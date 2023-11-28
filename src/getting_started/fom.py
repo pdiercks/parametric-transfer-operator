@@ -10,14 +10,22 @@ from definitions import Example
 
 def main(resolution, degree):
     ex = Example(name="beam", resolution=resolution)
-    domain = preprocessing(ex)
+    fom = discretize_fom(ex)
 
     # gdim = domain.ufl_cell().geometric_dimension()
     # finite_element = element("P", domain.basix_cell(), degree, shape=(gdim,))
     # V = fem.functionspace(domain, finite_element)
-    return 0
 
-def preprocessing(example) -> mesh.Mesh:
+def discretize_fom(ex):
+    """returns FOM as pymor model"""
+
+    # read fine grid from disk
+    with XDMFFile(MPI.COMM_WORLD, ex.fine_grid.as_posix(), "r") as fh:
+        domain = fh.read_mesh(name="Grid")
+
+    return None
+
+def preprocessing(example) -> None:
     """Creates global coarse and fine scale grid"""
 
     from multi.preprocessing import create_rectangle_grid
@@ -36,11 +44,6 @@ def preprocessing(example) -> mesh.Mesh:
     # create fine grid
     coarse_grid.create_fine_grid(np.arange(coarse_grid.num_cells), example.fine_grid.as_posix(), cell_type="quad")
 
-    # read fine grid from disk
-    with XDMFFile(MPI.COMM_WORLD, example.fine_grid.as_posix(), "r") as fh:
-        domain = fh.read_mesh(name="Grid")
-
-    return domain
 
 if __name__ == "__main__":
     # import argparse?
