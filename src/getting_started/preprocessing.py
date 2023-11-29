@@ -37,6 +37,7 @@ def mark_subdomains(ex, coarse_domain) -> None:
     entities = V.dofmap.list.flatten()
     values = u.vector.array.astype(np.int32)
     cell_tags = mesh.meshtags(domain, tdim ,entities, values)
+    cell_tags.name = "subdomains"
 
     domain.topology.create_connectivity(tdim-1, tdim)
     # overwrite xdmf file

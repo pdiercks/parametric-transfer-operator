@@ -44,3 +44,7 @@ class Example:
     @property
     def unit_cell_grid(self) -> Path:
         return self.grids_path / "unit_cell.msh"
+
+    @property
+    def fom_displacement(self) -> Path:
+        return self.rf / "fom_displacement.xdmf"
