@@ -28,8 +28,21 @@ a(w, v; \mu) &= \int_{\varOmega} \boldsymbol\varepsilon\boldsymbol\cdot\boldsymb
 \end{align}
 $$
 ### $E$ as piecewise constant function
-Assume different Young's Modulus for each unit cell of the lattice structure, i.e. $\mu=(\mu_1,\ldots,\mu_N)=(E_1,\ldots,E_N)$ where $N$ is the number of cells in the lattice structure. Also, assume $\nu=\mathrm{const.}$.
-In this case $L(\mu)$ and $M(\mu)$ can simply be put before the integral.
+Assume different Young's Modulus for each unit cell of the lattice structure, i.e. $\mu=(\mu_1,\ldots,\mu_N)=(E_1,\ldots,E_N)$ where $N$ is the number of cells in the lattice structure. Each unit cell is denoted by $\varOmega_i$, $i=1, \ldots, N$.
+Assuming $\nu=\mathrm{const.}$, we can find a form such that $\theta_q(\mu)=E_q$ (leading to $Q_a=N$).
+
+$$
+\begin{align}
+a(w, v;\mu) &= \sum_{q=1}^{N} \int_{\varOmega_q} L(\mu) \varepsilon_{kk}^2 + 2M(\mu) \varepsilon_{ij}\varepsilon_{ij}\,\mathrm{d}x\\
+            &= \sum_{q=1}^{N} E_q \frac{1}{(1+\nu)} \int_{\varOmega_q} \frac{\nu}{(1-2\nu)} \varepsilon_{kk}^2 + \varepsilon_{ij}\varepsilon_{ij}\,\mathrm{d}x\,.
+\end{align}
+$$
+
+$$
+\begin{equation}
+\theta_q(\mu) = E_q\,,\quad a_q(w, v)= \frac{1}{(1+\nu)} \int_{\varOmega_q} \frac{\nu}{(1-2\nu)} \varepsilon_{kk}^2 + \varepsilon_{ij}\varepsilon_{ij}\,\mathrm{d}x
+\end{equation}
+$$
 
 ### $E$ as linear combination of coefficients and basis functions
 Assume some $\mu=(\mu_1,\ldots,\mu_p)$ and $\nu=\mathrm{const.}$
