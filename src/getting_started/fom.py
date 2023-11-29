@@ -25,8 +25,6 @@ def main():
     test_mu = P.parameters.parse([1.5 for _ in range(10)])
     U = fom.solve(test_mu)
     fom.visualize(U, filename=ex.fom_displacement.as_posix())
-    
-    breakpoint()
 
 
 def discretize_fom(ex):
