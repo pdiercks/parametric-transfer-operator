@@ -1,6 +1,14 @@
 # Getting started
-In this example a heterogeneous beam structure is optimized. The design variables are the Young's Moduli $E_q$, $q=1, \ldots, N$ for the $N$ subdomains. Each subdomain corresponds to a unit cell.
-The objective function is the compliance $C(\boldsymbol{u}_{\mu}, \mu) = \boldsymbol{f}_{\mathrm{ext}}^T \boldsymbol{u}_{\mu}$.
+In this example a heterogeneous beam structure is optimized.
+The design variables are the Young's Moduli $E_q$, $q=1, \ldots, N$ for the $N$ subdomains.
+Each subdomain corresponds to a unit cell.
+The objective function is the compliance
+
+$$
+\begin{equation}
+C(\boldsymbol{u}_{\mu}, \mu) = \boldsymbol{f}_{\mathrm{ext}}^T \boldsymbol{u}_{\mu}\,.
+\end{equation}
+$$
 
 ## Setup
 
