@@ -13,7 +13,7 @@ from multi.preprocessing import create_meshtags
 from multi.product import InnerProduct
 from definitions import Example
 
-from pymor.basic import LincombOperator, VectorOperator, StationaryModel, ProjectionParameterFunctional
+from pymor.basic import LincombOperator, VectorOperator, StationaryModel, ProjectionParameterFunctional, VectorFunctional
 from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator, FenicsxVisualizer
 
 
@@ -23,8 +23,12 @@ def main():
     P = fom.parameters.space((1., 2.))
     # solve fom for constant μ and check solution via paraview
     test_mu = P.parameters.parse([1.5 for _ in range(10)])
-    U = fom.solve(test_mu)
+    data = fom.compute(solution=True, output=True, mu=test_mu)
+    U = data.get('solution')
     fom.visualize(U, filename=ex.fom_displacement.as_posix())
+
+    compliance = data.get('output')[0, 0]
+    print(f'\nCompliance C(u, mu) = {compliance} for mu={test_mu}')
 
 
 def discretize_fom(ex):
@@ -118,12 +122,19 @@ def discretize_fom(ex):
     parameter_functionals = [ProjectionParameterFunctional("E", size=num_subdomains, index=q) for q in range(num_subdomains)]
     ops = [FenicsxMatrixOperator(bc_mat, V, V), ] + [FenicsxMatrixOperator(mat, V, V) for mat in matrices]
     operator = LincombOperator(ops, [1., ] + parameter_functionals)
-    rhs = VectorOperator(FenicsxVectorSpace(V).make_array([b])) # type: ignore
+    F_ext = FenicsxVectorSpace(V).make_array([b]) # type: ignore
+    rhs = VectorOperator(F_ext)
     h1_product = FenicsxMatrixOperator(product_mat, V, V, name='h1_0_semi')
     viz = FenicsxVisualizer(FenicsxVectorSpace(V))
 
+    # output: C(u, mu) = f_{ext}^T u(mu) = inner(f_ext, u(mu))
+    # inner( , ) denotes inner product given by `product`
+    compliance = VectorFunctional(F_ext, product=None, name="compliance")
+
+    # TODO: add output functional
     fom = StationaryModel(
-            operator, rhs, products={"h1_0_semi": h1_product},
+            operator, rhs, output_functional=compliance,
+            products={"h1_0_semi": h1_product},
             visualizer=viz
             )
 
