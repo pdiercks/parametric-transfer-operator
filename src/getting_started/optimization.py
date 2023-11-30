@@ -46,6 +46,7 @@ def main():
     mu_ref = opt_fom_result.x
 
 
+    # Note: rom.logger is a DummyLogger and therefore no output on solve
     opt_rom_result = solve_optimization_problem(initial_guess, bounds, rom, rom_minimization_data, gradient=False)
 
     print('\nResult of optimization with FOM and FD')
@@ -73,7 +74,7 @@ def report(result, parse, data, reference_mu=None):
         print('  mu_min:    {}'.format(parse(result.x)))
         print('  J(mu_min): {}'.format(result.fun))
         if reference_mu is not None:
-            print('  absolute error w.r.t. reference solution: {:.2e}'.format(np.linalg.norm(result.x-reference_mu)))
+            print('  absolute error in mu_min w.r.t. reference solution: {:.2e}'.format(np.linalg.norm(result.x-reference_mu)))
         print('  num iterations:        {}'.format(result.nit))
         print('  num function calls:    {}'.format(data['num_evals']))
         print('  time:                  {:.5f} seconds'.format(data['time']))

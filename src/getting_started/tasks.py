@@ -19,11 +19,22 @@ def task_preprocessing():
 
 
 def task_build_rom():
-    """Getting starded: Build ROM"""
+    """Getting started: Build ROM"""
     return {
             "basename": f"build_rom_{ex.name}",
             "file_dep": [ROOT / "src/getting_started/rom.py"],
             "actions": ["python3 %(dependencies)s"],
             "targets": [ex.reduced_model],
             "clean": True,
+            }
+
+def task_optimize():
+    """Getting started: Optimization"""
+    optpy = ROOT / "src/getting_started/optimization.py"
+    return {
+            "basename": f"optimize_{ex.name}",
+            "file_dep": [optpy, ex.reduced_model],
+            "actions": ["python3 {}".format(optpy)],
+            "verbosity": 2,
+            "uptodate": [False],
             }
