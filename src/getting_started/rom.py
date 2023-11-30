@@ -1,3 +1,4 @@
+from collections import defaultdict
 from definitions import Example
 from fom import discretize_fom
 from pymor.basic import StationaryModel, StationaryRBReductor, pod
@@ -13,16 +14,26 @@ def main():
     num_modes = 10
     rom = build_rom(fom, parameter_space, reductor, num_modes, ntrain)
 
-    errors = []
+    errors = defaultdict(list)
     ntest = 10
     test_set = parameter_space.sample_randomly(ntest)
     for mu in test_set:
-        ERR = fom.solve(mu) - reductor.reconstruct(rom.solve(mu))
-        err = ERR.norm(fom.h1_0_semi_product)
-        errors.append(err)
+        fom_data = fom.compute(solution=True, output=True, mu=mu)
+        rom_data = rom.compute(solution=True, output=True, mu=mu)
+        for key in ('solution', 'output'):
+            if key == 'solution':
+                ERR = fom_data.get(key) - reductor.reconstruct(rom_data.get(key))
+                err = ERR.norm(fom.h1_0_semi_product)
+            else:
+                ERR = fom_data.get(key) - rom_data.get(key)
+                err = ERR[0, 0]
 
-    print(f"Max error = {max(errors)} over test set of size {len(test_set)}")
+            errors[key].append(err)
 
+    for key in ('solution', 'output'):
+        print(f"Max {key} error = {max(errors[key])} over test set of size {len(test_set)}")
+
+    # write ROM and parameter space to disk
     with open(ex.reduced_model.as_posix(), 'wb') as f:
         dump((rom, parameter_space), f)
 
