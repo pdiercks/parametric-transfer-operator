@@ -12,10 +12,16 @@ $$
 
 ## Setup
 
-![image of beam setup](./img/beamsetup.png "Beam")
+<img src="./img/beamsetup.png" alt="Beam setup" width="400"/>
 
-- [ ] add image of the beam sketch?
-- [ ] add image of mesh in paraview?
+## Full fine scale mesh
+
+<img src="./img/beam_subdomains.png" alt="Beam with subdomain IDs" width="400"/>
+
+## Displacement solution
+
+<img src="./img/beam_displacement.png" alt="Deflection of the beam" width="400"/>
+
 
 ## Parametrization and weak form
 Assume different Young's Modulus for each unit cell of the lattice structure, i.e. $\mu=(\mu_1,\ldots,\mu_N)=(E_1,\ldots,E_N)$ where $N$ is the number of cells in the lattice structure. Each unit cell is denoted by $\varOmega_i$, $i=1, \ldots, N$.
