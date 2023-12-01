@@ -22,7 +22,6 @@ $$
 
 <img src="./img/beam_displacement.png" alt="Deflection of the beam" width="400"/>
 
-
 ## Parametrization and weak form
 Assume different Young's Modulus for each unit cell of the lattice structure, i.e. $\mu=(\mu_1,\ldots,\mu_N)=(E_1,\ldots,E_N)$ where $N$ is the number of cells in the lattice structure. Each unit cell is denoted by $\varOmega_i$, $i=1, \ldots, N$.
 Assuming $\nu=\mathrm{const.}$, we can find a form such that $\theta_q(\mu)=E_q$ (leading to $Q_a=N$).
