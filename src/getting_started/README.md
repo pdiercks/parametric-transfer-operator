@@ -12,6 +12,8 @@ $$
 
 ## Setup
 
+![image of beam setup](./img/beamsetup.png "Beam")
+
 - [ ] add image of the beam sketch?
 - [ ] add image of mesh in paraview?
 
