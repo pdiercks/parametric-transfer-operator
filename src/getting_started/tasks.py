@@ -22,11 +22,15 @@ def task_build_rom():
     """Getting started: Build ROM"""
     return {
             "basename": f"build_rom_{ex.name}",
-            "file_dep": [ROOT / "src/getting_started/rom.py"],
+            "file_dep": [
+                ROOT / "src/getting_started/fom.py",
+                ROOT / "src/getting_started/rom.py"
+                ],
             "actions": ["python3 %(dependencies)s"],
             "targets": [ex.reduced_model],
             "clean": True,
             }
+
 
 def task_optimize():
     """Getting started: Optimization"""

@@ -45,7 +45,6 @@ def main():
     opt_fom_result = solve_optimization_problem(initial_guess, bounds, fom, fom_minimization_data, gradient=False)
     mu_ref = opt_fom_result.x
 
-
     # Note: rom.logger is a DummyLogger and therefore no output on solve
     opt_rom_result = solve_optimization_problem(initial_guess, bounds, rom, rom_minimization_data, gradient=False)
 

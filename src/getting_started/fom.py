@@ -1,5 +1,6 @@
 from mpi4py import MPI
 import ufl
+import numpy as np
 from dolfinx import fem, default_scalar_type
 from dolfinx.fem.petsc import assemble_matrix, assemble_vector, set_bc
 from dolfinx.io.utils import XDMFFile
@@ -13,7 +14,7 @@ from multi.preprocessing import create_meshtags
 from multi.product import InnerProduct
 from definitions import Example
 
-from pymor.basic import LincombOperator, VectorOperator, StationaryModel, ProjectionParameterFunctional, VectorFunctional
+from pymor.basic import LincombOperator, VectorOperator, StationaryModel, ProjectionParameterFunctional, VectorFunctional, ExpressionParameterFunctional, GenericParameterFunctional, ConstantOperator
 from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator, FenicsxVisualizer
 
 
@@ -23,6 +24,7 @@ def main():
     P = fom.parameters.space((1., 2.))
     # solve fom for constant μ and check solution via paraview
     test_mu = P.parameters.parse([1.5 for _ in range(10)])
+
     data = fom.compute(solution=True, output=True, mu=test_mu)
     U = data.get('solution')
     fom.visualize(U, filename=ex.fom_displacement.as_posix())
@@ -119,6 +121,7 @@ def discretize_fom(ex):
     set_bc(b, bcs)
 
     # ### wrap everything as pymor model
+    parameters = {"E": num_subdomains}
     parameter_functionals = [ProjectionParameterFunctional("E", size=num_subdomains, index=q) for q in range(num_subdomains)]
     ops = [FenicsxMatrixOperator(bc_mat, V, V), ] + [FenicsxMatrixOperator(mat, V, V) for mat in matrices]
     operator = LincombOperator(ops, [1., ] + parameter_functionals)
@@ -127,13 +130,25 @@ def discretize_fom(ex):
     h1_product = FenicsxMatrixOperator(product_mat, V, V, name='h1_0_semi')
     viz = FenicsxVisualizer(FenicsxVectorSpace(V))
 
-    # output: C(u, mu) = f_{ext}^T u(mu) = inner(f_ext, u(mu))
+    # output: C(u, mu) = f_{ext}^T u(mu) + Σ_i w_i (mu_i - 1) ** 2
+    # implemented as LincombOperator
+    # note: f_{ext}^T u(mu) = inner(f_ext, u(mu))
     # inner( , ) denotes inner product given by `product`
     compliance = VectorFunctional(F_ext, product=None, name="compliance")
 
-    # TODO: add output functional
+    mid_points = np.linspace(0, 9, num=10) + 0.5
+    L = omega.xmax[0]
+    weights = mid_points ** 2 - L * mid_points + L ** 2 / 4
+
+    cost = GenericParameterFunctional(lambda mu: np.dot(weights, (mu["E"] - 1.0) ** 2), parameters)
+    # always returns 1.
+    One = ConstantOperator(compliance.range.ones(1), source=compliance.source)
+
+    objective = LincombOperator([compliance, One], [1., cost])
+    # TODO what is the derivative wrt mu?
+
     fom = StationaryModel(
-            operator, rhs, output_functional=compliance,
+            operator, rhs, output_functional=objective,
             products={"h1_0_semi": h1_product},
             visualizer=viz
             )
