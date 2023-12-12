@@ -99,7 +99,7 @@ def solve_optimization_problem(initial_guess, bounds, model, minimization_data, 
                           method='L-BFGS-B',
                           jac=gradient,
                           bounds=bounds,
-                          options={'ftol': 1e-15})
+                          options={'ftol': 1e-12})
     minimization_data['time'] = perf_counter() - tic
 
     return opt_result
