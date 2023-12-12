@@ -4,9 +4,10 @@ from pathlib import Path
 ROOT = Path(__file__).parents[2]
 WORK = ROOT / "work"
 
+
 @dataclass
 class Example:
-    """Holds example specific data.
+    """Holds example specific data and manages filepaths.
 
     Args:
         name: The name of the example.
@@ -56,3 +57,7 @@ class Example:
     @property
     def reduced_model(self) -> Path:
         return self.rf / "reduced_model.out"
+
+    @property
+    def singular_values(self) -> Path:
+        return self.rf / "singular_values.npy"

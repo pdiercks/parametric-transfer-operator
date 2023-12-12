@@ -3,6 +3,7 @@ from definitions import Example
 from fom import discretize_fom
 from pymor.basic import StationaryModel, StationaryRBReductor, pod
 from pymor.core.pickle import dump
+from numpy import save
 
 
 def main():
@@ -10,9 +11,9 @@ def main():
     fom = discretize_fom(ex)
     parameter_space = fom.parameters.space((1., 2.))
     reductor = StationaryRBReductor(fom, product=fom.h1_0_semi_product, check_orthonormality=False)
-    ntrain = 20
-    num_modes = 10
-    rom = build_rom(fom, parameter_space, reductor, num_modes, ntrain)
+    ntrain = 60
+    num_modes = 20
+    rom, svals = build_rom(fom, parameter_space, reductor, num_modes, ntrain)
 
     errors = defaultdict(list)
     ntest = 10
@@ -37,6 +38,9 @@ def main():
     with open(ex.reduced_model.as_posix(), 'wb') as f:
         dump((rom, parameter_space), f)
 
+    # write singular_values to disk
+    save(ex.singular_values, svals)
+
 
 def build_rom(fom, parameter_space, reductor, basis_size, num_samples) -> StationaryModel:
     """Builds ROM"""
@@ -52,7 +56,7 @@ def build_rom(fom, parameter_space, reductor, basis_size, num_samples) -> Statio
 
     rom = reductor.reduce()
 
-    return rom
+    return rom, singular_values
 
 
 if __name__ == "__main__":

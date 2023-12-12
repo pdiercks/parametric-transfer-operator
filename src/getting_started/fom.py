@@ -14,7 +14,7 @@ from multi.preprocessing import create_meshtags
 from multi.product import InnerProduct
 from definitions import Example
 
-from pymor.basic import LincombOperator, VectorOperator, StationaryModel, ProjectionParameterFunctional, VectorFunctional, ExpressionParameterFunctional, GenericParameterFunctional, ConstantOperator
+from pymor.basic import LincombOperator, VectorOperator, StationaryModel, ProjectionParameterFunctional, VectorFunctional, GenericParameterFunctional, ConstantOperator
 from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator, FenicsxVisualizer
 
 
@@ -37,7 +37,6 @@ def discretize_fom(ex):
     """returns FOM as pymor model"""
 
     # read fine grid from disk
-    # with XDMFFile(MPI.COMM_WORLD, ex.fine_grid.as_posix(), "r") as fh:
     with XDMFFile(MPI.COMM_WORLD, ex.fine_grid.as_posix(), "r") as fh:
         domain = fh.read_mesh(name="Grid")
         cell_tags = fh.read_meshtags(domain, "subdomains")
