@@ -2,6 +2,7 @@
 
 from .definitions import Example, ROOT
 from doit.tools import run_once
+SRC = ROOT / "src/getting_started"  # source for this example
 
 ex = Example(name="beam")
 
@@ -11,6 +12,7 @@ def task_preprocessing():
     from .preprocessing import generate_meshes
     return {
             "basename": f"preproc_{ex.name}",
+            "file_dep": [SRC / "definitions.py"],
             "actions": [(generate_meshes, [ex])],
             "targets": [ex.coarse_grid, ex.unit_cell_grid, ex.fine_grid],
             "clean": True,
@@ -22,10 +24,7 @@ def task_build_rom():
     """Getting started: Build ROM"""
     return {
             "basename": f"build_rom_{ex.name}",
-            "file_dep": [
-                ROOT / "src/getting_started/fom.py",
-                ROOT / "src/getting_started/rom.py"
-                ],
+            "file_dep": [ex.coarse_grid, ex.unit_cell_grid, ex.fine_grid, SRC / "fom.py", SRC / "rom.py"],
             "actions": ["python3 %(dependencies)s"],
             "targets": [ex.reduced_model],
             "clean": True,
