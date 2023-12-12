@@ -19,7 +19,7 @@ class Example:
     name: str = "example"
     nx: int = 10
     ny: int = 1
-    resolution: int = 4
+    resolution: int = 10
     fe_deg: int = 1
 
     def __post_init__(self):
