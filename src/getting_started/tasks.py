@@ -25,8 +25,8 @@ def task_build_rom():
     return {
             "basename": f"build_rom_{ex.name}",
             "file_dep": [ex.coarse_grid, ex.unit_cell_grid, ex.fine_grid, SRC / "fom.py", SRC / "rom.py"],
-            "actions": ["python3 %(dependencies)s"],
-            "targets": [ex.reduced_model],
+            "actions": ["python3 {}".format(SRC / "rom.py")],
+            "targets": [ex.reduced_model, ex.singular_values],
             "clean": True,
             }
 
