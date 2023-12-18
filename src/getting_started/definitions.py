@@ -21,7 +21,7 @@ class Example:
     nx: int = 10
     ny: int = 1
     resolution: int = 10
-    fe_deg: int = 1
+    fe_deg: int = 2
 
     def __post_init__(self):
         """create dirs"""
