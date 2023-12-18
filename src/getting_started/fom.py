@@ -135,9 +135,12 @@ def discretize_fom(ex):
     # inner( , ) denotes inner product given by `product`
     compliance = VectorFunctional(F_ext, product=None, name="compliance")
 
-    mid_points = np.linspace(0, 9, num=10) + 0.5
-    L = omega.xmax[0]
-    weights = mid_points ** 2 - L * mid_points + L ** 2 / 4
+    # mid_points = np.linspace(0, 9, num=10) + 0.5
+    # L = omega.xmax[0]
+    # weights = mid_points ** 2 - L * mid_points + L ** 2 / 4
+    weights = np.ones(num_subdomains)
+
+    # TODO: dimensional analysis? scaling of cost?
 
     cost = GenericParameterFunctional(lambda mu: np.dot(weights, (mu["E"] - 1.0) ** 2), parameters)
     # always returns 1.
