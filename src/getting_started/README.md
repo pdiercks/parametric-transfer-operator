@@ -11,7 +11,7 @@ C(\boldsymbol{u}_{\mu}, \mu) = \boldsymbol{f}_{\mathrm{ext}}^T \boldsymbol{u}_{\
 $$
 
 The second term adds a cost functional with weights $w_1, \ldots, w_N$.
-The weights are chosen as a quadratic function such that choosing a high value of $E$ near the supports will be more costly that in the middle of the beam.
+Currently, $w_i=1$ is chosen.
 
 ## Setup
 
