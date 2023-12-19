@@ -33,6 +33,35 @@ def main():
     print(f'\nCompliance C(u, mu) = {compliance} for mu={test_mu}')
 
 
+def ass_mat(trial, test, measure, bcs):
+    """assemble matrix"""
+
+    def strain(x):
+        """Assume plane strain for ease of implementation"""
+        e = ufl.sym(ufl.grad(x))
+        return e
+
+    def a_q(trial, test, measure):
+        """ufl form - parameter independent"""
+        eps = strain(trial)
+        δeps = strain(test)
+        i, j = ufl.indices(2)
+        E = 20e3 # set reference modulus to 20 GPa, such that μ_i in range (1, 2) to get effective modulus in range (20, 40) GPa
+        NU = 0.3
+        form = E / (1. + NU) * (
+                NU / (1. - 2. * NU) * eps[i, i] * δeps[j, j] # type: ignore
+                + eps[i, j] * δeps[i, j] # type: ignore
+                ) * measure
+        return form
+
+    a = a_q(trial, test, measure)
+    cpp_form = fem.form(a, form_compiler_options={}, jit_options={})
+    A = assemble_matrix(cpp_form, bcs=bcs, diagonal=0.)
+    A.assemble()
+
+    return A
+
+
 def discretize_fom(ex):
     """returns FOM as pymor model"""
 
@@ -69,37 +98,10 @@ def discretize_fom(ex):
     bc_generator.add_dirichlet_bc(u_bottom_right, bottom_right, sub=1, method="geometrical", entity_dim=0)
     bcs = bc_generator.bcs
 
-    def strain(x):
-        """Assume plane strain for ease of implementation"""
-        e = ufl.sym(ufl.grad(x))
-        return e
-
-    def a_q(subdomain_id, trial, test):
-        """ufl form - parameter independent"""
-        eps = strain(trial)
-        δeps = strain(test)
-        i, j = ufl.indices(2)
-        E = 20e3 # set reference modulus to 20 GPa, such that μ_i in range (1, 2) to get effective modulus in range (20, 40) GPa
-        NU = 0.3
-        form = E / (1. + NU) * (
-                NU / (1. - 2. * NU) * eps[i, i] * δeps[j, j] # type: ignore
-                + eps[i, j] * δeps[i, j] # type: ignore
-                ) * dx(subdomain_id)
-        return form
-
-    def ass_mat(subdomain_id, bcs):
-        """assemble matrix"""
-        a = a_q(subdomain_id, u, v)
-        cpp_form = fem.form(a, form_compiler_options={}, jit_options={})
-        A = assemble_matrix(cpp_form, bcs=bcs, diagonal=0.)
-        A.assemble()
-
-        return A
-
     # assemble matrices
     matrices = []
     for id in range(num_subdomains):
-        matrices.append(ass_mat(id, bcs))
+        matrices.append(ass_mat(u, v, dx(id), bcs))
     assert matrices[0] is not matrices[1]
     # create matrix to account for BCs
     zero_form = ufl.inner(u, v) * u_bottom_right * dx # type:ignore

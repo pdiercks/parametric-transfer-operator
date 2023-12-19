@@ -14,7 +14,7 @@ def task_preprocessing():
             "basename": f"preproc_{ex.name}",
             "file_dep": [SRC / "definitions.py"],
             "actions": [(generate_meshes, [ex])],
-            "targets": [ex.coarse_grid, ex.unit_cell_grid, ex.fine_grid],
+            "targets": [ex.coarse_grid, ex.unit_cell_grid, ex.fine_grid, ex.coarse_oversampling_grid, ex.fine_oversampling_grid],
             "clean": True,
             "uptodate": [run_once],
             }

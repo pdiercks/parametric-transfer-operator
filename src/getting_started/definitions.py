@@ -51,6 +51,14 @@ class Example:
         return self.grids_path / "unit_cell.msh"
 
     @property
+    def coarse_oversampling_grid(self) -> Path:
+        return self.grids_path / "coarse_oversampling_grid.msh"
+
+    @property
+    def fine_oversampling_grid(self) -> Path:
+        return self.grids_path / "fine_oversampling_grid.xdmf"
+
+    @property
     def fom_displacement(self) -> Path:
         return self.rf / "fom_displacement.xdmf"
 
