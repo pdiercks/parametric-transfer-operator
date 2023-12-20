@@ -1,7 +1,7 @@
 from typing import Tuple, Optional
 
 import numpy as np
-from scipy.sparse import coo_array
+from scipy.sparse import coo_array, csr_array
 
 from mpi4py import MPI
 from dolfinx import mesh, fem, default_scalar_type
@@ -21,7 +21,8 @@ from multi.boundary import plane_at, within_range
 from multi.domain import Domain
 from multi.product import InnerProduct
 from multi.solver import build_nullspace
-from .definitions import Example
+from multi.transfer_operator import discretize_source_product
+from definitions import Example
 
 
 class COOMatrixOperator(Operator):
@@ -80,7 +81,8 @@ class COOMatrixOperator(Operator):
 def discretize_oversampling_problem(example: Example):
     """provides data to build T: LincombOperator A, ParameterSpace, dirichlet_dofs, range_dofs, projection_matrix"""
 
-    with XDMFFile(MPI.COMM_WORLD, example.fine_oversampling_grid.as_posix(), "r") as fh:
+    # use MPI.COMM_SELF for embarrassingly parallel workloads
+    with XDMFFile(MPI.COMM_SELF, example.fine_oversampling_grid.as_posix(), "r") as fh:
         domain = fh.read_mesh(name="Grid")
         cell_tags = fh.read_meshtags(domain, "subdomains")
 
@@ -120,14 +122,15 @@ def discretize_oversampling_problem(example: Example):
     product = InnerProduct(W, product="h1")
     product_mat = product.assemble_matrix()
     product = FenicsxMatrixOperator(product_mat, W, W)
-    # consider using csr here
-    M = product.matrix[:, :] # type: ignore
+    range_product_matrix = product.matrix
+    M = csr_array(range_product_matrix.getValuesCSR()[::-1])
     nullspace = build_nullspace(FenicsxVectorSpace(W), product=product)
     R = nullspace.to_numpy().T
     right = np.dot(R.T, M)
     # middle = np.linalg.inv(np.dot(R.T, np.dot(M, R))) # should be the identity
     left = R
     # P = np.dot(left, np.dot(middle, right)) # projection matrix
+    raise NotImplementedError("Memory Issue, because P is not sparse!")
     projection_matrix = np.dot(left, right)
 
     # ### Discretize A
@@ -149,12 +152,21 @@ def discretize_oversampling_problem(example: Example):
     ops = [FenicsxMatrixOperator(mat, V, V) for mat in matrices]
     operator = LincombOperator(ops, parameter_functionals)
 
+    # ### source product
+    source_prod = discretize_source_product(V, "l2", gamma_dofs)
+
+    # ### range product
+    # same as product above, but as NumpyMatrixOperator
+    range_prod = NumpyMatrixOperator(M, name="h1")
+
     return {
             "A": operator,
             "parameter_space": parameter_space,
             "dirichlet_dofs": gamma_dofs,
-            "range_dofs": range_dofs,
-            "projection_matrix": projection_matrix
+            "target_dofs": range_dofs,
+            "projection_matrix": projection_matrix,
+            "source_product": source_prod,
+            "range_product": range_prod,
             }
 
 

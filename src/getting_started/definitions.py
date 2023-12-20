@@ -69,3 +69,5 @@ class Example:
     @property
     def singular_values(self) -> Path:
         return self.rf / "singular_values.npy"
+
+beam = Example(name="beam")

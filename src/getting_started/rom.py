@@ -7,8 +7,8 @@ from numpy import save
 
 
 def main():
-    ex = Example(name="beam")
-    fom = discretize_fom(ex)
+    from .tasks import beam
+    fom = discretize_fom(beam)
     parameter_space = fom.parameters.space((1., 2.))
     reductor = StationaryRBReductor(fom, product=fom.h1_0_semi_product, check_orthonormality=False)
     ntrain = 60
@@ -35,11 +35,11 @@ def main():
         print(f"Max {key} error = {max(errors[key])} over test set of size {len(test_set)}")
 
     # write ROM and parameter space to disk
-    with open(ex.reduced_model.as_posix(), 'wb') as f:
+    with open(beam.reduced_model.as_posix(), 'wb') as f:
         dump((rom, parameter_space), f)
 
     # write singular_values to disk
-    save(ex.singular_values, svals)
+    save(beam.singular_values, svals)
 
 
 def build_rom(fom, parameter_space, reductor, basis_size, num_samples) -> StationaryModel:
