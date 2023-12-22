@@ -1,6 +1,4 @@
 from collections import defaultdict
-from definitions import Example
-from fom import discretize_fom
 from pymor.basic import StationaryModel, StationaryRBReductor, pod
 from pymor.core.pickle import dump
 from numpy import save
@@ -8,6 +6,7 @@ from numpy import save
 
 def main():
     from .tasks import beam
+    from .fom import discretize_fom
     fom = discretize_fom(beam)
     parameter_space = fom.parameters.space((1., 2.))
     reductor = StationaryRBReductor(fom, product=fom.h1_0_semi_product, check_orthonormality=False)

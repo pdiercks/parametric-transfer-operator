@@ -1,22 +1,18 @@
 """Solution of an optimization problem"""
 
 # check pymordemos/linear_optimization.py
-
-# - [ ] compute output functional (compliance) for chosen reference value of μ
-# - [ ] plot objective function over parameter space? Not possible in my case ($R^10$). Could do this for the oversampling problem.
-# - [ ] optimize with the FOM using FD
-# - [ ] optimize with the ROM using FD
+# - [x] optimize with the FOM using FD
+# - [x] optimize with the ROM using FD
 # - [ ] optimize with the FOM using pymor gradient computation (if possible)
 # - [ ] optimize with the ROM using pymor gradient computation (if possible)
 import numpy as np
-from definitions import Example
-from fom import discretize_fom
-from pymor.core.pickle import load
 
 
 def main():
     """solve optimization problem for different models"""
-    beam = Example(name="beam")
+    from pymor.core.pickle import load
+    from .tasks import beam
+    from .fom import discretize_fom
     fom = discretize_fom(beam)
 
     with beam.reduced_model.open('rb') as fh:

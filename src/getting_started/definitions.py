@@ -15,6 +15,8 @@ class Example:
         ny: Number of cells in y.
         resolution: `resolution ** 2` cells in each subdomain.
         fe_deg: FE degree.
+        poisson_ratio: The poisson ratio of the material.
+        youngs_modulus: The Young's modulus (reference value) of the material.
 
     """
     name: str = "example"
@@ -22,6 +24,8 @@ class Example:
     ny: int = 1
     resolution: int = 10
     fe_deg: int = 2
+    poisson_ratio: float = 0.3
+    youngs_modulus: float = 20e3
 
     def __post_init__(self):
         """create dirs"""
@@ -69,5 +73,3 @@ class Example:
     @property
     def singular_values(self) -> Path:
         return self.rf / "singular_values.npy"
-
-beam = Example(name="beam")

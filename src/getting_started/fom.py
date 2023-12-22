@@ -12,28 +12,28 @@ from multi.bcs import BoundaryConditions
 from multi.domain import Domain
 from multi.preprocessing import create_meshtags
 from multi.product import InnerProduct
-from definitions import Example
 
 from pymor.basic import LincombOperator, VectorOperator, StationaryModel, ProjectionParameterFunctional, VectorFunctional, GenericParameterFunctional, ConstantOperator
 from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator, FenicsxVisualizer
 
 
+
 def main():
-    ex = Example(name="beam")
-    fom = discretize_fom(ex)
+    from .tasks import beam
+    fom = discretize_fom(beam)
     P = fom.parameters.space((1., 2.))
     # solve fom for constant μ and check solution via paraview
     test_mu = P.parameters.parse([1.5 for _ in range(10)])
 
     data = fom.compute(solution=True, output=True, mu=test_mu)
     U = data.get('solution')
-    fom.visualize(U, filename=ex.fom_displacement.as_posix())
+    fom.visualize(U, filename=beam.fom_displacement.as_posix())
 
     compliance = data.get('output')[0, 0]
     print(f'\nCompliance C(u, mu) = {compliance} for mu={test_mu}')
 
 
-def ass_mat(trial, test, measure, bcs):
+def ass_mat(trial, test, measure, bcs, E, NU):
     """assemble matrix"""
 
     def strain(x):
@@ -46,8 +46,6 @@ def ass_mat(trial, test, measure, bcs):
         eps = strain(trial)
         δeps = strain(test)
         i, j = ufl.indices(2)
-        E = 20e3 # set reference modulus to 20 GPa, such that μ_i in range (1, 2) to get effective modulus in range (20, 40) GPa
-        NU = 0.3
         form = E / (1. + NU) * (
                 NU / (1. - 2. * NU) * eps[i, i] * δeps[j, j] # type: ignore
                 + eps[i, j] * δeps[i, j] # type: ignore
@@ -101,7 +99,7 @@ def discretize_fom(ex):
     # assemble matrices
     matrices = []
     for id in range(num_subdomains):
-        matrices.append(ass_mat(u, v, dx(id), bcs))
+        matrices.append(ass_mat(u, v, dx(id+1), bcs, ex.youngs_modulus, ex.poisson_ratio))
     assert matrices[0] is not matrices[1]
     # create matrix to account for BCs
     zero_form = ufl.inner(u, v) * u_bottom_right * dx # type:ignore

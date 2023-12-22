@@ -1,28 +1,23 @@
 from typing import Tuple, Optional
 
 import numpy as np
-from scipy.sparse import coo_array, csr_array
+from scipy.sparse import coo_array
 
 from mpi4py import MPI
-from dolfinx import mesh, fem, default_scalar_type
+from dolfinx import mesh, fem
 from dolfinx.io.utils import XDMFFile
 from basix.ufl import element
-import ufl
 
-from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator
 from pymor.operators.interface import Operator
 from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.vectorarrays.numpy import NumpyVectorSpace
-from pymor.parameters.base import Parameters, ParameterSpace
-from pymor.parameters.functionals import ProjectionParameterFunctional
-from pymor.operators.constructions import LincombOperator
+from pymor.parameters.base import Mu, Parameters, ParameterSpace
 
 from multi.boundary import plane_at, within_range
-from multi.domain import Domain
-from multi.product import InnerProduct
-from multi.solver import build_nullspace
-from multi.transfer_operator import discretize_source_product
-from definitions import Example
+from multi.domain import Domain, RectangularSubdomain
+from multi.materials import LinearElasticMaterial
+from multi.problems import LinearElasticityProblem, LinElaSubProblem, TransferProblem
+from .definitions import Example
 
 
 class COOMatrixOperator(Operator):
@@ -78,105 +73,71 @@ class COOMatrixOperator(Operator):
         return self.assemble(mu).apply_inverse(V, initial_guess=initial_guess, least_squares=least_squares)
 
 
-def discretize_oversampling_problem(example: Example):
-    """provides data to build T: LincombOperator A, ParameterSpace, dirichlet_dofs, range_dofs, projection_matrix"""
+def discretize_oversampling_problem(example: Example, mu: Mu):
+    """Returns TransferProblem for fixed parameter Mu.
+
+    Args:
+        example: The instance of the example dataclass.
+        mu: The parameter value.
+
+    """
 
     # use MPI.COMM_SELF for embarrassingly parallel workloads
     with XDMFFile(MPI.COMM_SELF, example.fine_oversampling_grid.as_posix(), "r") as fh:
         domain = fh.read_mesh(name="Grid")
         cell_tags = fh.read_meshtags(domain, "subdomains")
 
-    omega = Domain(domain)
+    omega = Domain(domain, cell_tags=cell_tags)
     tdim = domain.topology.dim
-    # fdim = tdim - 1
     gdim = domain.ufl_cell().geometric_dimension()
 
     # ### Gamma out
     left = plane_at(omega.xmin[0], "x")
     right = plane_at(omega.xmax[0], "x")
     gamma_out = lambda x: np.logical_or(left(x), right(x))
-    # facets_gamma_out = mesh.locate_entities_boundary(domain, fdim, gamma_out)
 
     # ### Omega in
     mark_omega_in = within_range([1., 0.], [2., 1.])
     cells_omega_in = mesh.locate_entities(domain, tdim, mark_omega_in)
     omega_in, _, _, _ = mesh.create_submesh(domain, tdim, cells_omega_in)
+    id_omega_in = 99
+    omega_in = RectangularSubdomain(id_omega_in, omega_in)
 
     # ### FE spaces
     degree = example.fe_deg
     fe = element("P", domain.basix_cell(), degree, shape=(gdim,))
-    V = fem.functionspace(domain, fe) # full space
-    W = fem.functionspace(omega_in, fe) # range space
+    V = fem.functionspace(omega.grid, fe) # full space
+    W = fem.functionspace(omega_in.grid, fe) # range space
 
-    # ### Dirichlet dofs Gamma out
-    # workaround: use dirichletbc to get correct dof indices
-    zero = fem.Constant(domain, (default_scalar_type(0.), ) * gdim)
-    gamma_dofs = fem.locate_dofs_geometrical(V, gamma_out)
-    bc_gamma = fem.dirichletbc(zero, gamma_dofs, V)
-    gamma_dofs = bc_gamma._cpp_object.dof_indices()[0]
-    range_dofs = fem.locate_dofs_geometrical(V, mark_omega_in)
-    bc_range = fem.dirichletbc(zero, range_dofs, V)
-    range_dofs = bc_range._cpp_object.dof_indices()[0]
+    # ### Oversampling problem
+    E = example.youngs_modulus
+    NU = example.poisson_ratio
+    mu_values = mu.to_numpy()
+    assert mu_values.size == 3
+    materials = tuple([LinearElasticMaterial(gdim, E * mu_i, NU, plane_stress=False) for mu_i in mu_values])
+    oversampling_problem = LinearElasticityProblem(omega, V, phases=materials)
 
-    # ### projection matrix (rigid body modes (rbm) in range space)
-    product = InnerProduct(W, product="h1")
-    product_mat = product.assemble_matrix()
-    product = FenicsxMatrixOperator(product_mat, W, W)
-    range_product_matrix = product.matrix
-    M = csr_array(range_product_matrix.getValuesCSR()[::-1])
-    nullspace = build_nullspace(FenicsxVectorSpace(W), product=product)
-    R = nullspace.to_numpy().T
-    right = np.dot(R.T, M)
-    # middle = np.linalg.inv(np.dot(R.T, np.dot(M, R))) # should be the identity
-    left = R
-    # P = np.dot(left, np.dot(middle, right)) # projection matrix
-    raise NotImplementedError("Memory Issue, because P is not sparse!")
-    projection_matrix = np.dot(left, right)
+    # ### Problem on target subdomain
+    subproblem = LinElaSubProblem(omega_in, W, phases=(materials[1],))
 
-    # ### Discretize A
-    # A.assemble(mu) should yield same a as in non-parametric setting
-    # no need to apply any boundary conditions
-    from fom import ass_mat
-    u = ufl.TrialFunction(V)
-    v = ufl.TestFunction(V)
-    dx = ufl.Measure("dx", domain=domain, subdomain_data=cell_tags)
-    num_subdomains = int(np.amax(cell_tags.values) + 1)
-    matrices = []
-    for id in range(num_subdomains):
-        matrices.append(ass_mat(u, v, dx(id), [])) # note bcs=[]
-    assert matrices[0] is not matrices[1]
-    # wrap as pymor operator
-    parameters = Parameters({"E": num_subdomains})
-    parameter_space = ParameterSpace(parameters, (1., 2.)) # FIXME duplicate definition of parameter range
-    parameter_functionals = [ProjectionParameterFunctional("E", size=num_subdomains, index=q) for q in range(num_subdomains)]
-    ops = [FenicsxMatrixOperator(mat, V, V) for mat in matrices]
-    operator = LincombOperator(ops, parameter_functionals)
+    # ### TransferProblem
+    transfer = TransferProblem(
+            oversampling_problem,
+            subproblem,
+            gamma_out,
+            dirichlet=None,
+            source_product={"product": "l2"},
+            range_product={"product": "h1"},
+            remove_kernel=True,
+            )
+    return transfer
 
-    # ### source product
-    source_prod = discretize_source_product(V, "l2", gamma_dofs)
 
-    # ### range product
-    # same as product above, but as NumpyMatrixOperator
-    range_prod = NumpyMatrixOperator(M, name="h1")
-
-    return {
-            "A": operator,
-            "parameter_space": parameter_space,
-            "dirichlet_dofs": gamma_dofs,
-            "target_dofs": range_dofs,
-            "projection_matrix": projection_matrix,
-            "source_product": source_prod,
-            "range_product": range_prod,
-            }
 
 
 if __name__ == "__main__":
-    from tasks import ex
-    rval = discretize_oversampling_problem(ex)
-    # testset = rval["parameter_space"].sample_uniformly(2)
-    # A = rval["A"]
-    # mu1 = testset[0]
-    # mu2 = testset[-1]
-    # A1 = A.assemble(mu1)
-    # A2 = A.assemble(mu2)
-    # breakpoint()
+    from .tasks import beam
+    param = Parameters({"E": 3})
+    ps = ParameterSpace(param, (1., 2.))
+    mu = ps.sample_randomly(1)[0]
+    rval = discretize_oversampling_problem(beam, mu)
