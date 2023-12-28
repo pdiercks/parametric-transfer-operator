@@ -1,16 +1,23 @@
 """approximate the range of transfer operators for fixed parameter values"""
 
+import os
 from typing import Optional, Any
-from time import perf_counter
+from itertools import repeat
 import concurrent.futures
 import numpy as np
 from scipy.linalg import eigh
+from scipy.sparse import csr_array
 from scipy.sparse.linalg import LinearOperator, eigsh
 from scipy.special import erfinv
+from time import perf_counter
 
 from pymor.algorithms.gram_schmidt import gram_schmidt
+from pymor.algorithms.pod import pod
 from pymor.core.defaults import defaults
+from pymor.core.logger import getLogger
 from pymor.operators.interface import Operator
+from pymor.operators.numpy import NumpyMatrixOperator
+from pymor.operators.constructions import NumpyConversionOperator
 from pymor.parameters.base import Parameters, ParameterSpace
 
 from multi.misc import x_dofs_vectorspace
@@ -89,39 +96,16 @@ def adaptive_rrf(
         maxnorm = np.max(M.norm(range_product))
         niter += 1
 
-    return B
+    # ### convert to NumpyVectorArray
+    # passing data along processes requires picklable data
+    # fenics stuff is not picklable ...
+    cop = NumpyConversionOperator(T.range, direction='to_numpy')
+    B_numpy = cop.apply(B)
+
+    return B_numpy
 
 
-def approximate_range(transfer_problem, distribution, sampling_options):
-    ttol = 1e-3
-    ftol = 1e-12
-    num_testvecs = 20
-    source_product = transfer_problem.source_product
-    range_product = transfer_problem.range_product
-    # TODO approximate range in context of new_rng (if number of realizations > 1)
-    basis = adaptive_rrf(
-            transfer_problem, source_product=source_product, range_product=range_product,
-            distribution=distribution, sampling_options=sampling_options, tol=ttol, failure_tolerance=ftol, num_testvecs=num_testvecs)
-    return basis
-
-
-def main():
-    from .tasks import beam
-    from .locmor import discretize_oversampling_problem
-
-    # TODO parameter space should only be defined once
-    param = Parameters({"E": 3})
-    parameter_space = ParameterSpace(param, (1., 2.))
-
-    # fixed mu
-    mu = parameter_space.sample_randomly(1)[0]
-
-    print(f"Approximating range of T for {mu=}")
-    tic = perf_counter()
-    transfer_problem = discretize_oversampling_problem(beam, mu)
-    print(f"Discretized transfer problem in {perf_counter()-tic}") # pyright: ignore[reportGeneralTypeIssues]
-
-    # FIXME need access to transfer problem discretization data to define mvn_train_set
+def build_mvn_training_set(transfer_problem):
     xmin = transfer_problem.problem.domain.xmin
     xmax = transfer_problem.problem.domain.xmax
     L_corr = np.linalg.norm(xmax - xmin).item() * 3
@@ -160,32 +144,77 @@ def main():
 
     mvn_train_set = np.vstack(training_set)
     print(f"Build mvn training set of size {len(mvn_train_set)}")
+    return mvn_train_set
+
+
+def approximate_range(mu, distribution='normal'):
+    from .tasks import beam
+    from .locmor import discretize_oversampling_problem
+
+    # FIXME how to deal with log file as target?
+    # pid not known during task definition
+    pid = os.getpid()
+    logger = getLogger('range_approximation', level='INFO', filename=f'range_approx_{pid}.log')
+    logger.info(f"Approximating range of T for {mu=} on process {pid} using {distribution=}.\n")
 
     tic = perf_counter()
-    U = approximate_range(transfer_problem, 'normal', {})
-    print(f"Approximated range using normal in {perf_counter()-tic}\n")
+    transfer_problem = discretize_oversampling_problem(beam, mu)
+    logger.info(f"Discretized transfer problem in {perf_counter()-tic}.")
 
-    tic = perf_counter()
-    V = approximate_range(transfer_problem, 'multivariate_normal', {'training_set': mvn_train_set})
-    print(f"Approximated range using multivariate normal in {perf_counter()-tic}\n")
+    if distribution == 'normal':
+        sampling_options = {}
+    elif distribution == 'multivariate_normal':
+        mvn_train_set = build_mvn_training_set(transfer_problem)
+        sampling_options = {'training_set': mvn_train_set}
+    else:
+        raise NotImplementedError
 
-    print(f"Length of U: {len(U)}")
-    print(f"Length of V: {len(V)}")
+    ttol = 1e-3
+    ftol = 1e-12
+    num_testvecs = 20
+    source_product = transfer_problem.source_product
+    range_product = transfer_problem.range_product
+    # TODO approximate range in context of new_rng (if number of realizations > 1)
+    basis = adaptive_rrf(
+            transfer_problem, source_product=source_product, range_product=range_product,
+            distribution=distribution, sampling_options=sampling_options, tol=ttol, failure_tolerance=ftol, num_testvecs=num_testvecs)
+    logger.info(f"Number of basis functions is {len(basis)}.")
 
-    # ### parallelization strategy
-    # 1. mpirun --> MPI.COMM_SELF for mesh
-    # 2. multiprocessing package
-    # 3. pymor pool of workers (requirements by hapod?)
-    # cannot use functions from pymor.algorithms.hapod directly
-    # I don't want to compute a POD at each leaf node in the dist_hapod
-    # The result of the range approx. is already an orthonormal basis
+    # FenicsxMatrixOperator is not picklable
+    product_matrix = csr_array(range_product.matrix.getValuesCSR()[::-1])
+    product = NumpyMatrixOperator(product_matrix, source_id=basis.space.id, range_id=basis.space.id)
+    return basis, product
 
-    # TODO use ProcessPoolExecutor for parallelization
-    # with concurrent.futures.ProcessPoolExecutor(max_workers=1) as executor:
-    #     bases = executor.map(range_finder, trainset)
 
-    # TODO do POD over all bases
+def main(args):
+    # TODO parameter space should only be defined once
+    param = Parameters({"E": 3})
+    parameter_space = ParameterSpace(param, (1., 2.))
+    # sufficient sampling? uniform?
+    training_set = parameter_space.sample_randomly(args.ntrain)
+
+    with concurrent.futures.ProcessPoolExecutor(max_workers=args.max_workers) as executor:
+        results = executor.map(approximate_range, training_set, repeat(args.distribution))
+
+    basis, range_product = next(results)
+    snapshots = range_product.range.empty()
+    snapshots.append(basis)
+    for rb, _ in results:
+        snapshots.append(rb)
+    pod_modes, svals = pod(snapshots, product=range_product, rtol=1e-6)
+
+    # TODO write/define targets: pod_modes, svals, logfile(s)
+    # TODO add a task to tasks.py
+    # call this with command line arguments when called as module?
+    # python3 -m src.getting_started.range_approximation arg1 arg2 works?
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    import argparse
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("distribution", type=str, help="The distribution to draw samples from.")
+    parser.add_argument("ntrain", type=int, help="The size of the training set.")
+    parser.add_argument("--max_workers", type=int, default=4, help="The max number of workers.")
+    args = parser.parse_args(sys.argv[1:])
+    main(args)
