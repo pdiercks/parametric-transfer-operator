@@ -169,8 +169,8 @@ def approximate_range(mu, distribution='normal'):
     else:
         raise NotImplementedError
 
-    ttol = 1e-3
-    ftol = 1e-12
+    ttol = 5e-2
+    ftol = 1e-15
     num_testvecs = 20
     source_product = transfer_problem.source_product
     range_product = transfer_problem.range_product
@@ -193,6 +193,10 @@ def main(args):
     # sufficient sampling? uniform?
     training_set = parameter_space.sample_randomly(args.ntrain)
 
+    # TODO refactor
+    # discretize transfer problem outside of the Pool?
+    # otherwise I cannot return any fenics objects because they are not picklable
+
     with concurrent.futures.ProcessPoolExecutor(max_workers=args.max_workers) as executor:
         results = executor.map(approximate_range, training_set, repeat(args.distribution))
 
@@ -202,6 +206,8 @@ def main(args):
     for rb, _ in results:
         snapshots.append(rb)
     pod_modes, svals = pod(snapshots, product=range_product, rtol=1e-6)
+
+    breakpoint()
 
     # TODO write/define targets: pod_modes, svals, logfile(s)
     # TODO add a task to tasks.py
