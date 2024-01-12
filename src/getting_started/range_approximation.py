@@ -147,19 +147,16 @@ def build_mvn_training_set(transfer_problem):
     return mvn_train_set
 
 
-def approximate_range(mu, distribution='normal'):
-    from .tasks import beam
+def approximate_range(beam, mu, distribution='normal'):
     from .locmor import discretize_oversampling_problem
 
-    # FIXME how to deal with log file as target?
-    # pid not known during task definition
+    logger = getLogger('range_approximation', level='INFO', filename=beam.range_approximation_log.as_posix())
     pid = os.getpid()
-    logger = getLogger('range_approximation', level='INFO', filename=f'range_approx_{pid}.log')
-    logger.info(f"Approximating range of T for {mu=} on process {pid} using {distribution=}.\n")
+    logger.info(f"{pid=},\tApproximating range of T for {mu=} using {distribution=}.\n")
 
     tic = perf_counter()
     transfer_problem = discretize_oversampling_problem(beam, mu)
-    logger.info(f"Discretized transfer problem in {perf_counter()-tic}.")
+    logger.info(f"{pid=},\tDiscretized transfer problem in {perf_counter()-tic}.")
 
     if distribution == 'normal':
         sampling_options = {}
@@ -169,16 +166,16 @@ def approximate_range(mu, distribution='normal'):
     else:
         raise NotImplementedError
 
-    ttol = 5e-2
-    ftol = 1e-15
-    num_testvecs = 20
+    ttol = beam.rrf_ttol
+    ftol = beam.rrf_ftol
+    num_testvecs = beam.rrf_num_testvecs
     source_product = transfer_problem.source_product
     range_product = transfer_problem.range_product
     # TODO approximate range in context of new_rng (if number of realizations > 1)
     basis = adaptive_rrf(
             transfer_problem, source_product=source_product, range_product=range_product,
             distribution=distribution, sampling_options=sampling_options, tol=ttol, failure_tolerance=ftol, num_testvecs=num_testvecs)
-    logger.info(f"Number of basis functions is {len(basis)}.")
+    logger.info(f"{pid=},\tNumber of basis functions is {len(basis)}.")
 
     # FenicsxMatrixOperator is not picklable
     product_matrix = csr_array(range_product.matrix.getValuesCSR()[::-1])
@@ -187,25 +184,21 @@ def approximate_range(mu, distribution='normal'):
 
 
 def main(args):
-    # TODO parameter space should only be defined once
+    from .tasks import beam
     param = Parameters({"E": 3})
-    parameter_space = ParameterSpace(param, (1., 2.))
+    parameter_space = ParameterSpace(param, beam.mu_range)
     # sufficient sampling? uniform?
     training_set = parameter_space.sample_randomly(args.ntrain)
 
-    # TODO refactor
-    # discretize transfer problem outside of the Pool?
-    # otherwise I cannot return any fenics objects because they are not picklable
-
     with concurrent.futures.ProcessPoolExecutor(max_workers=args.max_workers) as executor:
-        results = executor.map(approximate_range, training_set, repeat(args.distribution))
+        results = executor.map(approximate_range, repeat(beam), training_set, repeat(args.distribution))
 
     basis, range_product = next(results)
     snapshots = range_product.range.empty()
     snapshots.append(basis)
     for rb, _ in results:
         snapshots.append(rb)
-    pod_modes, svals = pod(snapshots, product=range_product, rtol=1e-6)
+    pod_modes, svals = pod(snapshots, product=range_product, rtol=beam.pod_rtol)
 
     breakpoint()
 

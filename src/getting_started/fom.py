@@ -21,7 +21,7 @@ from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator, Fe
 def main():
     from .tasks import beam
     fom = discretize_fom(beam)
-    P = fom.parameters.space((1., 2.))
+    P = fom.parameters.space(beam.mu_range)
     # solve fom for constant μ and check solution via paraview
     test_mu = P.parameters.parse([1.5 for _ in range(10)])
 

@@ -8,7 +8,7 @@ def main():
     from .tasks import beam
     from .fom import discretize_fom
     fom = discretize_fom(beam)
-    parameter_space = fom.parameters.space((1., 2.))
+    parameter_space = fom.parameters.space(beam.mu_range)
     reductor = StationaryRBReductor(fom, product=fom.h1_0_semi_product, check_orthonormality=False)
     ntrain = 60
     num_modes = 20

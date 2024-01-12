@@ -17,6 +17,11 @@ class Example:
         fe_deg: FE degree.
         poisson_ratio: The poisson ratio of the material.
         youngs_modulus: The Young's modulus (reference value) of the material.
+        mu_range: The value range of each parameter component.
+        rrf_ttol: Target tolerance for range finder algo.
+        rrf_ftol: Failure tolerance for range finder algo.
+        rrf_num_testvecs: Number of test vectors for range finder algo.
+        pod_rtol: Relative tolerance for POD algo.
 
     """
     name: str = "example"
@@ -26,10 +31,16 @@ class Example:
     fe_deg: int = 2
     poisson_ratio: float = 0.3
     youngs_modulus: float = 20e3
+    mu_range: tuple[float, float] = (1., 2.)
+    rrf_ttol: float = 5e-2
+    rrf_ftol: float = 1e-15
+    rrf_num_testvecs: int = 20
+    pod_rtol: float = 1e-6
 
     def __post_init__(self):
         """create dirs"""
         self.grids_path.mkdir(exist_ok=True, parents=True)
+        self.logs_path.mkdir(exist_ok=True, parents=True)
 
     @property
     def rf(self) -> Path:
@@ -39,6 +50,10 @@ class Example:
     @property
     def grids_path(self) -> Path:
         return self.rf / "grids"
+
+    @property
+    def logs_path(self) -> Path:
+        return self.rf / "logs"
 
     @property
     def coarse_grid(self) -> Path:
@@ -68,8 +83,14 @@ class Example:
 
     @property
     def reduced_model(self) -> Path:
+        """the global POD-ROM"""
         return self.rf / "reduced_model.out"
 
     @property
     def singular_values(self) -> Path:
+        """singular values for the global POD-ROM"""
         return self.rf / "singular_values.npy"
+
+    @property
+    def range_approximation_log(self) -> Path:
+        return self.logs_path / "range_approximation.log"
