@@ -91,6 +91,13 @@ class Example:
         """singular values for the global POD-ROM"""
         return self.rf / "singular_values.npy"
 
-    @property
-    def range_approximation_log(self) -> Path:
-        return self.logs_path / "range_approximation.log"
+    def range_approximation_log(self, distr: str) -> Path:
+        return self.logs_path / f"range_approximation_{distr}.log"
+
+    def loc_singular_values(self, distr: str) -> Path:
+        """singular values of POD compression for range approximation of parametric T"""
+        return self.rf / f"loc_singular_values_{distr}.npy"
+
+    def loc_pod_modes(self, distr: str) -> Path:
+        """POD modes for range approximation of parametric T"""
+        return self.rf / f"loc_pod_modes_{distr}.npy"

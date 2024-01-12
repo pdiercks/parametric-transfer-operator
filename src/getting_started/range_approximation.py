@@ -150,7 +150,7 @@ def build_mvn_training_set(transfer_problem):
 def approximate_range(beam, mu, distribution='normal'):
     from .locmor import discretize_oversampling_problem
 
-    logger = getLogger('range_approximation', level='INFO', filename=beam.range_approximation_log.as_posix())
+    logger = getLogger('range_approximation', level='INFO', filename=beam.range_approximation_log(distribution).as_posix())
     pid = os.getpid()
     logger.info(f"{pid=},\tApproximating range of T for {mu=} using {distribution=}.\n")
 
@@ -188,6 +188,9 @@ def main(args):
     param = Parameters({"E": 3})
     parameter_space = ParameterSpace(param, beam.mu_range)
     # sufficient sampling? uniform?
+
+    # FIXME: for comparison of normal to multivariate_normal I would need the same
+    # training set in both cases
     training_set = parameter_space.sample_randomly(args.ntrain)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=args.max_workers) as executor:
@@ -200,12 +203,10 @@ def main(args):
         snapshots.append(rb)
     pod_modes, svals = pod(snapshots, product=range_product, rtol=beam.pod_rtol)
 
-    breakpoint()
-
-    # TODO write/define targets: pod_modes, svals, logfile(s)
-    # TODO add a task to tasks.py
-    # call this with command line arguments when called as module?
-    # python3 -m src.getting_started.range_approximation arg1 arg2 works?
+    # write pod modes to disk
+    np.save(beam.loc_pod_modes(args.distribution), pod_modes.to_numpy())
+    # write singular_values to disk
+    np.save(beam.loc_singular_values(args.distribution), svals)
 
 
 if __name__ == "__main__":

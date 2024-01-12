@@ -30,6 +30,24 @@ def task_build_rom():
             }
 
 
+def task_loc_pod_modes():
+    """Getting started: Construct local POD basis"""
+    module = "src.getting_started.range_approximation"
+    defs = SRC / "definitions.py"
+    file = SRC / "range_approximation.py"
+    distributions = ("normal", "multivariate_normal")
+    num_train = 10 # number of Transfer operators
+    nworkers = 4 # number of workers in pool
+    for distr in distributions:
+        yield {
+                "basename": f"rrf_{beam.name}_{distr}",
+                "file_dep": [defs, file, beam.fine_oversampling_grid, beam.coarse_oversampling_grid],
+                "actions": ["python3 -m {} {} {} --max_workers {}".format(module, distr, num_train, nworkers)],
+                "targets": [beam.range_approximation_log(distr), beam.loc_pod_modes(distr), beam.loc_singular_values(distr)],
+                "clean": True,
+                }
+
+
 def task_optimize():
     """Getting started: Optimization"""
     optpy = ROOT / "src/getting_started/optimization.py"
