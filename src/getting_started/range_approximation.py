@@ -201,11 +201,12 @@ def main(args):
     snapshots.append(basis)
     for rb, _ in results:
         snapshots.append(rb)
-    pod_modes, svals = pod(snapshots, product=range_product, rtol=beam.pod_rtol)
+    pod_data = pod(snapshots, product=range_product, rtol=beam.pod_rtol)
+    pod_modes = pod_data[0]
+    svals = pod_data[1]
 
-    # write pod modes to disk
+    # write pod modes and singular values to disk
     np.save(beam.loc_pod_modes(args.distribution), pod_modes.to_numpy())
-    # write singular_values to disk
     np.save(beam.loc_singular_values(args.distribution), svals)
 
 
