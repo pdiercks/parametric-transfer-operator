@@ -83,5 +83,3 @@ if __name__ == "__main__":
     parser.add_argument("distribution", type=str, help="The distribution used in the range approximation.")
     args = parser.parse_args(sys.argv[1:])
     main(args)
-
-    # TODO: rename script to decompose_pod_basis.py
