@@ -4,9 +4,11 @@ from dolfinx.io import gmshio
 from basix.ufl import element
 import numpy as np
 
-from pymor.bindings.fenicsx import FenicsxVectorSpace
+from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxVisualizer
 
 from multi.debug import plot_modes
+from multi.bcs import BoundaryDataFactory
+from multi.extension import extend
 from multi.misc import locate_dofs, x_dofs_vectorspace
 from multi.domain import RectangularSubdomain
 from multi.materials import LinearElasticMaterial
@@ -65,12 +67,40 @@ def main(args):
     # plot_modes(L, 'b', bottom_modes, "x", mask)
 
     # ### Restriction of fine scale part to edges
-    edge_modes = dict()
+    bc_factory = BoundaryDataFactory(problem.domain.grid, problem.V)
+    # edge_modes = dict()
+    edges = set(["left", "bottom", "right", "top"])
+    zero_function = fem.Function(problem.V)
+    zero_function.x.array[:] = 0.
+    boundary_data = list()
+
     for edge, dofs in problem.V_to_L.items():
-        edge_modes[edge] = u_fine.dofs(dofs)
+        modes = u_fine.dofs(dofs)
+        # create BCs for extension of each mode
+        zero_boundaries = list(edges.difference([edge]))
+        for mode in modes:
+            bc = []
+            g = bc_factory.create_function_values(mode, dofs)
+            bc.append({"value": g, "boundary": problem.domain.str_to_marker(edge),
+                       "method": "geometrical"})
+            for boundary in zero_boundaries:
+                bc.append({"value": zero_function, "boundary": problem.domain.str_to_marker(boundary),
+                           "method": "geometrical"})
+            assert len(bc) == 4
+            boundary_data.append(bc)
+        # edge_modes[edge] = u_fine.dofs(dofs)
+
+    petsc_options = {
+            "ksp_type": "preonly",
+            "pc_type": "lu",
+            "pc_factor_mat_solver_type": "mumps",
+            }
+    extensions = extend(problem, boundary_data=boundary_data, petsc_options=petsc_options)
+    viz = FenicsxVisualizer(source)
+    U = source.make_array(extensions)
+    viz.visualize(U, filename="./ext.xdmf")
 
     breakpoint()
-    # TODO restrict to edges
     # TODO do again compression over edge sets | not good
     # TODO extend final edge functions
     # TODO write coarse and fine scale basis

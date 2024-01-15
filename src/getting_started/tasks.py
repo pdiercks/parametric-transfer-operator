@@ -11,7 +11,7 @@ def task_preprocessing():
     from .preprocessing import generate_meshes
     return {
             "basename": f"preproc_{beam.name}",
-            "file_dep": [SRC / "definitions.py"],
+            "file_dep": [SRC / "definitions.py", SRC / "preprocessing.py"],
             "actions": [(generate_meshes, [beam])],
             "targets": [beam.coarse_grid, beam.unit_cell_grid, beam.fine_grid, beam.coarse_oversampling_grid, beam.fine_oversampling_grid],
             "clean": True,

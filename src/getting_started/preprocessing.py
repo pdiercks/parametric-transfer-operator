@@ -52,14 +52,18 @@ def mark_subdomains(fine_grid: str, coarse_domain: mesh.Mesh) -> None:
 def generate_meshes(example) -> None:
     """Creates grids for global FOM, ROM and localized ROM"""
 
-    fine_grid_cell = "quad"
     recombine = True
+    options = {"Mesh.ElementOrder": example.fe_deg} # iso-parametric elements
+    fine_grid_cell = "quad9"
+    # Note: If mesh geometry and FE space are interpolated with same order
+    # Lagrange polynomials, no additional interpolation is required when
+    # writing to XDMFFile.
 
     # create coarse grid
-    create_rectangle(0., 10., 0., 1., num_cells=(example.nx, example.ny), recombine=recombine, out_file=example.coarse_grid.as_posix())
+    create_rectangle(0., 10., 0., 1., num_cells=(example.nx, example.ny), recombine=recombine, out_file=example.coarse_grid.as_posix(), options=options)
 
     # create unit cell grid
-    create_rectangle(0., 1. , 0., 1., num_cells=example.resolution, recombine=recombine, out_file=example.unit_cell_grid.as_posix())
+    create_rectangle(0., 1. , 0., 1., num_cells=example.resolution, recombine=recombine, out_file=example.unit_cell_grid.as_posix(), options=options)
 
 
     # initialize structured coarse grid
@@ -68,16 +72,16 @@ def generate_meshes(example) -> None:
     coarse_grid.fine_grid_method = [example.unit_cell_grid.as_posix()]
 
     # create global fine grid
-    coarse_grid.create_fine_grid(np.arange(coarse_grid.num_cells), example.fine_grid.as_posix(), cell_type=fine_grid_cell)
+    coarse_grid.create_fine_grid(np.arange(coarse_grid.num_cells), example.fine_grid.as_posix(), cell_type=fine_grid_cell, options=options)
     # create meshtags for fine scale grid
     mark_subdomains(example.fine_grid.as_posix(), coarse_domain)
 
     # ### oversampling domain
-    create_rectangle(0., 3., 0., 1., num_cells=(3, 1), recombine=recombine, out_file=example.coarse_oversampling_grid.as_posix())
+    create_rectangle(0., 3., 0., 1., num_cells=(3, 1), recombine=recombine, out_file=example.coarse_oversampling_grid.as_posix(), options=options)
     coarse_domain, _, _ = gmshio.read_from_msh(example.coarse_oversampling_grid.as_posix(), MPI.COMM_WORLD, gdim=2)
     coarse_grid = StructuredQuadGrid(coarse_domain)
     coarse_grid.fine_grid_method = [example.unit_cell_grid.as_posix()]
-    coarse_grid.create_fine_grid(np.arange(coarse_grid.num_cells), example.fine_oversampling_grid.as_posix(), cell_type=fine_grid_cell)
+    coarse_grid.create_fine_grid(np.arange(coarse_grid.num_cells), example.fine_oversampling_grid.as_posix(), cell_type=fine_grid_cell, options=options)
     mark_subdomains(example.fine_oversampling_grid.as_posix(), coarse_domain)
 
 
