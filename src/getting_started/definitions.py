@@ -101,3 +101,15 @@ class Example:
     def loc_pod_modes(self, distr: str) -> Path:
         """POD modes for range approximation of parametric T"""
         return self.rf / f"loc_pod_modes_{distr}.npy"
+
+    def pod_modes_xdmf(self, distr: str) -> Path:
+        """same as `loc_pod_modes` but .xdmf format"""
+        return self.rf / f"pod_modes_{distr}.xdmf"
+
+    def fine_scale_modes_xdmf(self, distr: str) -> Path:
+        """fine scale basis functions after extension"""
+        return self.rf / f"fine_scale_modes_{distr}.xdmf"
+
+    def local_basis_npz(self, distr: str) -> Path:
+        """final local basis functions"""
+        return self.rf / f"local_basis_{distr}.npz"

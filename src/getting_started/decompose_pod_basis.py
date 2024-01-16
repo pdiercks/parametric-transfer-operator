@@ -5,8 +5,10 @@ from basix.ufl import element
 import numpy as np
 
 from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxVisualizer
+from pymor.vectorarrays.numpy import NumpyVectorSpace
+from pymor.algorithms.gram_schmidt import gram_schmidt
 
-from multi.debug import plot_modes
+# from multi.debug import plot_modes
 from multi.bcs import BoundaryDataFactory
 from multi.extension import extend
 from multi.misc import locate_dofs, x_dofs_vectorspace
@@ -22,7 +24,9 @@ def main(args):
     gdim = 2
     domain, _, _ = gmshio.read_from_msh(beam.unit_cell_grid.as_posix(), MPI.COMM_WORLD, gdim=gdim)
     omega = RectangularSubdomain(12, domain)
-    # create grids for later use
+    # FIXME: make sure edge grids are also of same order as domain
+    # would be more consistent, but is not a problem
+    # only domain used for writing XDMF needs to be of same order as FE space
     omega.create_coarse_grid()
     omega.create_edge_grids()
 
@@ -50,6 +54,28 @@ def main(args):
     # ### Full POD basis
     pod_basis_data = np.load(beam.loc_pod_modes(args.distribution))
     pod_basis = source.from_numpy(pod_basis_data)
+    viz = FenicsxVisualizer(source)
+    viz.visualize(pod_basis, filename=beam.pod_modes_xdmf(args.distribution).as_posix())
+
+    # NOTE 16.01.24: looking at the full POD modes in ParaView
+    # 1st 20 modes are good, but now the modes get oscillatory
+    # and also in the middle and top & bottom the function is basically zero
+    # I wonder why those are not removed by the algorithm?
+    # Maybe, I have to think more thoroughly about the relation of the target tolerance in the
+    # range finder and the POD tolerance.
+
+    # After decomposition into coarse and fine scale part
+    # and running gram schmidt on the fine scale edge functions
+    # there is a reduction from 68 to ~40 modes
+    # I think this should be good, but I would like those oscillatory modes
+    # to be not present in the POD basis from the beginning.
+
+    # Is it the POD rtol or ttol of rrf?
+    # Would need to check basis for fixed T and see if oscillatory
+    # functions occurr even for rather large ttol.
+
+    # The oscillatory effects could be simply introduced by
+    # the discontinuous Young's moduli.
 
     # ### subtract coarse scale part
     xdofs = x_dofs_vectorspace(V)
@@ -60,22 +86,47 @@ def main(args):
     zero_dofs = u_fine.dofs(node_dofs)
     assert np.allclose(zero_dofs, np.zeros_like(zero_dofs))
 
-    # from multi.debug import plot_modes
-    # bottom_modes = u_fine.dofs(problem.V_to_L.get('bottom'))
-    # L = problem.edge_spaces['fine'].get('bottom')
-    # mask = np.s_[:5]
-    # plot_modes(L, 'b', bottom_modes, "x", mask)
-
     # ### Restriction of fine scale part to edges
     bc_factory = BoundaryDataFactory(problem.domain.grid, problem.V)
-    # edge_modes = dict()
     edges = set(["left", "bottom", "right", "top"])
     zero_function = fem.Function(problem.V)
     zero_function.x.array[:] = 0.
     boundary_data = list()
 
+    left = u_fine.dofs(problem.V_to_L.get('left'))
+    right = u_fine.dofs(problem.V_to_L.get('right'))
+    bottom = u_fine.dofs(problem.V_to_L.get('bottom'))
+    top = u_fine.dofs(problem.V_to_L.get('top'))
+    LR = NumpyVectorSpace(left.shape[-1])
+    BT = NumpyVectorSpace(bottom.shape[-1])
+
+    snapshots_left_right = LR.empty()
+    snapshots_left_right.append(LR.from_numpy(left))
+    snapshots_left_right.append(LR.from_numpy(right))
+    modes_left_right = gram_schmidt(snapshots_left_right)
+
+    snapshots_bottom_top = BT.empty()
+    snapshots_bottom_top.append(BT.from_numpy(bottom))
+    snapshots_bottom_top.append(BT.from_numpy(top))
+    modes_bottom_top = gram_schmidt(snapshots_bottom_top)
+
+    # from multi.debug import plot_modes
+    # L = problem.edge_spaces['fine'].get('bottom')
+    # mask = np.s_[7:8]
+    # bottom_modes = modes_bottom_top.to_numpy()
+    # plot_modes(L, 'b', bottom_modes, "x", mask)
+
+    mask = {} # mask used to write edge sets separately
+    start = 0
+    end = 0
     for edge, dofs in problem.V_to_L.items():
-        modes = u_fine.dofs(dofs)
+        if edge in ("bottom", "top"):
+            modes = modes_bottom_top.to_numpy()
+        else:
+            modes = modes_left_right.to_numpy()
+        end += modes.shape[-1]
+        mask[edge] = np.s_[start : end]
+        start += modes.shape[-1]
         # create BCs for extension of each mode
         zero_boundaries = list(edges.difference([edge]))
         for mode in modes:
@@ -88,7 +139,6 @@ def main(args):
                            "method": "geometrical"})
             assert len(bc) == 4
             boundary_data.append(bc)
-        # edge_modes[edge] = u_fine.dofs(dofs)
 
     petsc_options = {
             "ksp_type": "preonly",
@@ -96,14 +146,21 @@ def main(args):
             "pc_factor_mat_solver_type": "mumps",
             }
     extensions = extend(problem, boundary_data=boundary_data, petsc_options=petsc_options)
-    viz = FenicsxVisualizer(source)
     U = source.make_array(extensions)
-    viz.visualize(U, filename="./ext.xdmf")
+    viz.visualize(U, filename=beam.fine_scale_modes_xdmf(args.distribution).as_posix())
+    uf_arrays = {}
+    for edge, view in mask.items():
+        uf_arrays[edge] = U[view].to_numpy()
 
-    breakpoint()
-    # TODO do again compression over edge sets | not good
-    # TODO extend final edge functions
-    # TODO write coarse and fine scale basis
+    # ### write coarse scale basis and fine scale basis as numpy array
+    # to be used in the online phase
+    # data needs to be written for compatibility with multi.io.BasesLoader
+    # FIXME: BasesLoader expects filename basis_{cell_index}.npz
+    # Workaround: maybe do not use BasesLoader for this particular example?
+    # BasesLoader is designed for case that each coarse grid cell has different
+    # set of basis functions
+    np.savez(beam.local_basis_npz(args.distribution).as_posix(),
+             phi=phi.to_numpy(), **uf_arrays)
 
 
 if __name__ == "__main__":
