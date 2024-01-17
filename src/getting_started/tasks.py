@@ -24,9 +24,9 @@ def task_preprocessing():
         "targets": [
             beam.coarse_grid,
             beam.unit_cell_grid,
-            beam.fine_grid,
+            *with_h5(beam.fine_grid),
             beam.coarse_oversampling_grid,
-            beam.fine_oversampling_grid,
+            *with_h5(beam.fine_oversampling_grid),
         ],
         "clean": True,
         "uptodate": [run_once],
