@@ -5,6 +5,7 @@ from pathlib import Path
 from doit.tools import run_once
 
 SRC = ROOT / "src/getting_started"  # source for this example
+defs = SRC / "definitions.py"
 beam = Example(name="beam")
 
 
@@ -19,7 +20,7 @@ def task_preprocessing():
 
     return {
         "basename": f"preproc_{beam.name}",
-        "file_dep": [SRC / "definitions.py", SRC / "preprocessing.py"],
+        "file_dep": [defs, SRC / "preprocessing.py"],
         "actions": [(generate_meshes, [beam])],
         "targets": [
             beam.coarse_grid,
@@ -41,7 +42,7 @@ def task_build_rom():
             beam.coarse_grid,
             beam.unit_cell_grid,
             beam.fine_grid,
-            SRC / "definitions.py",
+            defs,
             SRC / "fom.py",
             SRC / "rom.py",
         ],
@@ -54,7 +55,6 @@ def task_build_rom():
 def task_loc_pod_modes():
     """Getting started: Construct local POD basis"""
     module = "src.getting_started.range_approximation"
-    defs = SRC / "definitions.py"
     file = SRC / "range_approximation.py"
     distributions = ("normal", "multivariate_normal")
     num_train = 10  # number of Transfer operators
@@ -82,10 +82,30 @@ def task_loc_pod_modes():
         }
 
 
+def task_test_sets():
+    """Getting started: Generate FOM test sets"""
+    module = "src.getting_started.fom_test_set"
+    code = SRC / "fom_test_set.py"
+    num_solves = 10
+    for subdomain in (4,):
+        yield {
+            "basename": f"test_set_{subdomain}_{beam.name}",
+            "file_dep": [
+                defs,
+                code,
+                beam.coarse_grid,
+                beam.unit_cell_grid,
+                *with_h5(beam.fine_grid),
+            ],
+            "actions": ["python3 -m {} {} {}".format(module, num_solves, subdomain)],
+            "targets": [],
+            "clean": True,
+        }
+
+
 def task_decomposition():
     """Getting started: Decompose local POD basis"""
     module = "src.getting_started.decompose_pod_basis"
-    defs = SRC / "definitions.py"
     code = SRC / "decompose_pod_basis.py"
     distributions = ("normal", "multivariate_normal")
     for distr in distributions:
