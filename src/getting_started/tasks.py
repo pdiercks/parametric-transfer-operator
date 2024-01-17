@@ -91,7 +91,7 @@ def task_decomposition():
     for distr in distributions:
         yield {
             "basename": f"decompose_{beam.name}_{distr}",
-            "file_dep": [defs, code, beam.unit_cell_grid],
+            "file_dep": [defs, code, beam.unit_cell_grid, beam.loc_pod_modes(distr)],
             "actions": ["python3 -m {} {}".format(module, distr)],
             "targets": [
                 beam.local_basis_npz(distr),
