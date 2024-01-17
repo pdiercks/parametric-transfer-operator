@@ -113,3 +113,7 @@ class Example:
     def local_basis_npz(self, distr: str) -> Path:
         """final local basis functions"""
         return self.rf / f"local_basis_{distr}.npz"
+
+    def fom_test_set(self, subdomain_id: int) -> Path:
+        """test set generated from FOM solutions"""
+        return self.rf / f"test_set_{subdomain_id}.npy"
