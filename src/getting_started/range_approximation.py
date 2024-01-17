@@ -19,6 +19,7 @@ from pymor.operators.interface import Operator
 from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.operators.constructions import NumpyConversionOperator
 from pymor.parameters.base import Parameters, ParameterSpace
+from pymor.tools.random import new_rng
 
 from multi.misc import x_dofs_vectorspace
 from multi.problems import TransferProblem
@@ -189,9 +190,10 @@ def main(args):
     parameter_space = ParameterSpace(param, beam.mu_range)
     # sufficient sampling? uniform?
 
-    # FIXME: for comparison of normal to multivariate_normal I would need the same
-    # training set in both cases
-    training_set = parameter_space.sample_randomly(args.ntrain)
+    # ensures that the same random training set is generated for both distributions
+    train_seed = 1510  # may define different seeds based on number of realizations at later point
+    with new_rng(train_seed):
+        training_set = parameter_space.sample_randomly(args.ntrain)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=args.max_workers) as executor:
         results = executor.map(approximate_range, repeat(beam), training_set, repeat(args.distribution))
