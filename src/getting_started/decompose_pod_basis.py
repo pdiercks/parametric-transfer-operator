@@ -1,5 +1,5 @@
 from mpi4py import MPI
-from dolfinx import fem
+from dolfinx import fem, mesh
 from dolfinx.io import gmshio
 from basix.ufl import element
 import numpy as np
@@ -12,6 +12,7 @@ from pymor.algorithms.gram_schmidt import gram_schmidt
 from multi.bcs import BoundaryDataFactory
 from multi.extension import extend
 from multi.misc import locate_dofs, x_dofs_vectorspace
+from multi.interpolation import make_mapping
 from multi.domain import RectangularSubdomain
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinElaSubProblem
@@ -24,11 +25,8 @@ def main(args):
     gdim = 2
     domain, _, _ = gmshio.read_from_msh(beam.unit_cell_grid.as_posix(), MPI.COMM_WORLD, gdim=gdim)
     omega = RectangularSubdomain(12, domain)
-    # FIXME: make sure edge grids are also of same order as domain
-    # would be more consistent, but is not a problem
-    # only domain used for writing XDMF needs to be of same order as FE space
-    omega.create_coarse_grid()
-    omega.create_edge_grids()
+    omega.create_coarse_grid(1)
+    omega.create_boundary_grids()
 
     # ### FE spaces
     degree = beam.fe_deg
@@ -47,8 +45,10 @@ def main(args):
     problem.create_map_from_V_to_L()
 
     # ### Coarse scale basis
-    nodes = omega.coarse_grid.geometry.x
-    phi_vectors = compute_phi(problem, nodes)
+    # FIXME: geom_deg is now 2, therefore cannot use full x here
+    vertices = omega.coarse_grid.topology.connectivity(2, 0).links(0)
+    x_vertices = mesh.compute_midpoints(omega.coarse_grid, 0, vertices)
+    phi_vectors = compute_phi(problem, x_vertices)
     phi = source.make_array(phi_vectors)
 
     # ### Full POD basis
@@ -79,7 +79,7 @@ def main(args):
 
     # ### subtract coarse scale part
     xdofs = x_dofs_vectorspace(V)
-    node_dofs = locate_dofs(xdofs, nodes)
+    node_dofs = locate_dofs(xdofs, x_vertices)
     coarse_dofs = pod_basis.dofs(node_dofs)
     u_coarse = phi.lincomb(coarse_dofs)
     u_fine = pod_basis - u_coarse
@@ -93,10 +93,16 @@ def main(args):
     zero_function.x.array[:] = 0.
     boundary_data = list()
 
-    left = u_fine.dofs(problem.V_to_L.get('left'))
-    right = u_fine.dofs(problem.V_to_L.get('right'))
-    bottom = u_fine.dofs(problem.V_to_L.get('bottom'))
-    top = u_fine.dofs(problem.V_to_L.get('top'))
+    # ### use Gram Schmidt to define edge mode sets
+    # bottom-top
+    # left-right
+    map_top_to_bottom = make_mapping(problem.edge_spaces["fine"]["bottom"], problem.edge_spaces["fine"]["top"])
+    map_right_to_left = make_mapping(problem.edge_spaces["fine"]["left"], problem.edge_spaces["fine"]["right"])
+    
+    left = u_fine.dofs(problem.V_to_L['left'])
+    right = u_fine.dofs(problem.V_to_L['right'][map_right_to_left])
+    bottom = u_fine.dofs(problem.V_to_L['bottom'])
+    top = u_fine.dofs(problem.V_to_L['top'][map_top_to_bottom])
     LR = NumpyVectorSpace(left.shape[-1])
     BT = NumpyVectorSpace(bottom.shape[-1])
 
