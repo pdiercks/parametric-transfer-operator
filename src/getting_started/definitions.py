@@ -11,8 +11,10 @@ class Example:
 
     Args:
         name: The name of the example.
-        nx: Number of cells in x.
-        ny: Number of cells in y.
+        length: The length of the beam.
+        height: The height of the beam.
+        nx: Number of coarse grid cells (subdomains) in x.
+        ny: Number of coarse grid cells (subdomains) in y.
         resolution: `resolution ** 2` cells in each subdomain.
         fe_deg: FE degree.
         poisson_ratio: The poisson ratio of the material.
@@ -25,6 +27,8 @@ class Example:
 
     """
     name: str = "example"
+    length: float = 10.
+    height: float = 1.
     nx: int = 10
     ny: int = 1
     resolution: int = 10

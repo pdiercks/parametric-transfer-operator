@@ -79,7 +79,7 @@ def discretize_fom(ex):
 
     # create facet tags to define external force
     top_facets = int(99)
-    top = {"top": (top_facets, plane_at(1.0, "y"))}
+    top = {"top": (top_facets, plane_at(ex.height, "y"))}
     tdim = domain.topology.dim
     fdim = tdim - 1
     facet_tags, _ = create_meshtags(domain, fdim, top)

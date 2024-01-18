@@ -16,6 +16,7 @@ from pymor.parameters.base import Mu, Parameters, ParameterSpace
 from multi.boundary import plane_at, within_range
 from multi.domain import Domain, RectangularSubdomain
 from multi.materials import LinearElasticMaterial
+from multi.preprocessing import create_meshtags
 from multi.problems import LinearElasticityProblem, LinElaSubProblem, TransferProblem
 from .definitions import Example
 
@@ -87,7 +88,23 @@ def discretize_oversampling_problem(example: Example, mu: Mu):
         domain = fh.read_mesh(name="Grid")
         cell_tags = fh.read_meshtags(domain, "subdomains")
 
-    omega = Domain(domain, cell_tags=cell_tags)
+    # create facet tags for later use as neumann problem
+    # see range_approximation.py
+    boundaries = {
+            "bottom": (int(11), plane_at(0.0, "y")),
+            "left": (int(12), plane_at(0.0, "x")),
+            "right": (int(13), plane_at(3.0, "x")),
+            "top": (int(14), plane_at(1.0, "y")),
+            }
+    tdim = domain.topology.dim
+    fdim = tdim - 1
+    facet_tags, _ = create_meshtags(domain, fdim, boundaries)
+    assert facet_tags.find(11).size == example.resolution * 3 # bottom
+    assert facet_tags.find(12).size == example.resolution * 1 # left
+    assert facet_tags.find(13).size == example.resolution * 1 # right
+    assert facet_tags.find(14).size == example.resolution * 3 # top
+
+    omega = Domain(domain, cell_tags=cell_tags, facet_tags=facet_tags)
     tdim = domain.topology.dim
     gdim = domain.ufl_cell().geometric_dimension()
 

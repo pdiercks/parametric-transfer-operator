@@ -60,7 +60,7 @@ def generate_meshes(example) -> None:
     # writing to XDMFFile.
 
     # create coarse grid
-    create_rectangle(0., 10., 0., 1., num_cells=(example.nx, example.ny), recombine=recombine, out_file=example.coarse_grid.as_posix(), options=options)
+    create_rectangle(0., example.length, 0., example.height, num_cells=(example.nx, example.ny), recombine=recombine, out_file=example.coarse_grid.as_posix(), options=options)
 
     # create unit cell grid
     create_rectangle(0., 1. , 0., 1., num_cells=example.resolution, recombine=recombine, out_file=example.unit_cell_grid.as_posix(), options=options)
