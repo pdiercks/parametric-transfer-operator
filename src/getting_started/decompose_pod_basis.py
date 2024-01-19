@@ -52,10 +52,10 @@ def main(args):
     phi = source.make_array(phi_vectors)
 
     # ### Full POD basis
-    pod_basis_data = np.load(beam.loc_pod_modes(args.distribution))
+    pod_basis_data = np.load(beam.loc_pod_modes(args.distribution, args.configuration))
     pod_basis = source.from_numpy(pod_basis_data)
     viz = FenicsxVisualizer(source)
-    viz.visualize(pod_basis, filename=beam.pod_modes_xdmf(args.distribution).as_posix())
+    viz.visualize(pod_basis, filename=beam.pod_modes_xdmf(args.distribution, args.configuration).as_posix())
 
     # NOTE 16.01.24: looking at the full POD modes in ParaView
     # 1st 20 modes are good, but now the modes get oscillatory
@@ -153,7 +153,7 @@ def main(args):
             }
     extensions = extend(problem, boundary_data=boundary_data, petsc_options=petsc_options)
     U = source.make_array(extensions)
-    viz.visualize(U, filename=beam.fine_scale_modes_xdmf(args.distribution).as_posix())
+    viz.visualize(U, filename=beam.fine_scale_modes_xdmf(args.distribution, args.configuration).as_posix())
     uf_arrays = {}
     for edge, view in mask.items():
         uf_arrays[edge] = U[view].to_numpy()
@@ -165,7 +165,7 @@ def main(args):
     # Workaround: maybe do not use BasesLoader for this particular example?
     # BasesLoader is designed for case that each coarse grid cell has different
     # set of basis functions
-    np.savez(beam.local_basis_npz(args.distribution).as_posix(),
+    np.savez(beam.local_basis_npz(args.distribution, args.configuration).as_posix(),
              phi=phi.to_numpy(), **uf_arrays)
 
 
@@ -174,5 +174,6 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("distribution", type=str, help="The distribution used in the range approximation.")
+    parser.add_argument("configuration", type=str, help="The type of oversampling problem.", choices=("inner", "left", "right"))
     args = parser.parse_args(sys.argv[1:])
     main(args)

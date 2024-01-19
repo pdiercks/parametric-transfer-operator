@@ -1,13 +1,18 @@
+from typing import Optional, Callable, Union
 from dataclasses import dataclass
 from pathlib import Path
+import numpy as np
+from multi.boundary import point_at, plane_at, within_range
+from multi.problems import MultiscaleProblemDefinition
+from dolfinx import default_scalar_type
 
 ROOT = Path(__file__).parents[2]
 WORK = ROOT / "work"
 
 
 @dataclass
-class Example:
-    """Holds example specific data and manages filepaths.
+class BeamData:
+    """Holds example specific parameters and manages filepaths.
 
     Args:
         name: The name of the example.
@@ -24,6 +29,8 @@ class Example:
         rrf_ftol: Failure tolerance for range finder algo.
         rrf_num_testvecs: Number of test vectors for range finder algo.
         pod_rtol: Relative tolerance for POD algo.
+        configurations: The configurations, i.e. oversampling problems.
+        distributions: The distributions used in the randomized range finder.
 
     """
     name: str = "example"
@@ -40,6 +47,8 @@ class Example:
     rrf_ftol: float = 1e-15
     rrf_num_testvecs: int = 20
     pod_rtol: float = 1e-6
+    configurations: tuple[str, str, str] = ("inner", "left", "right")
+    distributions: tuple[str, str] = ("normal", "multivariate_normal")
 
     def __post_init__(self):
         """create dirs"""
@@ -73,13 +82,13 @@ class Example:
     def unit_cell_grid(self) -> Path:
         return self.grids_path / "unit_cell.msh"
 
-    @property
-    def coarse_oversampling_grid(self) -> Path:
-        return self.grids_path / "coarse_oversampling_grid.msh"
+    def coarse_oversampling_grid(self, configuration: str) -> Path:
+        assert configuration in ("inner", "left", "right")
+        return self.grids_path / f"coarse_oversampling_grid_{configuration}.msh"
 
-    @property
-    def fine_oversampling_grid(self) -> Path:
-        return self.grids_path / "fine_oversampling_grid.xdmf"
+    def fine_oversampling_grid(self, configuration: str) -> Path:
+        assert configuration in ("inner", "left", "right")
+        return self.grids_path / f"fine_oversampling_grid_{configuration}.xdmf"
 
     @property
     def fom_displacement(self) -> Path:
@@ -95,29 +104,110 @@ class Example:
         """singular values for the global POD-ROM"""
         return self.rf / "singular_values.npy"
 
-    def range_approximation_log(self, distr: str) -> Path:
-        return self.logs_path / f"range_approximation_{distr}.log"
+    def range_approximation_log(self, distr: str, conf: str) -> Path:
+        return self.logs_path / f"range_approximation_{distr}_{conf}.log"
 
-    def loc_singular_values(self, distr: str) -> Path:
+    def loc_singular_values(self, distr: str, conf: str) -> Path:
         """singular values of POD compression for range approximation of parametric T"""
-        return self.rf / f"loc_singular_values_{distr}.npy"
+        return self.rf / f"loc_singular_values_{distr}_{conf}.npy"
 
-    def loc_pod_modes(self, distr: str) -> Path:
+    def loc_pod_modes(self, distr: str, conf: str) -> Path:
         """POD modes for range approximation of parametric T"""
-        return self.rf / f"loc_pod_modes_{distr}.npy"
+        return self.rf / f"loc_pod_modes_{distr}_{conf}.npy"
 
-    def pod_modes_xdmf(self, distr: str) -> Path:
+    def pod_modes_xdmf(self, distr: str, conf: str) -> Path:
         """same as `loc_pod_modes` but .xdmf format"""
-        return self.rf / f"pod_modes_{distr}.xdmf"
+        return self.rf / f"pod_modes_{distr}_{conf}.xdmf"
 
-    def fine_scale_modes_xdmf(self, distr: str) -> Path:
+    def fine_scale_modes_xdmf(self, distr: str, conf: str) -> Path:
         """fine scale basis functions after extension"""
-        return self.rf / f"fine_scale_modes_{distr}.xdmf"
+        return self.rf / f"fine_scale_modes_{distr}_{conf}.xdmf"
 
-    def local_basis_npz(self, distr: str) -> Path:
+    def local_basis_npz(self, distr: str, conf: str) -> Path:
         """final local basis functions"""
-        return self.rf / f"local_basis_{distr}.npz"
+        return self.rf / f"local_basis_{distr}_{conf}.npz"
 
-    def fom_test_set(self, subdomain_id: int) -> Path:
+    def fom_test_set(self, conf: str) -> Path:
         """test set generated from FOM solutions"""
-        return self.rf / f"test_set_{subdomain_id}.npy"
+        return self.rf / f"test_set_{conf}.npy"
+
+
+class BeamProblem(MultiscaleProblemDefinition):
+    def __init__(self, coarse_grid: Path, fine_grid: Path):
+        super().__init__(coarse_grid, fine_grid)
+        self.setup_coarse_grid()
+        # self.setup_fine_grid()
+
+    def config_to_cell(self, config: str) -> int:
+        """Maps config to global cell index."""
+        map = {"inner": 4, "left": 0, "right": 9}
+        return map[config]
+
+    @property
+    def cell_sets(self):
+        pass
+
+    @property
+    def boundaries(self):
+        pass
+
+    def get_omega_in(self, cell_index: Optional[int] = None) -> Callable:
+        if cell_index is not None:
+            assert cell_index in (0, 4, 9)
+        if cell_index == 0:
+            marker = within_range([0., 0.], [1., 1.])
+        elif cell_index == 4:
+            marker = within_range([5., 0.], [6., 1.])
+        elif cell_index == 9:
+            marker = within_range([9., 0.], [10., 1.])
+        else:
+            raise NotImplementedError
+        return marker
+
+    def get_dirichlet(self, cell_index: Optional[int] = None) -> Union[dict, None]:
+        if cell_index is not None:
+            assert cell_index in (0, 4, 9)
+        if cell_index == 0:
+            u_origin = np.array([0, 0], dtype=default_scalar_type)
+            origin = point_at([0., 0., 0.])
+            dirichlet = {"value": u_origin, "boundary": origin, "method": "geometrical"}
+        elif cell_index == 4:
+            dirichlet = None
+        elif cell_index == 9:
+            u_bottom_right = np.array([0], dtype=default_scalar_type)
+            bottom_right = point_at([10., 0., 0.])
+            dirichlet = {"value": u_bottom_right, "boundary": bottom_right, "sub": 1, "entity_dim": 0, "method": "geometrical"}
+        else:
+            raise NotImplementedError
+        return dirichlet
+
+    def get_neumann(self, cell_index: Optional[int] = None):
+        if cell_index is not None:
+            assert cell_index in (0, 4, 9)
+        pass
+
+    def get_remove_kernel(self, cell_index: Optional[int] = None) -> bool:
+        if cell_index is not None:
+            assert cell_index in (0, 4, 9)
+        return True
+
+    def get_gamma_out(self, cell_index: Optional[int] = None) -> Callable:
+        if cell_index is not None:
+            assert cell_index in (0, 4, 9)
+        if cell_index == 0:
+            gamma_out = plane_at(2., "x")
+        elif cell_index == 4:
+            left = plane_at(4., "x")
+            right = plane_at(7., "x")
+            gamma_out = lambda x: np.logical_or(left(x), right(x))
+        elif cell_index == 9:
+            gamma_out = plane_at(8., "x")
+        else:
+            raise NotImplementedError
+        return gamma_out
+
+
+
+if __name__ == "__main__":
+    data = BeamData(name="beam")
+    problem = BeamProblem(data.coarse_grid, data.fine_grid)

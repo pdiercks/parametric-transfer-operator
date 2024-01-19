@@ -1,10 +1,10 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from definitions import Example
+from definitions import BeamData
 
 
 def main():
-    ex = Example(name="beam")
+    ex = BeamData(name="beam")
     svals = np.load(ex.singular_values)
 
     plt.semilogy(np.arange(svals.size), svals / svals[0], 'k-x')

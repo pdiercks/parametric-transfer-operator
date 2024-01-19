@@ -76,16 +76,24 @@ def generate_meshes(example) -> None:
     # create meshtags for fine scale grid
     mark_subdomains(example.fine_grid.as_posix(), coarse_domain)
 
-    # ### oversampling domain
-    create_rectangle(0., 3., 0., 1., num_cells=(3, 1), recombine=recombine, out_file=example.coarse_oversampling_grid.as_posix(), options=options)
-    coarse_domain, _, _ = gmshio.read_from_msh(example.coarse_oversampling_grid.as_posix(), MPI.COMM_WORLD, gdim=2)
-    coarse_grid = StructuredQuadGrid(coarse_domain)
-    coarse_grid.fine_grid_method = [example.unit_cell_grid.as_posix()]
-    coarse_grid.create_fine_grid(np.arange(coarse_grid.num_cells), example.fine_oversampling_grid.as_posix(), cell_type=fine_grid_cell, options=options)
-    mark_subdomains(example.fine_oversampling_grid.as_posix(), coarse_domain)
+    # ### oversampling domain per configuration
+    configs = {
+            # name: (xmin, xmax, ymin, ymax, num_cells_x, num_cells_y)
+            "inner": (4.,  7., 0., 1., 3, 1),
+            "left":  (0.,  2., 0., 1., 2, 1),
+            "right": (8., 10., 0., 1., 2, 1),
+            }
+    for key, (xmin, xmax, ymin, ymax, nx, ny) in configs.items():
+
+        create_rectangle(xmin, xmax, ymin, ymax, num_cells=(nx, ny), recombine=recombine, out_file=example.coarse_oversampling_grid(key).as_posix(), options=options)
+        coarse_domain, _, _ = gmshio.read_from_msh(example.coarse_oversampling_grid(key).as_posix(), MPI.COMM_WORLD, gdim=2)
+        coarse_grid = StructuredQuadGrid(coarse_domain)
+        coarse_grid.fine_grid_method = [example.unit_cell_grid.as_posix()]
+        coarse_grid.create_fine_grid(np.arange(coarse_grid.num_cells), example.fine_oversampling_grid(key).as_posix(), cell_type=fine_grid_cell, options=options)
+        mark_subdomains(example.fine_oversampling_grid(key).as_posix(), coarse_domain)
 
 
 if __name__ == "__main__":
-    from definitions import Example
-    beam = Example(name="beam")
+    from definitions import BeamData
+    beam = BeamData(name="beam")
     generate_meshes(beam)

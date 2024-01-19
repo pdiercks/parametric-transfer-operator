@@ -11,9 +11,7 @@ from scipy.sparse.linalg import LinearOperator, eigsh
 from scipy.special import erfinv
 from time import perf_counter
 
-from mpi4py import MPI
 from dolfinx import fem, default_scalar_type
-from dolfinx.io.utils import XDMFFile
 
 from pymor.algorithms.gram_schmidt import gram_schmidt
 from pymor.algorithms.pod import pod
@@ -147,15 +145,15 @@ def build_mvn_training_set(transfer_problem):
     return mvn_train_set
 
 
-def approximate_range(beam, mu, distribution='normal'):
+def approximate_range(beam, mu, configuration, distribution='normal'):
     from .locmor import discretize_oversampling_problem
 
-    logger = getLogger('range_approximation', level='INFO', filename=beam.range_approximation_log(distribution).as_posix())
+    logger = getLogger('range_approximation', level='INFO', filename=beam.range_approximation_log(distribution, configuration).as_posix())
     pid = os.getpid()
     logger.info(f"{pid=},\tApproximating range of T for {mu=} using {distribution=}.\n")
 
     tic = perf_counter()
-    transfer_problem = discretize_oversampling_problem(beam, mu)
+    transfer_problem = discretize_oversampling_problem(beam, mu, configuration)
     logger.info(f"{pid=},\tDiscretized transfer problem in {perf_counter()-tic}.")
 
     if distribution == 'normal':
@@ -178,45 +176,50 @@ def approximate_range(beam, mu, distribution='normal'):
     basis_length = len(basis)
     logger.info(f"{pid=},\tNumber of basis functions after rrf is {basis_length}.")
 
-    # ### Add Solution of Neumann Problem
-    neumann_problem = transfer_problem.problem
-    neumann_problem.clear_bcs()
-    omega = neumann_problem.domain
+    # FIXME figure out why homogeneous dirichlet bcs are not fullfilled
+    # TODO continue re-adding neumann data dependet on oversampling problem
+    raise NotImplementedError
 
-    # ### Add Neumann bc
-    loading = fem.Constant(omega.grid, (default_scalar_type(0.0), default_scalar_type(-10.)))
-    top_facets = int(14) # see locmor.py
-    neumann_problem.add_neumann_bc(top_facets, loading)
-
-    # ### Add zero boundary conditions on gamma out
-    left = plane_at(omega.xmin[0], "x")
-    right = plane_at(omega.xmax[0], "x")
-    gamma_out = lambda x: np.logical_or(left(x), right(x))
-    zero = fem.Constant(omega.grid, (default_scalar_type(0.0), default_scalar_type(0.0)))
-    neumann_problem.add_dirichlet_bc(zero, gamma_out, method="geometrical")
-
-    # ### Solve
-    neumann_problem.setup_solver()
-    u_neumann = neumann_problem.solve()
-
-    # ### Restrict to target subdomain
-    u_in = fem.Function(transfer_problem.range.V)
-    u_in.interpolate(u_neumann, nmm_interpolation_data=fem.create_nonmatching_meshes_interpolation_data(
-        u_in.function_space.mesh._cpp_object,
-        u_in.function_space.element,
-        u_neumann.function_space.mesh._cpp_object))
-
-    # check u_neumann solution is correct
-    # seems to be the case, 18.01.24
-    # with XDMFFile(MPI.COMM_WORLD, "./neumann.xdmf", "w") as xdmf:
-    #     xdmf.write_mesh(omega.grid)
-    #     xdmf.write_function(u_neumann, 0.0)
-
-    # ### Extend basis
-    # raise error if extension fails?
-    basis.append(transfer_problem.range.make_array([u_in.vector]))
-    gram_schmidt(basis, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
-    logger.info(f"{pid=},\tNumber of basis functions after adding neumann data is {len(basis)}.")
+    # # ### Add Solution of Neumann Problem
+    # neumann_problem = transfer_problem.problem
+    # neumann_problem.clear_bcs()
+    # omega = neumann_problem.domain
+    #
+    # # ### Add Neumann bc
+    # loading = fem.Constant(omega.grid, (default_scalar_type(0.0), default_scalar_type(-10.)))
+    # top_facets = int(14) # see locmor.py
+    # neumann_problem.add_neumann_bc(top_facets, loading)
+    #
+    # # ### Add zero boundary conditions on gamma out
+    # # FIXME: this is configuration dependent ...
+    # left = plane_at(omega.xmin[0], "x")
+    # right = plane_at(omega.xmax[0], "x")
+    # gamma_out = lambda x: np.logical_or(left(x), right(x))
+    # zero = fem.Constant(omega.grid, (default_scalar_type(0.0), default_scalar_type(0.0)))
+    # neumann_problem.add_dirichlet_bc(zero, gamma_out, method="geometrical")
+    #
+    # # ### Solve
+    # neumann_problem.setup_solver()
+    # u_neumann = neumann_problem.solve()
+    #
+    # # ### Restrict to target subdomain
+    # u_in = fem.Function(transfer_problem.range.V)
+    # u_in.interpolate(u_neumann, nmm_interpolation_data=fem.create_nonmatching_meshes_interpolation_data(
+    #     u_in.function_space.mesh._cpp_object,
+    #     u_in.function_space.element,
+    #     u_neumann.function_space.mesh._cpp_object))
+    #
+    # # check u_neumann solution is correct
+    # # seems to be the case, 18.01.24
+    # # with XDMFFile(MPI.COMM_WORLD, "./neumann.xdmf", "w") as xdmf:
+    # #     xdmf.write_mesh(omega.grid)
+    # #     xdmf.write_function(u_neumann, 0.0)
+    #
+    # # ### Extend basis
+    # # raise error if extension fails?
+    # basis.append(transfer_problem.range.make_array([u_in.vector]))
+    # gram_schmidt(basis, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
+    # logger.info(f"{pid=},\tNumber of basis functions after adding neumann data is {len(basis)}.")
 
     # ### Conversion to picklable objects
     # passing data along processes requires picklable data
@@ -232,7 +235,10 @@ def approximate_range(beam, mu, distribution='normal'):
 
 def main(args):
     from .tasks import beam
-    param = Parameters({"E": 3})
+    if args.configuration == "inner":
+        param = Parameters({"E": 3})
+    else:
+        param = Parameters({"E": 2})
     parameter_space = ParameterSpace(param, beam.mu_range)
     # sufficient sampling? uniform?
 
@@ -242,7 +248,7 @@ def main(args):
         training_set = parameter_space.sample_randomly(args.ntrain)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=args.max_workers) as executor:
-        results = executor.map(approximate_range, repeat(beam), training_set, repeat(args.distribution))
+        results = executor.map(approximate_range, repeat(beam), training_set, repeat(args.configuration), repeat(args.distribution))
 
     basis, range_product = next(results)
     snapshots = range_product.range.empty()
@@ -254,8 +260,8 @@ def main(args):
     svals = pod_data[1]
 
     # write pod modes and singular values to disk
-    np.save(beam.loc_pod_modes(args.distribution), pod_modes.to_numpy())
-    np.save(beam.loc_singular_values(args.distribution), svals)
+    np.save(beam.loc_pod_modes(args.distribution, args.configuration), pod_modes.to_numpy())
+    np.save(beam.loc_singular_values(args.distribution, args.configuration), svals)
 
 
 if __name__ == "__main__":
@@ -264,6 +270,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("distribution", type=str, help="The distribution to draw samples from.")
     parser.add_argument("ntrain", type=int, help="The size of the training set.")
+    parser.add_argument("configuration", type=str, help="The type of oversampling problem.", choices=("inner", "left", "right"))
     parser.add_argument("--max_workers", type=int, default=4, help="The max number of workers.")
     args = parser.parse_args(sys.argv[1:])
     main(args)

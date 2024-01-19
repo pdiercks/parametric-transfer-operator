@@ -4,7 +4,7 @@ import numpy as np
 from scipy.sparse import coo_array
 
 from mpi4py import MPI
-from dolfinx import mesh, fem
+from dolfinx import mesh, fem, default_scalar_type
 from dolfinx.io.utils import XDMFFile
 from basix.ufl import element
 
@@ -13,12 +13,11 @@ from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.vectorarrays.numpy import NumpyVectorSpace
 from pymor.parameters.base import Mu, Parameters, ParameterSpace
 
-from multi.boundary import plane_at, within_range
-from multi.domain import Domain, RectangularSubdomain
+from multi.boundary import point_at, plane_at, within_range
+from multi.domain import RectangularDomain, RectangularSubdomain
 from multi.materials import LinearElasticMaterial
-from multi.preprocessing import create_meshtags
 from multi.problems import LinearElasticityProblem, LinElaSubProblem, TransferProblem
-from .definitions import Example
+from .definitions import BeamData, BeamProblem
 
 
 class COOMatrixOperator(Operator):
@@ -74,47 +73,64 @@ class COOMatrixOperator(Operator):
         return self.assemble(mu).apply_inverse(V, initial_guess=initial_guess, least_squares=least_squares)
 
 
-def discretize_oversampling_problem(example: Example, mu: Mu):
+def discretize_oversampling_problem(example: BeamData, mu: Mu, configuration: str):
     """Returns TransferProblem for fixed parameter Mu.
 
     Args:
         example: The instance of the example dataclass.
         mu: The parameter value.
+        configuration: The type of oversampling problem.
 
     """
 
     # use MPI.COMM_SELF for embarrassingly parallel workloads
-    with XDMFFile(MPI.COMM_SELF, example.fine_oversampling_grid.as_posix(), "r") as fh:
+    with XDMFFile(MPI.COMM_SELF, example.fine_oversampling_grid(configuration).as_posix(), "r") as fh:
         domain = fh.read_mesh(name="Grid")
         cell_tags = fh.read_meshtags(domain, "subdomains")
 
-    # create facet tags for later use as neumann problem
-    # see range_approximation.py
-    boundaries = {
-            "bottom": (int(11), plane_at(0.0, "y")),
-            "left": (int(12), plane_at(0.0, "x")),
-            "right": (int(13), plane_at(3.0, "x")),
-            "top": (int(14), plane_at(1.0, "y")),
-            }
-    tdim = domain.topology.dim
-    fdim = tdim - 1
-    facet_tags, _ = create_meshtags(domain, fdim, boundaries)
-    assert facet_tags.find(11).size == example.resolution * 3 # bottom
-    assert facet_tags.find(12).size == example.resolution * 1 # left
-    assert facet_tags.find(13).size == example.resolution * 1 # right
-    assert facet_tags.find(14).size == example.resolution * 3 # top
+    omega = RectangularDomain(domain, cell_tags=cell_tags, facet_tags=None)
+    omega.create_facet_tags({
+        "bottom": int(11), "left": int(12), "right": int(13), "top": int(14)
+        })
+    tdim = omega.tdim
+    gdim = omega.gdim
 
-    omega = Domain(domain, cell_tags=cell_tags, facet_tags=facet_tags)
-    tdim = domain.topology.dim
-    gdim = domain.ufl_cell().geometric_dimension()
+    # ### Definitions dependent on configuration
+    # Topology: Γ_out, Ω_in, Σ_D
+    # Dirichlet BCs on Σ_D
+    mu_values = mu.to_numpy()
+    beamproblem = BeamProblem(example.coarse_grid, example.fine_grid)
+    cell_index = beamproblem.config_to_cell(configuration)
+    gamma_out = beamproblem.get_gamma_out(cell_index)
+    mark_omega_in = beamproblem.get_omega_in(cell_index)
+    dirichlet = beamproblem.get_dirichlet(cell_index)
+    remove_kernel = beamproblem.get_remove_kernel(cell_index)
 
-    # ### Gamma out
-    left = plane_at(omega.xmin[0], "x")
-    right = plane_at(omega.xmax[0], "x")
-    gamma_out = lambda x: np.logical_or(left(x), right(x))
+    if configuration == "inner":
+        assert mu_values.size == 3
+        assert omega.facet_tags.find(11).size == example.resolution * 3 # bottom
+        assert omega.facet_tags.find(12).size == example.resolution * 1 # left
+        assert omega.facet_tags.find(13).size == example.resolution * 1 # right
+        assert omega.facet_tags.find(14).size == example.resolution * 3 # top
+
+    elif configuration == "left":
+        assert mu_values.size == 2
+        assert omega.facet_tags.find(11).size == example.resolution * 2 # bottom
+        assert omega.facet_tags.find(12).size == example.resolution * 1 # left
+        assert omega.facet_tags.find(13).size == example.resolution * 1 # right
+        assert omega.facet_tags.find(14).size == example.resolution * 2 # top
+
+    elif configuration == "right":
+        assert mu_values.size == 2
+        assert omega.facet_tags.find(11).size == example.resolution * 2 # bottom
+        assert omega.facet_tags.find(12).size == example.resolution * 1 # left
+        assert omega.facet_tags.find(13).size == example.resolution * 1 # right
+        assert omega.facet_tags.find(14).size == example.resolution * 2 # top
+
+    else:
+        raise NotImplementedError
 
     # ### Omega in
-    mark_omega_in = within_range([1., 0.], [2., 1.])
     cells_omega_in = mesh.locate_entities(domain, tdim, mark_omega_in)
     omega_in, _, _, _ = mesh.create_submesh(domain, tdim, cells_omega_in)
     id_omega_in = 99
@@ -129,23 +145,29 @@ def discretize_oversampling_problem(example: Example, mu: Mu):
     # ### Oversampling problem
     E = example.youngs_modulus
     NU = example.poisson_ratio
-    mu_values = mu.to_numpy()
-    assert mu_values.size == 3
     materials = tuple([LinearElasticMaterial(gdim, E * mu_i, NU, plane_stress=False) for mu_i in mu_values])
     oversampling_problem = LinearElasticityProblem(omega, V, phases=materials)
 
     # ### Problem on target subdomain
-    subproblem = LinElaSubProblem(omega_in, W, phases=(materials[1],))
+    if configuration == "inner":
+        subproblem = LinElaSubProblem(omega_in, W, phases=(materials[1],))
+    elif configuration == "left":
+        subproblem = LinElaSubProblem(omega_in, W, phases=(materials[0],))
+    elif configuration == "right":
+        subproblem = LinElaSubProblem(omega_in, W, phases=(materials[-1],))
+    else:
+        raise NotImplementedError
 
     # ### TransferProblem
     transfer = TransferProblem(
             oversampling_problem,
             subproblem,
             gamma_out,
-            dirichlet=None,
+            dirichlet=dirichlet,
             source_product={"product": "l2"},
             range_product={"product": "h1"},
-            remove_kernel=True,
+            # remove_kernel=remove_kernel,
+            remove_kernel=False, # FIXME: instead of bool, indicate set of rigid body modes to use
             )
     return transfer
 
@@ -154,7 +176,16 @@ def discretize_oversampling_problem(example: Example, mu: Mu):
 
 if __name__ == "__main__":
     from .tasks import beam
-    param = Parameters({"E": 3})
+    from multi.misc import x_dofs_vectorspace, locate_dofs
+    from pymor.bindings.fenicsx import FenicsxVisualizer
+    param = Parameters({"E": 2})
     ps = ParameterSpace(param, (1., 2.))
     mu = ps.sample_randomly(1)[0]
-    rval = discretize_oversampling_problem(beam, mu)
+    T = discretize_oversampling_problem(beam, mu, "left")
+    v = T.generate_random_boundary_data(1, distribution='normal')
+    breakpoint()
+    U = T.solve(v)
+    xdofs = x_dofs_vectorspace(T.range.V)
+    dofs_origin = locate_dofs(xdofs, np.array([[0, 0, 0]]))
+    viz = FenicsxVisualizer(T.range)
+    viz.visualize(U, filename="./homDirichlet.xdmf")

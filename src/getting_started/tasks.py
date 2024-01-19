@@ -1,12 +1,14 @@
 """tasks for the getting started example"""
 
-from .definitions import Example, ROOT
+from .definitions import BeamData, ROOT
 from pathlib import Path
 from doit.tools import run_once
 
 SRC = ROOT / "src/getting_started"  # source for this example
 defs = SRC / "definitions.py"
-beam = Example(name="beam")
+beam = BeamData(name="beam")
+CONFIGS = beam.configurations
+DISTR = beam.distributions
 
 
 def with_h5(xdmf: Path) -> list[Path]:
@@ -18,17 +20,17 @@ def task_preprocessing():
     """Getting started: Preprocessing"""
     from .preprocessing import generate_meshes
 
+    mesh_files = [beam.coarse_grid, beam.unit_cell_grid,
+                  *with_h5(beam.fine_grid)]
+    for config in ("inner", "left", "right"):
+        mesh_files += [beam.coarse_oversampling_grid(config)]
+        mesh_files += with_h5(beam.fine_oversampling_grid(config))
+
     return {
         "basename": f"preproc_{beam.name}",
         "file_dep": [defs, SRC / "preprocessing.py"],
         "actions": [(generate_meshes, [beam])],
-        "targets": [
-            beam.coarse_grid,
-            beam.unit_cell_grid,
-            *with_h5(beam.fine_grid),
-            beam.coarse_oversampling_grid,
-            *with_h5(beam.fine_oversampling_grid),
-        ],
+        "targets": mesh_files,
         "clean": True,
         "uptodate": [run_once],
     }
@@ -56,30 +58,30 @@ def task_loc_pod_modes():
     """Getting started: Construct local POD basis"""
     module = "src.getting_started.range_approximation"
     file = SRC / "range_approximation.py"
-    distributions = ("normal", "multivariate_normal")
     num_train = 10  # number of Transfer operators
     nworkers = 4  # number of workers in pool
-    for distr in distributions:
-        yield {
-            "basename": f"rrf_{beam.name}_{distr}",
-            "file_dep": [
-                defs,
-                file,
-                beam.fine_oversampling_grid,
-                beam.coarse_oversampling_grid,
-            ],
-            "actions": [
-                "python3 -m {} {} {} --max_workers {}".format(
-                    module, distr, num_train, nworkers
-                )
-            ],
-            "targets": [
-                beam.range_approximation_log(distr),
-                beam.loc_pod_modes(distr),
-                beam.loc_singular_values(distr),
-            ],
-            "clean": True,
-        }
+    for distr in DISTR:
+        for config in CONFIGS:
+            yield {
+                "basename": f"rrf_{beam.name}_{distr}_{config}",
+                "file_dep": [
+                    defs,
+                    file,
+                    beam.fine_oversampling_grid(config),
+                    beam.coarse_oversampling_grid(config),
+                ],
+                "actions": [
+                    "python3 -m {} {} {} {} --max_workers {}".format(
+                        module, distr, num_train, config, nworkers
+                    )
+                ],
+                "targets": [
+                    beam.range_approximation_log(distr, config),
+                    beam.loc_pod_modes(distr, config),
+                    beam.loc_singular_values(distr, config),
+                ],
+                "clean": True,
+            }
 
 
 def task_test_sets():
@@ -87,9 +89,11 @@ def task_test_sets():
     module = "src.getting_started.fom_test_set"
     code = SRC / "fom_test_set.py"
     num_solves = 10
-    for subdomain in (4,):
+    map = {"inner": 4, "left": 0, "right": 9}
+    for config in CONFIGS:
+        subdomain = map[config]
         yield {
-            "basename": f"test_set_{subdomain}_{beam.name}",
+            "basename": f"test_set_{config}_{beam.name}",
             "file_dep": [
                 defs,
                 code,
@@ -98,7 +102,7 @@ def task_test_sets():
                 *with_h5(beam.fine_grid),
             ],
             "actions": ["python3 -m {} {} {}".format(module, num_solves, subdomain)],
-            "targets": [],
+            "targets": [beam.fom_test_set(config)],
             "clean": True,
         }
 
@@ -107,19 +111,19 @@ def task_decomposition():
     """Getting started: Decompose local POD basis"""
     module = "src.getting_started.decompose_pod_basis"
     code = SRC / "decompose_pod_basis.py"
-    distributions = ("normal", "multivariate_normal")
-    for distr in distributions:
-        yield {
-            "basename": f"decompose_{beam.name}_{distr}",
-            "file_dep": [defs, code, beam.unit_cell_grid, beam.loc_pod_modes(distr)],
-            "actions": ["python3 -m {} {}".format(module, distr)],
-            "targets": [
-                beam.local_basis_npz(distr),
-                *with_h5(beam.fine_scale_modes_xdmf(distr)),
-                *with_h5(beam.pod_modes_xdmf(distr)),
-            ],
-            "clean": True,
-        }
+    for distr in DISTR:
+        for config in CONFIGS:
+            yield {
+                "basename": f"decompose_{beam.name}_{distr}_{config}",
+                "file_dep": [defs, code, beam.unit_cell_grid, beam.loc_pod_modes(distr, config)],
+                "actions": ["python3 -m {} {} {}".format(module, distr, config)],
+                "targets": [
+                    beam.local_basis_npz(distr, config),
+                    *with_h5(beam.fine_scale_modes_xdmf(distr, config)),
+                    *with_h5(beam.pod_modes_xdmf(distr, config)),
+                ],
+                "clean": True,
+            }
 
 
 def task_optimize():
