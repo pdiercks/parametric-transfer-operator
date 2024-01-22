@@ -4,19 +4,22 @@ import numpy as np
 from scipy.sparse import coo_array
 
 from mpi4py import MPI
-from dolfinx import mesh, fem, default_scalar_type
+from dolfinx import mesh, fem
 from dolfinx.io.utils import XDMFFile
 from basix.ufl import element
 
+from pymor.algorithms.gram_schmidt import gram_schmidt
+from pymor.bindings.fenicsx import FenicsxMatrixOperator, FenicsxVectorSpace
 from pymor.operators.interface import Operator
 from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.vectorarrays.numpy import NumpyVectorSpace
 from pymor.parameters.base import Mu, Parameters, ParameterSpace
 
-from multi.boundary import point_at, plane_at, within_range
 from multi.domain import RectangularDomain, RectangularSubdomain
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinearElasticityProblem, LinElaSubProblem, TransferProblem
+from multi.product import InnerProduct
+from multi.solver import build_nullspace
 from .definitions import BeamData, BeamProblem
 
 
@@ -99,12 +102,12 @@ def discretize_oversampling_problem(example: BeamData, mu: Mu, configuration: st
     # Topology: Γ_out, Ω_in, Σ_D
     # Dirichlet BCs on Σ_D
     mu_values = mu.to_numpy()
-    beamproblem = BeamProblem(example.coarse_grid, example.fine_grid)
+    beamproblem = BeamProblem(example.coarse_grid.as_posix(), example.fine_grid.as_posix())
     cell_index = beamproblem.config_to_cell(configuration)
     gamma_out = beamproblem.get_gamma_out(cell_index)
     mark_omega_in = beamproblem.get_omega_in(cell_index)
     dirichlet = beamproblem.get_dirichlet(cell_index)
-    remove_kernel = beamproblem.get_remove_kernel(cell_index)
+    kernel_set = beamproblem.get_kernel_set(cell_index)
 
     if configuration == "inner":
         assert mu_values.size == 3
@@ -158,16 +161,35 @@ def discretize_oversampling_problem(example: BeamData, mu: Mu, configuration: st
     else:
         raise NotImplementedError
 
+    # ### Range product operator
+    # create homogeneous Dirichlet BCs if necessary
+    if dirichlet is None:
+        bc_hom = ()
+    else:
+        subproblem.add_dirichlet_bc(**dirichlet)
+        bc_hom = subproblem.get_dirichlet_bcs()
+    inner_product = InnerProduct(subproblem.V, "h1", bcs=bc_hom)
+    pmat = inner_product.assemble_matrix()
+    range_product = FenicsxMatrixOperator(pmat, subproblem.V, subproblem.V)
+
+    # ### Rigid body modes
+    ns_vecs = build_nullspace(subproblem.V, gdim=omega_in.grid.ufl_cell().geometric_dimension())
+    range_space = FenicsxVectorSpace(subproblem.V)
+    rigid_body_modes = []
+    for j in kernel_set:
+        rigid_body_modes.append(ns_vecs[j])
+    kernel = range_space.make_array(rigid_body_modes)
+    gram_schmidt(kernel, product=range_product, copy=False)
+
     # ### TransferProblem
     transfer = TransferProblem(
             oversampling_problem,
             subproblem,
             gamma_out,
             dirichlet=dirichlet,
-            source_product={"product": "l2"},
-            range_product={"product": "h1"},
-            # remove_kernel=remove_kernel,
-            remove_kernel=False, # FIXME: instead of bool, indicate set of rigid body modes to use
+            source_product={"product": "l2", "bcs": ()},
+            range_product=range_product,
+            kernel=kernel,
             )
     return transfer
 
@@ -183,7 +205,6 @@ if __name__ == "__main__":
     mu = ps.sample_randomly(1)[0]
     T = discretize_oversampling_problem(beam, mu, "left")
     v = T.generate_random_boundary_data(1, distribution='normal')
-    breakpoint()
     U = T.solve(v)
     xdofs = x_dofs_vectorspace(T.range.V)
     dofs_origin = locate_dofs(xdofs, np.array([[0, 0, 0]]))

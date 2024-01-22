@@ -33,16 +33,17 @@ class BeamData:
         distributions: The distributions used in the randomized range finder.
 
     """
+
     name: str = "example"
-    length: float = 10.
-    height: float = 1.
+    length: float = 10.0
+    height: float = 1.0
     nx: int = 10
     ny: int = 1
     resolution: int = 10
     fe_deg: int = 2
     poisson_ratio: float = 0.3
     youngs_modulus: float = 20e3
-    mu_range: tuple[float, float] = (1., 2.)
+    mu_range: tuple[float, float] = (1.0, 2.0)
     rrf_ttol: float = 5e-2
     rrf_ftol: float = 1e-15
     rrf_num_testvecs: int = 20
@@ -133,10 +134,10 @@ class BeamData:
 
 
 class BeamProblem(MultiscaleProblemDefinition):
-    def __init__(self, coarse_grid: Path, fine_grid: Path):
+    def __init__(self, coarse_grid: str, fine_grid: str):
         super().__init__(coarse_grid, fine_grid)
-        self.setup_coarse_grid()
-        # self.setup_fine_grid()
+        self.setup_coarse_grid(2)
+        self.setup_fine_grid()
 
     def config_to_cell(self, config: str) -> int:
         """Maps config to global cell index."""
@@ -145,67 +146,92 @@ class BeamProblem(MultiscaleProblemDefinition):
 
     @property
     def cell_sets(self):
-        pass
+        cells = {
+            "inner": set([3, 4, 5]),
+            "left": set([0, 1]),
+            "right": set([8, 9]),
+        }
+        return cells
 
     @property
     def boundaries(self):
-        pass
+        x = self.coarse_grid.grid.geometry.x
+        xmin = np.amin(x, axis=0)
+        xmax = np.amax(x, axis=0)
+        return {
+            "origin": (int(101), point_at([xmin[0], xmin[1], xmin[2]])),
+            "bottom_right": (int(102), point_at([xmax[0], xmin[1], xmin[2]])),
+        }
 
     def get_omega_in(self, cell_index: Optional[int] = None) -> Callable:
         if cell_index is not None:
             assert cell_index in (0, 4, 9)
         if cell_index == 0:
-            marker = within_range([0., 0.], [1., 1.])
+            marker = within_range([0.0, 0.0], [1.0, 1.0])
         elif cell_index == 4:
-            marker = within_range([5., 0.], [6., 1.])
+            marker = within_range([5.0, 0.0], [6.0, 1.0])
         elif cell_index == 9:
-            marker = within_range([9., 0.], [10., 1.])
+            marker = within_range([9.0, 0.0], [10.0, 1.0])
         else:
             raise NotImplementedError
         return marker
 
     def get_dirichlet(self, cell_index: Optional[int] = None) -> Union[dict, None]:
+        _, origin = self.boundaries["origin"]
+        _, bottom_right = self.boundaries["bottom_right"]
         if cell_index is not None:
             assert cell_index in (0, 4, 9)
         if cell_index == 0:
             u_origin = np.array([0, 0], dtype=default_scalar_type)
-            origin = point_at([0., 0., 0.])
             dirichlet = {"value": u_origin, "boundary": origin, "method": "geometrical"}
         elif cell_index == 4:
             dirichlet = None
         elif cell_index == 9:
             u_bottom_right = np.array([0], dtype=default_scalar_type)
-            bottom_right = point_at([10., 0., 0.])
-            dirichlet = {"value": u_bottom_right, "boundary": bottom_right, "sub": 1, "entity_dim": 0, "method": "geometrical"}
+            dirichlet = {
+                "value": u_bottom_right,
+                "boundary": bottom_right,
+                "sub": 1,
+                "entity_dim": 0,
+                "method": "geometrical",
+            }
         else:
             raise NotImplementedError
         return dirichlet
 
     def get_neumann(self, cell_index: Optional[int] = None):
-        if cell_index is not None:
-            assert cell_index in (0, 4, 9)
-        pass
+        # is the same for all oversampling problems
+        # see range_approximation.py
+        return None
 
-    def get_remove_kernel(self, cell_index: Optional[int] = None) -> bool:
+    def get_kernel_set(self, cell_index: int) -> tuple[int, ...]:
+        """return indices of rigid body modes to be used"""
         if cell_index is not None:
             assert cell_index in (0, 4, 9)
-        return True
+        if cell_index == 0:
+            # left, only rotation is free
+            return (2,)
+        elif cell_index == 4:
+            # inner, use all rigid body modes
+            return (0, 1, 2)
+        elif cell_index == 9:
+            # right, only trans y is constrained
+            return (0, 2)
 
     def get_gamma_out(self, cell_index: Optional[int] = None) -> Callable:
         if cell_index is not None:
             assert cell_index in (0, 4, 9)
         if cell_index == 0:
-            gamma_out = plane_at(2., "x")
+            gamma_out = plane_at(2.0, "x")
         elif cell_index == 4:
-            left = plane_at(4., "x")
-            right = plane_at(7., "x")
+            left = plane_at(3.0, "x")
+            right = plane_at(6.0, "x")
             gamma_out = lambda x: np.logical_or(left(x), right(x))
         elif cell_index == 9:
-            gamma_out = plane_at(8., "x")
+            gamma_out = plane_at(8.0, "x")
         else:
             raise NotImplementedError
         return gamma_out
-
 
 
 if __name__ == "__main__":
