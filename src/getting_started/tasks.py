@@ -120,6 +120,22 @@ def task_proj_error():
                     }
 
 
+def task_plot_proj_error():
+    """Getting started: Figure Projection Error"""
+    module = "src.getting_started.plot_projerr"
+    code = SRC / "plot_projerr.py"
+    for config in beam.configurations:
+        deps= [code]
+        deps += [beam.proj_error(distr, config) for distr in beam.distributions]
+        yield {
+                "basename": f"fig_proj_err_{beam.name}_{config}",
+                "file_dep": deps,
+                "actions": ["python3 -m {}".format(module)],
+                "targets": [beam.fig_proj_error(config)],
+                "clean": True,
+                }
+
+
 def task_decomposition():
     """Getting started: Decompose local POD basis"""
     module = "src.getting_started.decompose_pod_basis"

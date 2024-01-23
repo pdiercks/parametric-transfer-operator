@@ -140,6 +140,10 @@ class BeamData:
         """projection error for fom test set wrt pod basis"""
         return self.rf / f"proj_error_{distr}_{conf}.npy"
 
+    def fig_proj_error(self, conf: str) -> Path:
+        """figure of projection error plot"""
+        return self.rf / f"fig_proj_error_{conf}.pdf"
+
 
 class BeamProblem(MultiscaleProblemDefinition):
     def __init__(self, coarse_grid: str, fine_grid: str):
