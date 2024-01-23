@@ -105,6 +105,21 @@ def task_test_sets():
         }
 
 
+def task_proj_error():
+    """Getting started: Projection error for FOM test sets"""
+    module = "src.getting_started.projerr"
+    code = SRC / "projerr.py"
+    for distr in DISTR:
+        for config in CONFIGS:
+            yield {
+                    "basename": f"proj_err_{beam.name}_{distr}_{config}",
+                    "file_dep": [defs, code, beam.unit_cell_grid, beam.loc_pod_modes(distr, config), beam.fom_test_set(config)],
+                    "actions": ["python3 -m {} {} {}".format(module, distr, config)],
+                    "targets": [beam.proj_error(distr, config)],
+                    "clean": True,
+                    }
+
+
 def task_decomposition():
     """Getting started: Decompose local POD basis"""
     module = "src.getting_started.decompose_pod_basis"

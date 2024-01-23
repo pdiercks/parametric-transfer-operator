@@ -16,6 +16,7 @@ class BeamData:
 
     Args:
         name: The name of the example.
+        gdim: The geometric dimension of the problem.
         length: The length of the beam.
         height: The height of the beam.
         nx: Number of coarse grid cells (subdomains) in x.
@@ -31,10 +32,12 @@ class BeamData:
         pod_rtol: Relative tolerance for POD algo.
         configurations: The configurations, i.e. oversampling problems.
         distributions: The distributions used in the randomized range finder.
+        range_product: The inner product to use (rrf, projection error).
 
     """
 
     name: str = "example"
+    gdim: int = 2
     length: float = 10.0
     height: float = 1.0
     nx: int = 10
@@ -50,6 +53,7 @@ class BeamData:
     pod_rtol: float = 1e-6
     configurations: tuple[str, str, str] = ("inner", "left", "right")
     distributions: tuple[str, str] = ("normal", "multivariate_normal")
+    range_product: str = "h1"
 
     def __post_init__(self):
         """create dirs"""
@@ -131,6 +135,10 @@ class BeamData:
     def fom_test_set(self, conf: str) -> Path:
         """test set generated from FOM solutions"""
         return self.rf / f"test_set_{conf}.npy"
+
+    def proj_error(self, distr: str, conf: str) -> Path:
+        """projection error for fom test set wrt pod basis"""
+        return self.rf / f"proj_error_{distr}_{conf}.npy"
 
 
 class BeamProblem(MultiscaleProblemDefinition):
