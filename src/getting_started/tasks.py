@@ -23,7 +23,6 @@ def task_preprocessing():
     mesh_files = [beam.coarse_grid, beam.unit_cell_grid,
                   *with_h5(beam.fine_grid)]
     for config in ("inner", "left", "right"):
-        mesh_files += [beam.coarse_oversampling_grid(config)]
         mesh_files += with_h5(beam.fine_oversampling_grid(config))
 
     return {
@@ -68,7 +67,6 @@ def task_loc_pod_modes():
                     defs,
                     file,
                     beam.fine_oversampling_grid(config),
-                    beam.coarse_oversampling_grid(config),
                 ],
                 "actions": [
                     "python3 -m {} {} {} {} --max_workers {}".format(

@@ -195,9 +195,7 @@ def discretize_oversampling_problem(example: BeamData, mu: Mu, configuration: st
             range_product=range_product,
             kernel=kernel,
             )
-    return transfer, kernel
-
-
+    return transfer
 
 
 if __name__ == "__main__":
@@ -209,7 +207,7 @@ if __name__ == "__main__":
     mu = ps.parameters.parse([1.5 for _ in range(2)])
     configuration = "right"
     # configuration = "left"
-    T, rbm = discretize_oversampling_problem(beam, mu, configuration)
+    T = discretize_oversampling_problem(beam, mu, configuration)
     v = T.generate_random_boundary_data(1, distribution='normal')
     v[:, ::2] = 0.1 # set x component to value
     v[:, 1::2] = 0.1 # set y component to value

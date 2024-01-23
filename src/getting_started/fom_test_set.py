@@ -5,6 +5,7 @@ from basix.ufl import element
 from pymor.bindings.fenicsx import FenicsxVectorSpace
 from pymor.tools.random import new_rng
 from multi.domain import StructuredQuadGrid, RectangularSubdomain
+import numpy as np
 
 
 def main(args):
@@ -57,7 +58,10 @@ def main(args):
 
         U = source.make_array([f.vector.copy()])
         test_set.append(U)
-    np.save(beam.fom_test_set(args.subdomain_id), test_set.to_numpy())
+
+    cell_to_config = {0: "left", 4: "inner", 9: "right"}
+    config = cell_to_config[args.subdomain_id]
+    np.save(beam.fom_test_set(config), test_set.to_numpy())
 
 
 if __name__ == "__main__":

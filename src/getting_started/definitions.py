@@ -83,9 +83,9 @@ class BeamData:
     def unit_cell_grid(self) -> Path:
         return self.grids_path / "unit_cell.msh"
 
-    def coarse_oversampling_grid(self, configuration: str) -> Path:
-        assert configuration in ("inner", "left", "right")
-        return self.grids_path / f"coarse_oversampling_grid_{configuration}.msh"
+    # def coarse_oversampling_grid(self, configuration: str) -> Path:
+    #     assert configuration in ("inner", "left", "right")
+    #     return self.grids_path / f"coarse_oversampling_grid_{configuration}.msh"
 
     def fine_oversampling_grid(self, configuration: str) -> Path:
         assert configuration in ("inner", "left", "right")

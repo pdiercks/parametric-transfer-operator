@@ -213,13 +213,6 @@ def approximate_range(beam, mu, configuration, distribution='normal'):
         u_in.function_space.element,
         u_neumann.function_space.mesh._cpp_object))
 
-    # check u_neumann solution is correct
-    # seems to be the case, 18.01.24
-    from dolfinx.io.utils import XDMFFile
-    with XDMFFile(MPI.COMM_WORLD, "./neumann.xdmf", "w") as xdmf:
-        xdmf.write_mesh(omega.grid)
-        xdmf.write_function(u_neumann, 0.0)
-
     # ### Extend basis
     # raise error if extension fails?
     basis.append(transfer_problem.range.make_array([u_in.vector]))
