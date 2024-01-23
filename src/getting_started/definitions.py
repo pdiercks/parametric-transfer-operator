@@ -182,7 +182,7 @@ class BeamProblem(MultiscaleProblemDefinition):
         if cell_index is not None:
             assert cell_index in (0, 4, 9)
         if cell_index == 0:
-            u_origin = np.array([0, 0], dtype=default_scalar_type)
+            u_origin = np.array([0.0, 0.0], dtype=default_scalar_type)
             dirichlet = {"value": u_origin, "boundary": origin, "method": "geometrical"}
         elif cell_index == 4:
             dirichlet = None
