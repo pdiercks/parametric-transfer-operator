@@ -11,6 +11,7 @@ from scipy.sparse.linalg import LinearOperator, eigsh
 from scipy.special import erfinv
 from time import perf_counter
 
+from mpi4py import MPI
 from dolfinx import fem, default_scalar_type
 
 from pymor.algorithms.gram_schmidt import gram_schmidt
@@ -23,7 +24,6 @@ from pymor.operators.constructions import NumpyConversionOperator
 from pymor.parameters.base import Parameters, ParameterSpace
 from pymor.tools.random import new_rng
 
-from multi.boundary import plane_at
 from multi.misc import x_dofs_vectorspace
 from multi.problems import TransferProblem
 from multi.sampling import correlation_matrix, create_random_values
@@ -146,6 +146,7 @@ def build_mvn_training_set(transfer_problem):
 
 
 def approximate_range(beam, mu, configuration, distribution='normal'):
+    from .definitions import BeamProblem
     from .locmor import discretize_oversampling_problem
 
     logger = getLogger('range_approximation', level='INFO', filename=beam.range_approximation_log(distribution, configuration).as_posix())
@@ -176,50 +177,54 @@ def approximate_range(beam, mu, configuration, distribution='normal'):
     basis_length = len(basis)
     logger.info(f"{pid=},\tNumber of basis functions after rrf is {basis_length}.")
 
-    # FIXME figure out why homogeneous dirichlet bcs are not fullfilled
-    # TODO continue re-adding neumann data dependet on oversampling problem
-    raise NotImplementedError
+    # ### Add Solution of Neumann Problem
+    # get multiscale problem definition
+    beam_problem = BeamProblem(beam.coarse_grid.as_posix(), beam.fine_grid.as_posix())
+    cell_index = beam_problem.config_to_cell(configuration)
+    gamma_out = beam_problem.get_gamma_out(cell_index)
+    dirichlet = beam_problem.get_dirichlet(cell_index)
 
-    # # ### Add Solution of Neumann Problem
-    # neumann_problem = transfer_problem.problem
-    # neumann_problem.clear_bcs()
-    # omega = neumann_problem.domain
-    #
-    # # ### Add Neumann bc
-    # loading = fem.Constant(omega.grid, (default_scalar_type(0.0), default_scalar_type(-10.)))
-    # top_facets = int(14) # see locmor.py
-    # neumann_problem.add_neumann_bc(top_facets, loading)
-    #
-    # # ### Add zero boundary conditions on gamma out
-    # # FIXME: this is configuration dependent ...
-    # left = plane_at(omega.xmin[0], "x")
-    # right = plane_at(omega.xmax[0], "x")
-    # gamma_out = lambda x: np.logical_or(left(x), right(x))
-    # zero = fem.Constant(omega.grid, (default_scalar_type(0.0), default_scalar_type(0.0)))
-    # neumann_problem.add_dirichlet_bc(zero, gamma_out, method="geometrical")
-    #
-    # # ### Solve
-    # neumann_problem.setup_solver()
-    # u_neumann = neumann_problem.solve()
-    #
-    # # ### Restrict to target subdomain
-    # u_in = fem.Function(transfer_problem.range.V)
-    # u_in.interpolate(u_neumann, nmm_interpolation_data=fem.create_nonmatching_meshes_interpolation_data(
-    #     u_in.function_space.mesh._cpp_object,
-    #     u_in.function_space.element,
-    #     u_neumann.function_space.mesh._cpp_object))
-    #
-    # # check u_neumann solution is correct
-    # # seems to be the case, 18.01.24
-    # # with XDMFFile(MPI.COMM_WORLD, "./neumann.xdmf", "w") as xdmf:
-    # #     xdmf.write_mesh(omega.grid)
-    # #     xdmf.write_function(u_neumann, 0.0)
-    #
-    # # ### Extend basis
-    # # raise error if extension fails?
-    # basis.append(transfer_problem.range.make_array([u_in.vector]))
-    # gram_schmidt(basis, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
-    # logger.info(f"{pid=},\tNumber of basis functions after adding neumann data is {len(basis)}.")
+    # Neumann problem
+    neumann_problem = transfer_problem.problem
+    neumann_problem.clear_bcs()
+    omega = neumann_problem.domain
+
+    # Add Neumann bc
+    loading = fem.Constant(omega.grid, (default_scalar_type(0.0), default_scalar_type(-10.)))
+    top_facets = int(14) # see locmor.py l. 95
+    neumann_problem.add_neumann_bc(top_facets, loading)
+
+    # Add zero boundary conditions on gamma out
+    zero = fem.Constant(omega.grid, (default_scalar_type(0.0), default_scalar_type(0.0)))
+    neumann_problem.add_dirichlet_bc(zero, gamma_out, method="geometrical")
+
+    # Add homogeneous Dirichlet BCs if present
+    if dirichlet is not None:
+        neumann_problem.add_dirichlet_bc(**dirichlet)
+
+    # ### Solve
+    neumann_problem.setup_solver()
+    u_neumann = neumann_problem.solve()
+
+    # ### Restrict to target subdomain
+    u_in = fem.Function(transfer_problem.range.V)
+    u_in.interpolate(u_neumann, nmm_interpolation_data=fem.create_nonmatching_meshes_interpolation_data(
+        u_in.function_space.mesh._cpp_object,
+        u_in.function_space.element,
+        u_neumann.function_space.mesh._cpp_object))
+
+    # check u_neumann solution is correct
+    # seems to be the case, 18.01.24
+    from dolfinx.io.utils import XDMFFile
+    with XDMFFile(MPI.COMM_WORLD, "./neumann.xdmf", "w") as xdmf:
+        xdmf.write_mesh(omega.grid)
+        xdmf.write_function(u_neumann, 0.0)
+
+    # ### Extend basis
+    # raise error if extension fails?
+    basis.append(transfer_problem.range.make_array([u_in.vector]))
+    gram_schmidt(basis, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
+    logger.info(f"{pid=},\tNumber of basis functions after adding neumann data is {len(basis)}.")
 
     # ### Conversion to picklable objects
     # passing data along processes requires picklable data

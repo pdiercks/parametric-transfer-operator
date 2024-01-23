@@ -5,6 +5,7 @@ from scipy.sparse import coo_array
 
 from mpi4py import MPI
 from dolfinx import mesh, fem
+from dolfinx.fem.petsc import set_bc
 from dolfinx.io.utils import XDMFFile
 from basix.ufl import element
 
@@ -162,12 +163,12 @@ def discretize_oversampling_problem(example: BeamData, mu: Mu, configuration: st
         raise NotImplementedError
 
     # ### Range product operator
-    # create homogeneous Dirichlet BCs if necessary
-    if dirichlet is None:
-        bc_hom = ()
-    else:
+    # get homogeneous Dirichlet bcs if present
+    bc_hom = []
+    if dirichlet is not None:
         subproblem.add_dirichlet_bc(**dirichlet)
         bc_hom = subproblem.get_dirichlet_bcs()
+
     inner_product = InnerProduct(subproblem.V, "h1", bcs=bc_hom)
     pmat = inner_product.assemble_matrix()
     range_product = FenicsxMatrixOperator(pmat, subproblem.V, subproblem.V)
@@ -177,11 +178,14 @@ def discretize_oversampling_problem(example: BeamData, mu: Mu, configuration: st
     range_space = FenicsxVectorSpace(subproblem.V)
     rigid_body_modes = []
     for j in kernel_set:
+        set_bc(ns_vecs[j], bc_hom)
         rigid_body_modes.append(ns_vecs[j])
     kernel = range_space.make_array(rigid_body_modes)
     gram_schmidt(kernel, product=range_product, copy=False)
 
     # ### TransferProblem
+    oversampling_problem.clear_bcs()
+    subproblem.clear_bcs()
     transfer = TransferProblem(
             oversampling_problem,
             subproblem,
@@ -191,7 +195,7 @@ def discretize_oversampling_problem(example: BeamData, mu: Mu, configuration: st
             range_product=range_product,
             kernel=kernel,
             )
-    return transfer
+    return transfer, kernel
 
 
 
@@ -202,11 +206,21 @@ if __name__ == "__main__":
     from pymor.bindings.fenicsx import FenicsxVisualizer
     param = Parameters({"E": 2})
     ps = ParameterSpace(param, (1., 2.))
-    mu = ps.sample_randomly(1)[0]
-    T = discretize_oversampling_problem(beam, mu, "left")
+    mu = ps.parameters.parse([1.5 for _ in range(2)])
+    configuration = "right"
+    # configuration = "left"
+    T, rbm = discretize_oversampling_problem(beam, mu, configuration)
     v = T.generate_random_boundary_data(1, distribution='normal')
+    v[:, ::2] = 0.1 # set x component to value
+    v[:, 1::2] = 0.1 # set y component to value
     U = T.solve(v)
+
     xdofs = x_dofs_vectorspace(T.range.V)
-    dofs_origin = locate_dofs(xdofs, np.array([[0, 0, 0]]))
+    if configuration == "left":
+        dofs = locate_dofs(xdofs, np.array([[0., 0., 0.]]))
+    elif configuration == "right":
+        dofs = locate_dofs(xdofs, np.array([[10., 0., 0.]]))
+    assert np.allclose(U.dofs(dofs)[:, 1], np.zeros_like(U.dofs(dofs)[:, 1]))
+
     viz = FenicsxVisualizer(T.range)
     viz.visualize(U, filename="./homDirichlet.xdmf")

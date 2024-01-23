@@ -169,7 +169,7 @@ class BeamProblem(MultiscaleProblemDefinition):
         if cell_index == 0:
             marker = within_range([0.0, 0.0], [1.0, 1.0])
         elif cell_index == 4:
-            marker = within_range([5.0, 0.0], [6.0, 1.0])
+            marker = within_range([4.0, 0.0], [5.0, 1.0])
         elif cell_index == 9:
             marker = within_range([9.0, 0.0], [10.0, 1.0])
         else:
@@ -187,7 +187,8 @@ class BeamProblem(MultiscaleProblemDefinition):
         elif cell_index == 4:
             dirichlet = None
         elif cell_index == 9:
-            u_bottom_right = np.array([0], dtype=default_scalar_type)
+            # u_bottom_right = np.array([0], dtype=default_scalar_type) # raises RuntimeError: Rank mis-match between Constant and function space
+            u_bottom_right = default_scalar_type(0.0)
             dirichlet = {
                 "value": u_bottom_right,
                 "boundary": bottom_right,
