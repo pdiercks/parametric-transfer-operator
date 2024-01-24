@@ -5,7 +5,6 @@ from pathlib import Path
 from doit.tools import run_once
 
 SRC = ROOT / "src/getting_started"  # source for this example
-defs = SRC / "definitions.py"
 beam = BeamData(name="beam")
 CONFIGS = beam.configurations
 DISTR = beam.distributions
@@ -27,7 +26,7 @@ def task_preprocessing():
 
     return {
         "basename": f"preproc_{beam.name}",
-        "file_dep": [defs, SRC / "preprocessing.py"],
+        "file_dep": [SRC / "preprocessing.py"],
         "actions": [(generate_meshes, [beam])],
         "targets": mesh_files,
         "clean": True,
@@ -43,7 +42,6 @@ def task_build_rom():
             beam.coarse_grid,
             beam.unit_cell_grid,
             beam.fine_grid,
-            defs,
             SRC / "fom.py",
             SRC / "rom.py",
         ],
@@ -64,7 +62,6 @@ def task_loc_pod_modes():
             yield {
                 "basename": f"rrf_{beam.name}_{distr}_{config}",
                 "file_dep": [
-                    defs,
                     file,
                     beam.fine_oversampling_grid(config),
                 ],
@@ -93,7 +90,6 @@ def task_test_sets():
         yield {
             "basename": f"test_set_{config}_{beam.name}",
             "file_dep": [
-                defs,
                 code,
                 beam.coarse_grid,
                 beam.unit_cell_grid,
@@ -113,7 +109,7 @@ def task_proj_error():
         for config in CONFIGS:
             yield {
                     "basename": f"proj_err_{beam.name}_{distr}_{config}",
-                    "file_dep": [defs, code, beam.unit_cell_grid, beam.loc_pod_modes(distr, config), beam.fom_test_set(config)],
+                    "file_dep": [code, beam.unit_cell_grid, beam.loc_pod_modes(distr, config), beam.fom_test_set(config)],
                     "actions": ["python3 -m {} {} {}".format(module, distr, config)],
                     "targets": [beam.proj_error(distr, config)],
                     "clean": True,
@@ -144,7 +140,7 @@ def task_decomposition():
         for config in CONFIGS:
             yield {
                 "basename": f"decompose_{beam.name}_{distr}_{config}",
-                "file_dep": [defs, code, beam.unit_cell_grid, beam.loc_pod_modes(distr, config)],
+                "file_dep": [code, beam.unit_cell_grid, beam.loc_pod_modes(distr, config)],
                 "actions": ["python3 -m {} {} {}".format(module, distr, config)],
                 "targets": [
                     beam.local_basis_npz(distr, config),
