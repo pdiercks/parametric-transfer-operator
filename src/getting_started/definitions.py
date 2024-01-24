@@ -144,6 +144,10 @@ class BeamData:
         """figure of projection error plot"""
         return self.rf / f"fig_proj_error_{conf}.pdf"
 
+    def fig_loc_svals(self, config: str) -> Path:
+        """figure of singular values of POD compression after rrf"""
+        return self.rf / f"fig_loc_svals_{config}.pdf"
+
 
 class BeamProblem(MultiscaleProblemDefinition):
     def __init__(self, coarse_grid: str, fine_grid: str):
