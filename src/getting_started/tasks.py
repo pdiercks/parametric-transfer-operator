@@ -90,7 +90,7 @@ def task_plot_loc_svals():
         yield {
             "basename": f"fig_loc_svals_{beam.name}_{config}",
             "file_dep": deps,
-            "actions": ["python3 -m {}".format(module)],
+            "actions": ["python3 -m {} %(targets)s {}".format(module, config)],
             "targets": [beam.fig_loc_svals(config)],
             "clean": True,
         }
@@ -148,7 +148,7 @@ def task_plot_proj_error():
         yield {
             "basename": f"fig_proj_err_{beam.name}_{config}",
             "file_dep": deps,
-            "actions": ["python3 -m {}".format(module)],
+            "actions": ["python3 -m {} %(targets)s {}".format(module, config)],
             "targets": [beam.fig_proj_error(config)],
             "clean": True,
         }
@@ -185,5 +185,5 @@ def task_optimize():
         "file_dep": [optpy, beam.reduced_model],
         "actions": ["python3 -m src.getting_started.optimization"],
         "verbosity": 2,
-        "uptodate": [False],
+        "uptodate": [True],
     }
