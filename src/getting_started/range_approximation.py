@@ -11,7 +11,6 @@ from scipy.sparse.linalg import LinearOperator, eigsh
 from scipy.special import erfinv
 from time import perf_counter
 
-from mpi4py import MPI
 from dolfinx import fem, default_scalar_type
 
 from pymor.algorithms.gram_schmidt import gram_schmidt
@@ -22,7 +21,6 @@ from pymor.operators.interface import Operator
 from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.operators.constructions import NumpyConversionOperator
 from pymor.parameters.base import Parameters, ParameterSpace
-from pymor.tools.random import new_rng
 
 from multi.misc import x_dofs_vectorspace
 from multi.problems import TransferProblem
