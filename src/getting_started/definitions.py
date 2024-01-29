@@ -1,5 +1,5 @@
 from typing import Optional, Callable, Union
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import numpy as np
 from multi.boundary import point_at, plane_at, within_range
@@ -33,6 +33,7 @@ class BeamData:
         configurations: The configurations, i.e. oversampling problems.
         distributions: The distributions used in the randomized range finder.
         range_product: The inner product to use (rrf, projection error).
+        lhs: Parameters for Latin-Hypercube-Sampling for each configuration.
 
     """
 
@@ -54,6 +55,31 @@ class BeamData:
     configurations: tuple[str, str, str] = ("inner", "left", "right")
     distributions: tuple[str, str] = ("normal", "multivariate_normal")
     range_product: str = "h1"
+    lhs: dict = field(
+        default_factory=lambda: {
+            "inner": {
+                "name": "E",
+                "ndim": 3,
+                "samples": 100,
+                "criterion": "center",
+                "random_state": 1510,
+            },
+            "left": {
+                "name": "E",
+                "ndim": 2,
+                "samples": 50,
+                "criterion": "center",
+                "random_state": 1510,
+            },
+            "right": {
+                "name": "E",
+                "ndim": 2,
+                "samples": 50,
+                "criterion": "center",
+                "random_state": 1510,
+            },
+        }
+    )
 
     def __post_init__(self):
         """create dirs"""
@@ -86,10 +112,6 @@ class BeamData:
     @property
     def unit_cell_grid(self) -> Path:
         return self.grids_path / "unit_cell.msh"
-
-    # def coarse_oversampling_grid(self, configuration: str) -> Path:
-    #     assert configuration in ("inner", "left", "right")
-    #     return self.grids_path / f"coarse_oversampling_grid_{configuration}.msh"
 
     def fine_oversampling_grid(self, configuration: str) -> Path:
         assert configuration in ("inner", "left", "right")

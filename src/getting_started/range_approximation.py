@@ -233,17 +233,14 @@ def approximate_range(beam, mu, configuration, distribution='normal'):
 
 def main(args):
     from .tasks import beam
-    if args.configuration == "inner":
-        param = Parameters({"E": 3})
-    else:
-        param = Parameters({"E": 2})
-    parameter_space = ParameterSpace(param, beam.mu_range)
-    # sufficient sampling? uniform?
+    from .lhs import sample_lhs
 
-    # ensures that the same random training set is generated for both distributions
-    train_seed = 1510  # may define different seeds based on number of realizations at later point
-    with new_rng(train_seed):
-        training_set = parameter_space.sample_randomly(args.ntrain)
+    sampling_options = beam.lhs[args.configuration]
+    mu_name = sampling_options.pop("name")
+    ndim = sampling_options.pop('ndim')
+    param = Parameters({mu_name: ndim})
+    parameter_space = ParameterSpace(param, beam.mu_range)
+    training_set = sample_lhs(parameter_space, mu_name, **sampling_options)
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=args.max_workers) as executor:
         results = executor.map(approximate_range, repeat(beam), training_set, repeat(args.configuration), repeat(args.distribution))
@@ -267,7 +264,6 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("distribution", type=str, help="The distribution to draw samples from.")
-    parser.add_argument("ntrain", type=int, help="The size of the training set.")
     parser.add_argument("configuration", type=str, help="The type of oversampling problem.", choices=("inner", "left", "right"))
     parser.add_argument("--max_workers", type=int, default=4, help="The max number of workers.")
     args = parser.parse_args(sys.argv[1:])

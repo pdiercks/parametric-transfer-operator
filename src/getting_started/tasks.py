@@ -54,7 +54,6 @@ def task_loc_pod_modes():
     """Getting started: Construct local POD basis"""
     module = "src.getting_started.range_approximation"
     file = SRC / "range_approximation.py"
-    num_train = 10  # number of Transfer operators
     nworkers = 4  # number of workers in pool
     for distr in DISTR:
         for config in CONFIGS:
@@ -65,8 +64,8 @@ def task_loc_pod_modes():
                     beam.fine_oversampling_grid(config),
                 ],
                 "actions": [
-                    "python3 -m {} {} {} {} --max_workers {}".format(
-                        module, distr, num_train, config, nworkers
+                    "python3 -m {} {} {} --max_workers {}".format(
+                        module, distr, config, nworkers
                     )
                 ],
                 "targets": [
