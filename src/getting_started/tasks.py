@@ -176,6 +176,21 @@ def task_decomposition():
             }
 
 
+def task_paper():
+    """Getting started: Compile Paper"""
+    source = ROOT / "paper/paper.tex"
+    deps = [source]
+    for config in CONFIGS:
+        deps.append(beam.fig_loc_svals(config))
+        deps.append(beam.fig_proj_error(config))
+    return {
+            "file_dep": deps,
+            "actions": ["latexmk -cd -pdf %s" % source],
+            "targets": [source.with_suffix(".pdf")],
+            "clean": True,
+            }
+
+
 def task_optimize():
     """Getting started: Optimization"""
     optpy = ROOT / "src/getting_started/optimization.py"

@@ -224,13 +224,6 @@ def approximate_range(beam, mu, configuration, distribution='normal'):
     gram_schmidt(basis, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
     logger.info(f"{pid=},\tNumber of basis functions after adding neumann data is {len(basis)}.")
 
-    # from pymor.bindings.fenicsx import FenicsxVisualizer
-    # viz = FenicsxVisualizer(transfer_problem.range)
-    # viz.visualize(basis, filename="./range_of_T.xdmf")
-    # breakpoint()
-
-    # ==> 30.01.24: the result of rrf does not contain 'unsmooth' modes
-
     # ### Conversion to picklable objects
     # passing data along processes requires picklable data
     # fenics stuff is not picklable ...

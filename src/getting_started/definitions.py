@@ -51,7 +51,7 @@ class BeamData:
     rrf_ttol: float = 5e-2
     rrf_ftol: float = 1e-15
     rrf_num_testvecs: int = 20
-    pod_rtol: float = 1e-5
+    pod_rtol: float = 1e-6
     configurations: tuple[str, str, str] = ("inner", "left", "right")
     distributions: tuple[str, str] = ("normal", "multivariate_normal")
     range_product: str = "h1"
@@ -69,14 +69,14 @@ class BeamData:
                 "ndim": 2,
                 "samples": 50,
                 "criterion": "center",
-                "random_state": 1510,
+                "random_state": 1511,
             },
             "right": {
                 "name": "E",
                 "ndim": 2,
                 "samples": 50,
                 "criterion": "center",
-                "random_state": 1510,
+                "random_state": 1512,
             },
         }
     )
