@@ -8,7 +8,6 @@ from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxVisualizer
 from pymor.vectorarrays.numpy import NumpyVectorSpace
 from pymor.algorithms.gram_schmidt import gram_schmidt
 
-# from multi.debug import plot_modes
 from multi.bcs import BoundaryDataFactory
 from multi.extension import extend
 from multi.misc import locate_dofs, x_dofs_vectorspace

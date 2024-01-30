@@ -22,7 +22,7 @@ from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.operators.constructions import NumpyConversionOperator
 from pymor.parameters.base import Parameters, ParameterSpace
 
-from multi.misc import x_dofs_vectorspace, locate_dofs
+from multi.misc import x_dofs_vectorspace
 from multi.problems import TransferProblem
 from multi.sampling import correlation_matrix, create_random_values
 from multi.projection import orthogonal_part
@@ -224,6 +224,13 @@ def approximate_range(beam, mu, configuration, distribution='normal'):
     gram_schmidt(basis, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
     logger.info(f"{pid=},\tNumber of basis functions after adding neumann data is {len(basis)}.")
 
+    # from pymor.bindings.fenicsx import FenicsxVisualizer
+    # viz = FenicsxVisualizer(transfer_problem.range)
+    # viz.visualize(basis, filename="./range_of_T.xdmf")
+    # breakpoint()
+
+    # ==> 30.01.24: the result of rrf does not contain 'unsmooth' modes
+
     # ### Conversion to picklable objects
     # passing data along processes requires picklable data
     # fenics stuff is not picklable ...
@@ -240,12 +247,17 @@ def main(args):
     from .tasks import beam
     from .lhs import sample_lhs
 
+    logger = getLogger('range_approximation', level='INFO', filename=beam.range_approximation_log(args.distribution, args.configuration).as_posix())
+
     sampling_options = beam.lhs[args.configuration]
     mu_name = sampling_options.pop("name")
     ndim = sampling_options.pop('ndim')
     param = Parameters({mu_name: ndim})
     parameter_space = ParameterSpace(param, beam.mu_range)
     training_set = sample_lhs(parameter_space, mu_name, **sampling_options)
+
+    logger.info("Starting range approximation of transfer operators"
+                f" for training set of size {len(training_set)}.")
 
     with concurrent.futures.ProcessPoolExecutor(max_workers=args.max_workers) as executor:
         results = executor.map(approximate_range, repeat(beam), training_set, repeat(args.configuration), repeat(args.distribution))
@@ -258,6 +270,9 @@ def main(args):
     pod_data = pod(snapshots, product=range_product, rtol=beam.pod_rtol)
     pod_modes = pod_data[0]
     svals = pod_data[1]
+    logger.info(f"Number of snapshots: {len(snapshots)}.")
+    logger.info(f"Number of POD modes: {len(pod_modes)}.")
+    logger.info(f"POD tolerance used: rtol={beam.pod_rtol}.")
 
     # write pod modes and singular values to disk
     np.save(beam.loc_pod_modes(args.distribution, args.configuration), pod_modes.to_numpy())
