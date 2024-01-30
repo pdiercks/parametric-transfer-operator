@@ -44,18 +44,18 @@ def main(args):
     problem.setup_edge_spaces()
     problem.create_map_from_V_to_L()
 
+    # ### Full POD basis
+    pod_basis_data = np.load(beam.loc_pod_modes(args.distribution, args.configuration))
+    pod_basis = source.from_numpy(pod_basis_data)
+    viz = FenicsxVisualizer(source)
+    viz.visualize(pod_basis, filename=beam.pod_modes_xdmf(args.distribution, args.configuration).as_posix())
+
     # ### Coarse scale basis
     # FIXME: geom_deg is now 2, therefore cannot use full x here
     vertices = omega.coarse_grid.topology.connectivity(2, 0).links(0)
     x_vertices = mesh.compute_midpoints(omega.coarse_grid, 0, vertices)
     phi_vectors = compute_phi(problem, x_vertices)
     phi = source.make_array(phi_vectors)
-
-    # ### Full POD basis
-    pod_basis_data = np.load(beam.loc_pod_modes(args.distribution, args.configuration))
-    pod_basis = source.from_numpy(pod_basis_data)
-    viz = FenicsxVisualizer(source)
-    viz.visualize(pod_basis, filename=beam.pod_modes_xdmf(args.distribution, args.configuration).as_posix())
 
     # NOTE 16.01.24: looking at the full POD modes in ParaView
     # 1st 20 modes are good, but now the modes get oscillatory
@@ -165,6 +165,10 @@ def main(args):
     # Workaround: maybe do not use BasesLoader for this particular example?
     # BasesLoader is designed for case that each coarse grid cell has different
     # set of basis functions
+
+    # TODO: simply write npz file for each configuration
+    # BasesLoader config has to be defined to load these files
+    # for particular cells
     np.savez(beam.local_basis_npz(args.distribution, args.configuration).as_posix(),
              phi=phi.to_numpy(), **uf_arrays)
 

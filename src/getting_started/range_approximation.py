@@ -22,9 +22,10 @@ from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.operators.constructions import NumpyConversionOperator
 from pymor.parameters.base import Parameters, ParameterSpace
 
-from multi.misc import x_dofs_vectorspace
+from multi.misc import x_dofs_vectorspace, locate_dofs
 from multi.problems import TransferProblem
 from multi.sampling import correlation_matrix, create_random_values
+from multi.projection import orthogonal_part
 
 
 @defaults('tol', 'failure_tolerance', 'num_testvecs')
@@ -211,9 +212,15 @@ def approximate_range(beam, mu, configuration, distribution='normal'):
         u_in.function_space.element,
         u_neumann.function_space.mesh._cpp_object))
 
+    U_in = transfer_problem.range.make_array([u_in.vector])
+    if transfer_problem.kernel is None:
+        U_orth = U_in
+    else:
+        U_orth = orthogonal_part(U_in, transfer_problem.kernel, product=transfer_problem.range_product, orthonormal=True)
+
     # ### Extend basis
     # raise error if extension fails?
-    basis.append(transfer_problem.range.make_array([u_in.vector]))
+    basis.append(U_orth)
     gram_schmidt(basis, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
     logger.info(f"{pid=},\tNumber of basis functions after adding neumann data is {len(basis)}.")
 
