@@ -7,6 +7,7 @@ from dolfinx.fem.petsc import set_bc
 from dolfinx.io import gmshio
 import numpy as np
 
+from multi.domain import RectangularDomain
 from multi.projection import compute_relative_proj_errors
 from multi.product import InnerProduct
 from multi.bcs import BoundaryConditions
@@ -29,22 +30,31 @@ def main(args):
     # let all loggers of this module have same level
     logger = getLogger(Path(__file__).stem, level='INFO')
 
+    # ### Unit cell domain
     meshfile = beam.unit_cell_grid
     domain, _, _ = gmshio.read_from_msh(meshfile.as_posix(), MPI.COMM_SELF, gdim=beam.gdim)
-    fe = element("P", domain.basix_cell(), beam.fe_deg, shape=(beam.gdim, ))
-    V = fem.functionspace(domain, fe)
-    source = FenicsxVectorSpace(V)
+    omega = RectangularDomain(domain)
 
+    # ### Beam Problem definitions
     beamproblem = BeamProblem(beam.coarse_grid.as_posix(), beam.fine_grid.as_posix())
     cell_index = beamproblem.config_to_cell(args.configuration)
     dirichlet = beamproblem.get_dirichlet(cell_index)
     kernel_set = beamproblem.get_kernel_set(cell_index)
     logger.info(f"{kernel_set=}")
 
-    bchandler = BoundaryConditions(domain, V)
+    # ### Translate the unit cell domain
+    unit_length = omega.xmax[0] - omega.xmin[0]
+    deltax = cell_index * unit_length
+    dx = np.array([[deltax, 0., 0.]])
+    omega.translate(dx)
+
+    fe = element("P", domain.basix_cell(), beam.fe_deg, shape=(beam.gdim, ))
+    V = fem.functionspace(domain, fe)
+    source = FenicsxVectorSpace(V)
 
     # ### Range product operator
     # get homogeneous Dirichlet bcs if present
+    bchandler = BoundaryConditions(domain, V)
     bc_hom = []
     if dirichlet is not None:
         bchandler.add_dirichlet_bc(**dirichlet)
