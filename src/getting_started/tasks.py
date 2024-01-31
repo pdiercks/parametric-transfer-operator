@@ -169,8 +169,8 @@ def task_decomposition():
                 "actions": ["python3 -m {} {} {}".format(module, distr, config)],
                 "targets": [
                     beam.local_basis_npz(distr, config),
-                    *with_h5(beam.fine_scale_modes_xdmf(distr, config)),
-                    *with_h5(beam.pod_modes_xdmf(distr, config)),
+                    beam.fine_scale_modes_bp(distr, config),
+                    beam.pod_modes_bp(distr, config),
                 ],
                 "clean": True,
             }

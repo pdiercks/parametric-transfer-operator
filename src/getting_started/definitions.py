@@ -22,6 +22,7 @@ class BeamData:
         nx: Number of coarse grid cells (subdomains) in x.
         ny: Number of coarse grid cells (subdomains) in y.
         resolution: `resolution ** 2` cells in each subdomain.
+        geom_deg: Degree for geometry interpolation.
         fe_deg: FE degree.
         poisson_ratio: The poisson ratio of the material.
         youngs_modulus: The Young's modulus (reference value) of the material.
@@ -44,6 +45,7 @@ class BeamData:
     nx: int = 10
     ny: int = 1
     resolution: int = 10
+    geom_deg: int = 2
     fe_deg: int = 2
     poisson_ratio: float = 0.3
     youngs_modulus: float = 20e3
@@ -119,7 +121,7 @@ class BeamData:
 
     @property
     def fom_displacement(self) -> Path:
-        return self.rf / "fom_displacement.xdmf"
+        return self.rf / "fom_displacement.bp"
 
     @property
     def reduced_model(self) -> Path:
@@ -145,13 +147,13 @@ class BeamData:
         """POD modes for range approximation of parametric T"""
         return self.rf / f"loc_pod_modes_{distr}_{conf}.npy"
 
-    def pod_modes_xdmf(self, distr: str, conf: str) -> Path:
-        """same as `loc_pod_modes` but .xdmf format"""
-        return self.rf / f"pod_modes_{distr}_{conf}.xdmf"
+    def pod_modes_bp(self, distr: str, conf: str) -> Path:
+        """same as `loc_pod_modes` but adios2 (bp) format"""
+        return self.rf / f"pod_modes_{distr}_{conf}.bp"
 
-    def fine_scale_modes_xdmf(self, distr: str, conf: str) -> Path:
+    def fine_scale_modes_bp(self, distr: str, conf: str) -> Path:
         """fine scale basis functions after extension"""
-        return self.rf / f"fine_scale_modes_{distr}_{conf}.xdmf"
+        return self.rf / f"fine_scale_modes_{distr}_{conf}.bp"
 
     def local_basis_npz(self, distr: str, conf: str) -> Path:
         """final local basis functions"""
@@ -228,7 +230,6 @@ class BeamProblem(MultiscaleProblemDefinition):
         elif cell_index == 4:
             dirichlet = None
         elif cell_index == 9:
-            # u_bottom_right = np.array([0], dtype=default_scalar_type) # raises RuntimeError: Rank mis-match between Constant and function space
             u_bottom_right = default_scalar_type(0.0)
             dirichlet = {
                 "value": u_bottom_right,
@@ -278,4 +279,4 @@ class BeamProblem(MultiscaleProblemDefinition):
 
 if __name__ == "__main__":
     data = BeamData(name="beam")
-    problem = BeamProblem(data.coarse_grid, data.fine_grid)
+    problem = BeamProblem(data.coarse_grid.as_posix(), data.fine_grid.as_posix())

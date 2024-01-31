@@ -221,4 +221,4 @@ if __name__ == "__main__":
     assert np.allclose(U.dofs(dofs)[:, 1], np.zeros_like(U.dofs(dofs)[:, 1]))
 
     viz = FenicsxVisualizer(T.range)
-    viz.visualize(U, filename="./homDirichlet.xdmf")
+    viz.visualize(U, filename="./homDirichlet.bp")

@@ -8,7 +8,7 @@ import numpy as np
 
 
 def main():
-    from .tasks import beam
+    from ..tasks import beam
 
     unit_cell_msh = beam.unit_cell_grid.as_posix()
     gdim = beam.gdim
@@ -19,10 +19,17 @@ def main():
     source = FenicsxVectorSpace(V)
     viz = FenicsxVisualizer(source)
 
-    distr = "normal"
-    config = "right"
-    data = np.load(beam.loc_pod_modes(distr, config))
-    U = source.from_numpy(data)
+    # need displacment for warp by vector
+    u = fem.Function(V)
+    def expression(x):
+        return (np.sin(np.pi * x[0]) * np.sinh(np.pi * x[1]), np.cos(np.pi*x[0]))
+    u.interpolate(expression)
+
+    # distr = "normal"
+    # config = "right"
+    # data = np.load(beam.loc_pod_modes(distr, config))
+    # U = source.from_numpy(data)
+    U = source.make_array([u.vector])
     viz.visualize(U, filename="./test.bp")
 
 

@@ -56,8 +56,13 @@ def generate_meshes(example) -> None:
     """Creates grids for global FOM, ROM and localized ROM"""
 
     recombine = True
-    options = {"Mesh.ElementOrder": example.fe_deg}  # iso-parametric elements
-    fine_grid_cell = "quad9"
+    options = {"Mesh.ElementOrder": example.geom_deg}  # iso-parametric elements
+    if example.geom_deg == 1:
+        fine_grid_cell = "quad"
+    elif example.geom_deg == 2:
+        fine_grid_cell = "quad9"
+    else:
+        raise NotImplementedError("Degree of geometry interpolation should be 1 or 2.")
     # Note: If mesh geometry and FE space are interpolated with same order
     # Lagrange polynomials, no additional interpolation is required when
     # writing to XDMFFile.
@@ -74,7 +79,7 @@ def generate_meshes(example) -> None:
         options=options,
     )
     coarse_domain, _, _ = gmshio.read_from_msh(
-        example.coarse_grid.as_posix(), MPI.COMM_WORLD, gdim=2
+        example.coarse_grid.as_posix(), MPI.COMM_WORLD, gdim=example.gdim
     )
     coarse_grid = StructuredQuadGrid(coarse_domain)
 

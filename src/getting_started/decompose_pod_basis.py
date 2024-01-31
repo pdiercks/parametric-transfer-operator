@@ -47,7 +47,7 @@ def main(args):
     pod_basis_data = np.load(beam.loc_pod_modes(args.distribution, args.configuration))
     pod_basis = source.from_numpy(pod_basis_data)
     viz = FenicsxVisualizer(source)
-    viz.visualize(pod_basis, filename=beam.pod_modes_xdmf(args.distribution, args.configuration).as_posix())
+    viz.visualize(pod_basis, filename=beam.pod_modes_bp(args.distribution, args.configuration).as_posix())
 
     # ### Coarse scale basis
     # FIXME: geom_deg is now 2, therefore cannot use full x here
@@ -152,7 +152,7 @@ def main(args):
             }
     extensions = extend(problem, boundary_data=boundary_data, petsc_options=petsc_options)
     U = source.make_array(extensions)
-    viz.visualize(U, filename=beam.fine_scale_modes_xdmf(args.distribution, args.configuration).as_posix())
+    viz.visualize(U, filename=beam.fine_scale_modes_bp(args.distribution, args.configuration).as_posix())
     uf_arrays = {}
     for edge, view in mask.items():
         uf_arrays[edge] = U[view].to_numpy()
