@@ -148,7 +148,7 @@ def approximate_range(beam, mu, configuration, distribution='normal'):
     from .definitions import BeamProblem
     from .locmor import discretize_oversampling_problem
 
-    logger = getLogger('range_approximation', level='INFO', filename=beam.range_approximation_log(distribution, configuration).as_posix())
+    logger = getLogger('range_approximation', level='INFO', filename=beam.log_range_approximation(distribution, configuration).as_posix())
     pid = os.getpid()
     logger.info(f"{pid=},\tApproximating range of T for {mu=} using {distribution=}.\n")
 
@@ -216,7 +216,7 @@ def approximate_range(beam, mu, configuration, distribution='normal'):
     if transfer_problem.kernel is None:
         U_orth = U_in
     else:
-        U_orth = orthogonal_part(U_in, transfer_problem.kernel, product=transfer_problem.range_product, orthonormal=True)
+        U_orth = orthogonal_part(U_in, transfer_problem.kernel, product=range_product, orthonormal=True)
 
     # ### Extend basis
     # raise error if extension fails?
@@ -240,7 +240,7 @@ def main(args):
     from .tasks import beam
     from .lhs import sample_lhs
 
-    logger = getLogger('range_approximation', level='INFO', filename=beam.range_approximation_log(args.distribution, args.configuration).as_posix())
+    logger = getLogger('range_approximation', level='INFO', filename=beam.log_range_approximation(args.distribution, args.configuration).as_posix())
 
     sampling_options = beam.lhs[args.configuration]
     mu_name = sampling_options.pop("name")

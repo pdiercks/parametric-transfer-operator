@@ -131,8 +131,11 @@ class BeamData:
         """singular values for the global POD-ROM"""
         return self.rf / "singular_values.npy"
 
-    def range_approximation_log(self, distr: str, conf: str) -> Path:
+    def log_range_approximation(self, distr: str, conf: str) -> Path:
         return self.logs_path / f"range_approximation_{distr}_{conf}.log"
+
+    def log_projerr(self, distr: str, conf: str) -> Path:
+        return self.logs_path / f"projerr_{distr}_{conf}.log"
 
     def loc_singular_values(self, distr: str, conf: str) -> Path:
         """singular values of POD compression for range approximation of parametric T"""

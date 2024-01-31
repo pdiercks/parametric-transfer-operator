@@ -169,7 +169,7 @@ def discretize_oversampling_problem(example: BeamData, mu: Mu, configuration: st
         subproblem.add_dirichlet_bc(**dirichlet)
         bc_hom = subproblem.get_dirichlet_bcs()
 
-    inner_product = InnerProduct(subproblem.V, "h1", bcs=bc_hom)
+    inner_product = InnerProduct(subproblem.V, example.range_product, bcs=bc_hom)
     pmat = inner_product.assemble_matrix()
     range_product = FenicsxMatrixOperator(pmat, subproblem.V, subproblem.V)
 

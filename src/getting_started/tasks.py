@@ -69,7 +69,7 @@ def task_loc_pod_modes():
                     )
                 ],
                 "targets": [
-                    beam.range_approximation_log(distr, config),
+                    beam.log_range_approximation(distr, config),
                     beam.loc_pod_modes(distr, config),
                     beam.loc_singular_values(distr, config),
                 ],
