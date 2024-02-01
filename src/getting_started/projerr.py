@@ -23,16 +23,20 @@ def main(args):
     from .tasks import beam
     from .definitions import BeamProblem
 
-    set_defaults({
-        "pymor.core.logger.getLogger.filename": beam.log_projerr(args.distribution, args.configuration),
-        })
-    # FIXME: even better define a module 'getting_started'
-    # let all loggers of this module have same level
-    logger = getLogger(Path(__file__).stem, level='INFO')
+    set_defaults(
+        {
+            "pymor.core.logger.getLogger.filename": beam.log_projerr(
+                args.distribution, args.configuration
+            ),
+        }
+    )
+    logger = getLogger(Path(__file__).stem, level="INFO")
 
     # ### Unit cell domain
     meshfile = beam.unit_cell_grid
-    domain, _, _ = gmshio.read_from_msh(meshfile.as_posix(), MPI.COMM_SELF, gdim=beam.gdim)
+    domain, _, _ = gmshio.read_from_msh(
+        meshfile.as_posix(), MPI.COMM_SELF, gdim=beam.gdim
+    )
     omega = RectangularDomain(domain)
 
     # ### Beam Problem definitions
@@ -45,10 +49,10 @@ def main(args):
     # ### Translate the unit cell domain
     unit_length = omega.xmax[0] - omega.xmin[0]
     deltax = cell_index * unit_length
-    dx = np.array([[deltax, 0., 0.]])
+    dx = np.array([[deltax, 0.0, 0.0]])
     omega.translate(dx)
 
-    fe = element("P", domain.basix_cell(), beam.fe_deg, shape=(beam.gdim, ))
+    fe = element("P", domain.basix_cell(), beam.fe_deg, shape=(beam.gdim,))
     V = fem.functionspace(domain, fe)
     source = FenicsxVectorSpace(V)
 
@@ -87,7 +91,6 @@ def main(args):
     np.save(beam.proj_error(args.distribution, args.configuration), errs)
 
 
-
 if __name__ == "__main__":
     import sys
     import argparse
@@ -96,7 +99,16 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         description="Compute projection error for given data set and reduced basis.",
     )
-    argparser.add_argument("distribution", type=str, help="Distribution that was used for sampling in the basis construction.")
-    argparser.add_argument("configuration", type=str, help="Configuration of oversampling problem for which the test data should be read.", choices=("left", "inner", "right"))
+    argparser.add_argument(
+        "distribution",
+        type=str,
+        help="Distribution that was used for sampling in the basis construction.",
+    )
+    argparser.add_argument(
+        "configuration",
+        type=str,
+        help="Configuration of oversampling problem for which the test data should be read.",
+        choices=("left", "inner", "right"),
+    )
     args = argparser.parse_args(sys.argv[1:])
     main(args)
