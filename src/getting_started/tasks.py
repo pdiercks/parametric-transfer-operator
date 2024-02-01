@@ -2,8 +2,10 @@
 
 from .definitions import BeamData, ROOT
 from pathlib import Path
+import os
 from doit.tools import run_once
 
+os.environ["PYMOR_COLORS_DISABLE"] = "1"
 SRC = ROOT / "src/getting_started"  # source for this example
 beam = BeamData(name="beam")
 CONFIGS = beam.configurations

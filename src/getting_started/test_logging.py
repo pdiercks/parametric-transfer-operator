@@ -1,4 +1,7 @@
+import os
 from pymor.basic import *
+
+os.environ["PYMOR_COLORS_DISABLE"] = "1"
 
 
 def main():
