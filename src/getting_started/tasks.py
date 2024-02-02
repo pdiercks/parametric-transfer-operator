@@ -3,6 +3,7 @@
 from .definitions import BeamData, ROOT
 from pathlib import Path
 import os
+import shutil
 from doit.tools import run_once
 
 os.environ["PYMOR_COLORS_DISABLE"] = "1"
@@ -10,6 +11,31 @@ SRC = ROOT / "src/getting_started"  # source for this example
 beam = BeamData(name="beam")
 CONFIGS = beam.configurations
 DISTR = beam.distributions
+
+
+def rm_rf(task, dryrun):
+    """Removes any target.
+
+    If the target is a file it is removed as usual.
+    If the target is a dir, it is removed even if non-empty
+    in contrast to the default implementation of `doit.task.clean_targets`.
+    """
+    for target in sorted(task.targets, reverse=True):
+        if os.path.isfile(target):
+            print("%s - removing file '%s'" % (task.name, target))
+            if not dryrun:
+                os.remove(target)
+        elif os.path.isdir(target):
+            if os.listdir(target):
+                msg = "%s - removing dir (although not empty) '%s'"
+                print(msg % (task.name, target))
+                if not dryrun:
+                    shutil.rmtree(target)
+            else:
+                msg = "%s - removing dir '%s'"
+                print(msg % (task.name, target))
+                if not dryrun:
+                    os.rmdir(target)
 
 
 def with_h5(xdmf: Path) -> list[Path]:
@@ -101,7 +127,7 @@ def task_test_sets():
     """Getting started: Generate FOM test sets"""
     module = "src.getting_started.fom_test_set"
     code = SRC / "fom_test_set.py"
-    num_solves = 10
+    num_solves = 50
     map = {"inner": 4, "left": 0, "right": 9}
     for config in CONFIGS:
         subdomain = map[config]
@@ -134,7 +160,7 @@ def task_proj_error():
                     beam.fom_test_set(config),
                 ],
                 "actions": ["python3 -m {} {} {}".format(module, distr, config)],
-                "targets": [beam.proj_error(distr, config)],
+                "targets": [beam.proj_error(distr, config), beam.log_projerr(distr, config)],
                 "clean": True,
             }
 
@@ -174,7 +200,7 @@ def task_decomposition():
                     beam.fine_scale_modes_bp(distr, config),
                     beam.pod_modes_bp(distr, config),
                 ],
-                "clean": True,
+                "clean": [rm_rf],
             }
 
 
@@ -190,6 +216,15 @@ def task_paper():
             "actions": ["latexmk -cd -pdf %s" % source],
             "targets": [source.with_suffix(".pdf")],
             "clean": True,
+            }
+
+
+def task_show_paper():
+    """Getting started: View Paper"""
+    return {
+            "file_dep": [ROOT / "paper/paper.pdf"],
+            "actions": ["zathura %(dependencies)s"],
+            "uptodate": [False],
             }
 
 
