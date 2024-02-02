@@ -139,6 +139,9 @@ class BeamData:
     def log_projerr(self, distr: str, conf: str) -> Path:
         return self.logs_path / f"projerr_{distr}_{conf}.log"
 
+    def log_decompose_pod_basis(self, distr: str, conf: str) -> Path:
+        return self.logs_path / f"decompose_pod_basis_{distr}_{conf}.log"
+
     def loc_singular_values(self, distr: str, conf: str) -> Path:
         """singular values of POD compression for range approximation of parametric T"""
         return self.rf / f"loc_singular_values_{distr}_{conf}.npy"
