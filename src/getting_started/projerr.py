@@ -8,7 +8,7 @@ from dolfinx.io import gmshio
 import numpy as np
 
 from multi.domain import RectangularDomain
-from multi.projection import compute_relative_proj_errors
+from multi.projection import compute_absolute_proj_errors
 from multi.product import InnerProduct
 from multi.bcs import BoundaryConditions
 from multi.solver import build_nullspace
@@ -87,7 +87,7 @@ def main(args):
     data = np.load(beam.fom_test_set(args.configuration))
     U = source.from_numpy(data)
 
-    errs = compute_relative_proj_errors(U, basis, product=product, orthonormal=True)
+    errs = compute_absolute_proj_errors(U, basis, product=product, orthonormal=True)
     np.save(beam.proj_error(args.distribution, args.configuration), errs)
 
 
