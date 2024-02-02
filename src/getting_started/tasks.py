@@ -160,7 +160,10 @@ def task_proj_error():
                     beam.fom_test_set(config),
                 ],
                 "actions": ["python3 -m {} {} {}".format(module, distr, config)],
-                "targets": [beam.proj_error(distr, config), beam.log_projerr(distr, config)],
+                "targets": [
+                    beam.proj_error(distr, config),
+                    beam.log_projerr(distr, config),
+                ],
                 "clean": True,
             }
 
@@ -212,20 +215,20 @@ def task_paper():
         deps.append(beam.fig_loc_svals(config))
         deps.append(beam.fig_proj_error(config))
     return {
-            "file_dep": deps,
-            "actions": ["latexmk -cd -pdf %s" % source],
-            "targets": [source.with_suffix(".pdf")],
-            "clean": True,
-            }
+        "file_dep": deps,
+        "actions": ["latexmk -cd -pdf %s" % source],
+        "targets": [source.with_suffix(".pdf")],
+        "clean": True,
+    }
 
 
 def task_show_paper():
     """Getting started: View Paper"""
     return {
-            "file_dep": [ROOT / "paper/paper.pdf"],
-            "actions": ["zathura %(dependencies)s"],
-            "uptodate": [False],
-            }
+        "file_dep": [ROOT / "paper/paper.pdf"],
+        "actions": ["zathura %(dependencies)s"],
+        "uptodate": [False],
+    }
 
 
 def task_optimize():
