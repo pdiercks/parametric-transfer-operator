@@ -45,7 +45,7 @@ class BeamData:
     nx: int = 10
     ny: int = 1
     resolution: int = 10
-    geom_deg: int = 2
+    geom_deg: int = 1
     fe_deg: int = 2
     poisson_ratio: float = 0.3
     youngs_modulus: float = 20e3
@@ -53,7 +53,7 @@ class BeamData:
     rrf_ttol: float = 5e-2
     rrf_ftol: float = 1e-15
     rrf_num_testvecs: int = 20
-    pod_rtol: float = 1e-6
+    pod_rtol: float = 1e-5
     configurations: tuple[str, str, str] = ("inner", "left", "right")
     distributions: tuple[str, str] = ("normal", "multivariate_normal")
     range_product: str = "h1"
