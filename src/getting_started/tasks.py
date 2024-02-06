@@ -218,7 +218,7 @@ def task_paper():
         "file_dep": deps,
         "actions": ["latexmk -cd -pdf %s" % source],
         "targets": [source.with_suffix(".pdf")],
-        "clean": True,
+        "clean": ["latexmk -cd -C %s" % source],
     }
 
 
