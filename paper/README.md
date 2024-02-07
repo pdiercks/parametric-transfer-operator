@@ -1,3 +1,3 @@
 # Paper
 
-- [ ] add journal template (.tex)
+- [x] add journal template (.tex)
