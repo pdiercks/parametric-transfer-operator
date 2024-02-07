@@ -87,6 +87,8 @@ class BeamData:
         """create dirs"""
         self.grids_path.mkdir(exist_ok=True, parents=True)
         self.logs_path.mkdir(exist_ok=True, parents=True)
+        for distr in self.distributions:
+            self.bases_path(distr).mkdir(exist_ok=True, parents=True)
 
     @property
     def rf(self) -> Path:
@@ -100,6 +102,9 @@ class BeamData:
     @property
     def logs_path(self) -> Path:
         return self.rf / "logs"
+
+    def bases_path(self, distr: str) -> Path:
+        return self.rf / f"bases/{distr}"
 
     @property
     def coarse_grid(self) -> Path:
@@ -177,6 +182,24 @@ class BeamData:
     def fig_loc_svals(self, config: str) -> Path:
         """figure of singular values of POD compression after rrf"""
         return self.rf / f"fig_loc_svals_{config}.pdf"
+
+    def config_to_cell(self, config: str) -> int:
+        """Maps config to global cell index."""
+        map = {"inner": 4, "left": 0, "right": 9}
+        return map[config]
+
+    def cell_to_config(self, cell: int) -> str:
+        """Maps global cell index to config."""
+        assert cell in list(range(self.nx * self.ny))
+        map = {0: "left", 9: "right"}
+        config = map.get(cell, "inner")
+        return config
+
+    def xi_npz(self, distr: str, cell: int) -> Path:
+        """final basis for loc rom assembly"""
+        dir = self.bases_path(distr)
+        return dir / f"xi_{cell}.npz"
+
 
 
 class BeamProblem(MultiscaleProblemDefinition):
