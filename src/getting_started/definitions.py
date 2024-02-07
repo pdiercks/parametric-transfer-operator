@@ -198,7 +198,7 @@ class BeamData:
     def xi_npz(self, distr: str, cell: int) -> Path:
         """final basis for loc rom assembly"""
         dir = self.bases_path(distr)
-        return dir / f"xi_{cell}.npz"
+        return dir / f"xi_{cell:03}.npz"
 
 
 
