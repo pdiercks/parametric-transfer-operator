@@ -110,7 +110,7 @@ def generate_meshes(example) -> None:
     problem = BeamProblem(example.coarse_grid.as_posix(), example.fine_grid.as_posix())
 
     # ### Creation of grids for oversampling problems
-    cell_sets = problem.cell_sets
+    cell_sets = problem.cell_sets_oversampling
     for key, cset in cell_sets.items():
         cells = np.array(list(cset), dtype=np.int32)
         os_domain, _, _, _ = mesh.create_submesh(coarse_domain, 2, cells)

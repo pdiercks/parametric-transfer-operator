@@ -184,6 +184,7 @@ class BeamProblem(MultiscaleProblemDefinition):
         super().__init__(coarse_grid, fine_grid)
         self.setup_coarse_grid(2)
         self.setup_fine_grid()
+        self.build_edge_basis_config(self.cell_sets)
 
     def config_to_cell(self, config: str) -> int:
         """Maps config to global cell index."""
@@ -192,6 +193,21 @@ class BeamProblem(MultiscaleProblemDefinition):
 
     @property
     def cell_sets(self):
+        """Returns cell sets for definition of edge basis configuration"""
+        # the order is important
+        # this way e.g. cell 1 will load modes for the left edge
+        # from basis generated for cell 0 (right)
+        cell_sets = {
+                "left": set([0,]),
+                "right": set([9,]),
+                "inner": set([1, 2, 3, 4, 5, 6, 7, 8]),
+                }
+        return cell_sets
+
+    @property
+    def cell_sets_oversampling(self):
+        """Returns cell sets that define oversampling domains"""
+        # see preprocessing.py
         cells = {
             "inner": set([3, 4, 5]),
             "left": set([0, 1]),
