@@ -1,116 +1,44 @@
-\documentclass{scrartcl}
+\documentclass[a4paper]{eccomas_paper-2024}
 
-\usepackage[utf8]{inputenc}
-\usepackage[usenames,dvipsnames,svgnames]{xcolor}
-\usepackage[english]{babel}
-\usepackage{mathtools}
-\usepackage{bm,amsmath,amssymb}
-\usepackage{microtype}
-\usepackage[paperwidth=17cm, paperheight=24cm, top=2.5cm, left=2.0cm, bottom=1.5cm, right=.1cm]{geometry}
-\usepackage[exponent-product=\cdot]{siunitx}
-\usepackage{helvet}
-\usepackage[pagecontinue=true]{pageslts}
-\pagenumbering{arabic}
-\usepackage{scrlayer-scrpage}
-\usepackage{eurosym}
-\usepackage{fp}
-\usepackage{xspace}
-\usepackage{verbatim}
-\usepackage{enumitem}
-
-\usepackage{tikz}
-\usepackage{pgfplots}
-\usepackage{standalone}
-\pgfplotsset{compat=newest}
-\usetikzlibrary{positioning,calc}
-
-\usepackage{lipsum}
-% TODO use separate metadata.tex ?
-\usepackage[colorlinks=true, linkcolor=MidnightBlue, citecolor=MidnightBlue, urlcolor=MidnightBlue, pdfauthor={Philipp Diercks}, pdfpagelayout=SinglePage, bookmarks, bookmarksopen]{hyperref}
-\usepackage{cleveref}% must be loaded after hyperref
-\usepackage{bookmark}
-
-\usepackage{gensymb}
 \usepackage{graphicx}
-\usepackage{wrapfig}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
 
-\usepackage{textcomp}
-\usepackage{csquotes}
-\usepackage{relsize}
-\usepackage{bamcolors}
+\title{INSTRUCTIONS TO PREPARE A FULL PAPER FOR THE 9th EUROPEAN CONGRESS ON COMPUTATIONAL METHODS IN APPLIED SCIENCES AND ENGINEERING\break ECCOMAS CONGRESS 2024}
 
-\usepackage[font=small,labelfont={bf,it},textfont=it]{caption}
-\captionsetup{format=plain}
+\author{FIRST A. AUTHOR$^1$, SECOND B. AUTHOR$^2$ AND THIRD C. AUTHOR$^1$}
 
-\usepackage{setspace}
-\setstretch{1.2}
+\heading{First A. Author, Second B. Author and Third C. Author}
 
-\usepackage[backend=biber,
-    style=numeric, %alphabetic, numeric
-    giveninits=true,
-    natbib=true,
-    url=false,
-    doi=true,
-    eprint=false,
-    isbn=false,
-    defernumbers=true,
-    labelnumber,
-    hyperref=true,
-    maxbibnames=3,
-    sorting=none,%remove this to have things sorted, e.g. use style=alphabetic
-    ]{biblatex}
-
-% add mapping to use shortjournal instead of journal field
-\DeclareSourcemap{%
-  \maps[datatype=bibtex]{%
-    \map[overwrite]{% Notice the overwrite: replace one field with another
-      \step[fieldsource=shortjournal,fieldtarget=journal]%
-    }
-  }  
+\address{$^{1}$ International Center for Numerical Methods in Engineering (CIMNE)\\
+Universidad Polit\'{e}cnica de Catalu\~{n}a\\
+Campus Norte UPC, 08034 Barcelona, Spain\\
+e-mail: congress@cimne.upc.edu, www.cimne.com
+\and
+$^{2}$ Spanish Association for Numerical Methods in Engineering (SEMNI)\\
+Edificio C1, Campus Norte UPC\\
+Gran Capit\'{a}n s/n, 08034 Barcelona, Spain\\
+email: semni@cimne.upc.edu, www.semni.org
 }
 
-% TODO add literature.bib
-% \graphicspath{{img/}}
-% \addbibresource{literature.bib}
+\keywords{Computational Mechanics, FEM, Contact Problems}
 
-
-% --------------------------------------------------------------------------------
-% KOMA options
-\KOMAoptions{paper=a4}
-\KOMAoption{fontsize}{11pt}
-\pagestyle{scrheadings}
-
-% Maybe customize fonts
-% \setkomafont{section}{\normalsize}
-% \setkomafont{subsection}{\normalsize}
-% \setkomafont{subparagraph}{\normalfont\itshape}
-
-% \renewcommand{\familydefault}{\sfdefault}
-% \renewcommand{\headfont}{\sffamily\footnotesize}
-
-% Maybe redeclare section commands
-% \RedeclareSectionCommands[
-% beforeskip=.1em,
-% runin=false,
-% afterskip=-0.5\parskip
-% ]{section,subsection,subsubsection}
-
-% --------------------------------------------------------------------------------
-% custom commands
-\newcommand{\ie}{i.\,e.\@\xspace}
-\newcommand{\eg}{e.\,g.\@\xspace}
-
+\abstract{This document provides information and instructions for
+preparing a Full Paper to be included in the Proceedings
+of {\it ECCOMAS CONGRESS 2024}. }
 
 \begin{document}
+\thispagestyle{empty}
 
-% TODO Titlepage
-% TODO frontmatter
+\section{INTRODUCTION}
 
-\section{Introduction}
+All the participants whose Abstract has been accepted for presentation at the ECCOMAS 2022 Congress are kindly requested to submit the Full Paper electronically via the web page of the \href{https://eccomas2024.org/lisbon}{Congress}, before \textbf{July 1st, 2024}. Congress Proceedings (including full papers only) will be published on Scipedia with DOI number after the congress and will be submitted for indexation to SCOPUS database. Submission of the full paper is not mandatory. The Full Paper should be written following the format of macros for submission. The file has to be translated into Portable Document Format (PDF) before submission via the Conference site. The organizers do not commit themselves to include in the Proceedings any Full Paper received later than the above-mentioned deadline. The corresponding author should be the speaker, and is expected to register and pay his registration fee during the advance period (before \textbf{April 1st, 2024}) for the paper to be included in the technical programme of the ECCOMAS 2024.
 
-\section{Methods}
+\section{METHODS}
 
-\section{Results}
+\section{RESULTS}
 
 \subsection{Basis Construction}
 For the beam problem, there are three oversampling problems to consider (left, inner, right).
@@ -123,21 +51,59 @@ independent basis functions (POD modes).
 
 \subsubsection{Singular values of POD modes}
 
-\includegraphics[width=0.6\textwidth]{../work/beam/fig_loc_svals_left.pdf}
-\includegraphics[width=0.6\textwidth]{../work/beam/fig_loc_svals_inner.pdf}
-\includegraphics[width=0.6\textwidth]{../work/beam/fig_loc_svals_right.pdf}
+\begin{figure}[!htb]
+\minipage{0.32\textwidth}
+  \includegraphics[width=\linewidth]{../work/beam/fig_loc_svals_left.pdf}
+  \caption{A really Awesome Image}\label{fig:awesome_image1}
+\endminipage\hfill
+\minipage{0.32\textwidth}
+  \includegraphics[width=\linewidth]{../work/beam/fig_loc_svals_inner.pdf}
+  \caption{A really Awesome Image}\label{fig:awesome_image2}
+\endminipage\hfill
+\minipage{0.32\textwidth}%
+  \includegraphics[width=\linewidth]{../work/beam/fig_loc_svals_right.pdf}
+  \caption{A really Awesome Image}\label{fig:awesome_image3}
+\endminipage
+\end{figure}
+
 
 \subsection{Projection Error}
 The projection error is computed for a test set for each configuration that was computed
 using the FOM. Each test set has size $n_{test}$.
 
-\includegraphics[width=0.6\textwidth]{../work/beam/fig_proj_error_left.pdf}
-\includegraphics[width=0.6\textwidth]{../work/beam/fig_proj_error_inner.pdf}
-\includegraphics[width=0.6\textwidth]{../work/beam/fig_proj_error_right.pdf}
+\begin{figure}[!htb]
+\minipage{0.32\textwidth}
+  \includegraphics[width=\linewidth]{../work/beam/fig_proj_error_left.pdf}
+  \caption{A really Awesome Image}\label{fig:awesome_image1}
+\endminipage\hfill
+\minipage{0.32\textwidth}
+  \includegraphics[width=\linewidth]{../work/beam/fig_proj_error_inner.pdf}
+  \caption{A really Awesome Image}\label{fig:awesome_image2}
+\endminipage\hfill
+\minipage{0.32\textwidth}%
+  \includegraphics[width=\linewidth]{../work/beam/fig_proj_error_right.pdf}
+  \caption{A really Awesome Image}\label{fig:awesome_image3}
+\endminipage
+\end{figure}
 
-\section{Conclusions}
+\section{FORMAT OF REFERENCES}
 
-% TODO Bibliography
-% TODO backmatter
+References should be quoted in the text by superscript
+numbers \cite{McQuerry18,nssga,Oden18} and grouped together at the end of the Full Paper in numerical order as shown in these instructions.
+
+\section{CONCLUSIONS}
+
+\begin{itemize}
+\item[-] Full Papers in format for publication should be submitted electronically via the web page of the Conference, before \textbf{July 1st, 2024}. They must be converted to  Portable Document Format (PDF) before submission. The maximum size of the file is 4 Mb.
+\end{itemize}
+
+\begin{thebibliography}{99}
+\bibitem{McQuerry18}  McQuerry, M. 2018. “Validation of a Clothing Heat Transfer Model in Nonisothermal Test Conditions.” J Test Eval 46, no. 1 (January/February): 1–7. http://doi.org/10.1520/JTE20170073
+
+\bibitem{nssga}   National Stone, Sand, and Gravel Association (NSSGA). 2013. The Aggregates Handbook, 2nd ed. Englewood, CO: Society of Mining, Metallurgy, and Exploration.
+
+\bibitem{Oden18}  Oden, C. P., C. L. Ho, and H. F. Kashani. 2018. “Man-Portable Real-Time Ballast Inspection Device Using Ground-Penetrating Radar.” In Railroad Ballast Testing and Properties, edited by T. Stark, R. Swan, and R. Szecsy, 77–104. West Conshohocken, PA: ASTM International. http://doi.org/10.1520/STP160520170023
+
+\end{thebibliography}
 
 \end{document}
