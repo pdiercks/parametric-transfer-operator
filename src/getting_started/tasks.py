@@ -86,7 +86,7 @@ def task_loc_pod_modes():
     for distr in DISTR:
         for config in CONFIGS:
             yield {
-                "basename": f"rrf_{beam.name}_{distr}_{config}",
+                "name": f"rrf_{beam.name}_{distr}_{config}",
                 "file_dep": [
                     file,
                     beam.fine_oversampling_grid(config),
@@ -115,7 +115,7 @@ def task_plot_loc_svals():
             beam.loc_singular_values(distr, config) for distr in beam.distributions
         ]
         yield {
-            "basename": f"fig_loc_svals_{beam.name}_{config}",
+            "name": f"fig_loc_svals_{beam.name}_{config}",
             "file_dep": deps,
             "actions": ["python3 -m {} %(targets)s {}".format(module, config)],
             "targets": [beam.fig_loc_svals(config)],
@@ -132,7 +132,7 @@ def task_test_sets():
     for config in CONFIGS:
         subdomain = map[config]
         yield {
-            "basename": f"test_set_{config}_{beam.name}",
+            "name": f"test_set_{config}_{beam.name}",
             "file_dep": [
                 code,
                 beam.coarse_grid,
@@ -152,7 +152,7 @@ def task_proj_error():
     for distr in DISTR:
         for config in CONFIGS:
             yield {
-                "basename": f"proj_err_{beam.name}_{distr}_{config}",
+                "name": f"proj_err_{beam.name}_{distr}_{config}",
                 "file_dep": [
                     code,
                     beam.unit_cell_grid,
@@ -176,7 +176,7 @@ def task_plot_proj_error():
         deps = [code]
         deps += [beam.proj_error(distr, config) for distr in beam.distributions]
         yield {
-            "basename": f"fig_proj_err_{beam.name}_{config}",
+            "name": f"fig_proj_err_{beam.name}_{config}",
             "file_dep": deps,
             "actions": ["python3 -m {} %(targets)s {}".format(module, config)],
             "targets": [beam.fig_proj_error(config)],
@@ -191,7 +191,7 @@ def task_decomposition():
     for distr in DISTR:
         for config in CONFIGS:
             yield {
-                "basename": f"decompose_{beam.name}_{distr}_{config}",
+                "name": f"decompose_{beam.name}_{distr}_{config}",
                 "file_dep": [
                     code,
                     beam.unit_cell_grid,
@@ -205,6 +205,22 @@ def task_decomposition():
                 ],
                 "clean": [rm_rf],
             }
+
+
+def task_write_xi():
+    """Getting started: Write final basis"""
+    module = "src.getting_started.write_xi"
+    num_cells = beam.nx * beam.ny
+    for distr in DISTR:
+        for cell_index in range(num_cells):
+            config = beam.cell_to_config(cell_index)
+            yield {
+                    "name": f"xi_{beam.name}_{distr}_{cell_index}",
+                    "file_dep": [beam.local_basis_npz(distr, config)],
+                    "actions": ["python3 -m {}".format(module, cell_index)],
+                    "targets": [beam.xi_npz(distr, cell_index)],
+                    "clean": True,
+                    }
 
 
 def task_paper():
