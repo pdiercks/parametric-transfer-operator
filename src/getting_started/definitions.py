@@ -147,6 +147,9 @@ class BeamData:
     def log_decompose_pod_basis(self, distr: str, conf: str) -> Path:
         return self.logs_path / f"decompose_pod_basis_{distr}_{conf}.log"
 
+    def log_extension(self, distr : str, cell: int) -> Path:
+        return self.logs_path / f"extension_{distr}_{cell}.log"
+
     def loc_singular_values(self, distr: str, conf: str) -> Path:
         """singular values of POD compression for range approximation of parametric T"""
         return self.rf / f"loc_singular_values_{distr}_{conf}.npy"
@@ -159,13 +162,13 @@ class BeamData:
         """same as `loc_pod_modes` but adios2 (bp) format"""
         return self.rf / f"pod_modes_{distr}_{conf}.bp"
 
-    def fine_scale_modes_bp(self, distr: str, conf: str) -> Path:
-        """fine scale basis functions after extension"""
-        return self.rf / f"fine_scale_modes_{distr}_{conf}.bp"
+    def fine_scale_edge_modes_npz(self, distr: str, conf: str) -> Path:
+        """edge-restricted fine scale part of pod modes"""
+        return self.rf / f"fine_scale_edge_modes_{distr}_{conf}.npz"
 
-    def local_basis_npz(self, distr: str, conf: str) -> Path:
-        """final local basis functions"""
-        return self.rf / f"local_basis_{distr}_{conf}.npz"
+    def fine_scale_modes_bp(self, distr: str, cell: int) -> Path:
+        """fine scale basis functions after extension"""
+        return self.rf / f"fine_scale_modes_{distr}_{cell}.bp"
 
     def fom_test_set(self, conf: str) -> Path:
         """test set generated from FOM solutions"""
@@ -195,10 +198,10 @@ class BeamData:
         config = map.get(cell, "inner")
         return config
 
-    def xi_npz(self, distr: str, cell: int) -> Path:
+    def local_basis_npz(self, distr: str, cell: int) -> Path:
         """final basis for loc rom assembly"""
         dir = self.bases_path(distr)
-        return dir / f"xi_{cell:03}.npz"
+        return dir / f"basis_{cell:03}.npz"
 
 
 
@@ -219,11 +222,11 @@ class BeamProblem(MultiscaleProblemDefinition):
         """Returns cell sets for definition of edge basis configuration"""
         # the order is important
         # this way e.g. cell 1 will load modes for the left edge
-        # from basis generated for cell 0 (right)
+        # from basis generated for cell 1 (config inner)
         cell_sets = {
+                "inner": set([1, 2, 3, 4, 5, 6, 7, 8]),
                 "left": set([0,]),
                 "right": set([9,]),
-                "inner": set([1, 2, 3, 4, 5, 6, 7, 8]),
                 }
         return cell_sets
 

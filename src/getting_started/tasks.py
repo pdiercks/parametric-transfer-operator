@@ -100,6 +100,7 @@ def task_loc_pod_modes():
                     beam.log_range_approximation(distr, config),
                     beam.loc_pod_modes(distr, config),
                     beam.loc_singular_values(distr, config),
+                    beam.pod_modes_bp(distr, config),
                 ],
                 "clean": True,
             }
@@ -199,27 +200,25 @@ def task_decomposition():
                 ],
                 "actions": ["python3 -m {} {} {}".format(module, distr, config)],
                 "targets": [
-                    beam.local_basis_npz(distr, config),
-                    beam.fine_scale_modes_bp(distr, config),
-                    beam.pod_modes_bp(distr, config),
+                    beam.fine_scale_edge_modes_npz(distr, config),
                 ],
                 "clean": [rm_rf],
             }
 
 
-def task_write_xi():
-    """Getting started: Write final basis"""
-    module = "src.getting_started.write_xi"
+def task_extension():
+    """Getting started: Extend fine scale modes and write final basis"""
+    module = "src.getting_started.extension"
     num_cells = beam.nx * beam.ny
     for distr in DISTR:
         for cell_index in range(num_cells):
             config = beam.cell_to_config(cell_index)
             yield {
                     "name": f"xi_{beam.name}_{distr}_{cell_index}",
-                    "file_dep": [beam.local_basis_npz(distr, config)],
-                    "actions": ["python3 -m {}".format(module, cell_index)],
-                    "targets": [beam.xi_npz(distr, cell_index)],
-                    "clean": True,
+                    "file_dep": [beam.fine_scale_edge_modes_npz(distr, config)],
+                    "actions": ["python3 -m {} {} {}".format(module, distr, cell_index)],
+                    "targets": [beam.local_basis_npz(distr, cell_index), beam.fine_scale_modes_bp(distr, cell_index)],
+                    "clean": [rm_rf],
                     }
 
 
