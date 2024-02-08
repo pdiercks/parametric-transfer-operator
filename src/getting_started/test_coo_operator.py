@@ -1,3 +1,4 @@
+from collections import defaultdict
 from mpi4py import MPI
 from dolfinx import mesh
 import numpy as np
@@ -130,37 +131,46 @@ def test_rhs():
     apply_bcs(A, F, bc_dofs, bc_vals)
 
     # ### Use COO matrix for LHS, but apply BCs locally
-    diagonals = []
-    data = []
-    rows = []
-    cols = []
-    indexptr = []
+    lhs = defaultdict(list)
+    rhs = defaultdict(list)
+
     for ci in range(dofmap.num_cells):
         dofs = dofmap.cell_dofs(ci)
         for l, x in enumerate(dofs):
+
+            if x in bc_dofs:
+                rhs["rows"].append(x)
+                rhs["cols"].append(0)
+                rhs["data"].append(0.0)
+            else:
+                rhs["rows"].append(x)
+                rhs["cols"].append(0)
+                rhs["data"].append(elementvector[l, 0])
+
             for k, y in enumerate(dofs):
                 if x in bc_dofs or y in bc_dofs:
-
                     # Note: in the MOR context set diagonal to zero
                     # for the matrices arising from a_q
                     if x == y:
-                        if x not in diagonals: # only set diagonal entry once
-                            rows.append(x)
-                            cols.append(y)
-                            data.append(0.0)
-                            diagonals.append(x)
-                        
+                        if x not in lhs["diagonals"]: # only set diagonal entry once
+                            lhs["rows"].append(x)
+                            lhs["cols"].append(y)
+                            lhs["data"].append(0.0)
+                            lhs["diagonals"].append(x)
                 else:
-                    rows.append(x)
-                    cols.append(y)
-                    data.append(elementmatrix[l, k])
-        indexptr.append(len(rows))
+                    lhs["rows"].append(x)
+                    lhs["cols"].append(y)
+                    lhs["data"].append(elementmatrix[l, k])
+
+
+        lhs["indexptr"].append(len(lhs["rows"]))
+        rhs["indexptr"].append(len(rhs["rows"]))
 
     options = None
-    data = np.array(data)
-    rows = np.array(rows)
-    cols = np.array(cols)
-    indexptr = np.array(indexptr)
+    data = np.array(lhs["data"])
+    rows = np.array(lhs["rows"])
+    cols = np.array(lhs["cols"])
+    indexptr = np.array(lhs["indexptr"])
     shape = (N, N)
     op = COOMatrixOperator((data, rows, cols), indexptr, num_cells, shape, solver_options=options, name="K")
 
@@ -173,33 +183,33 @@ def test_rhs():
     assert np.allclose(A, K_bc + Karray)
 
     # ### Use COO matrix for RHS, but apply BCs locally
-    data = []
-    rows = []
-    cols = []
-    indexptr = []
-    for ci in range(dofmap.num_cells):
-        dofs = dofmap.cell_dofs(ci)
-        for l, x in enumerate(dofs):
-            y = 0
-            if x in bc_dofs:
-                rows.append(x)
-                cols.append(y)
-                data.append(0.0)
-                    
-            else:
-                rows.append(x)
-                cols.append(y)
-                data.append(elementvector[l, 0])
-        indexptr.append(len(rows))
-
+    # data = []
+    # rows = []
+    # cols = []
+    # indexptr = []
+    # for ci in range(dofmap.num_cells):
+    #     dofs = dofmap.cell_dofs(ci)
+    #     for l, x in enumerate(dofs):
+    #         y = 0
+    #         if x in bc_dofs:
+    #             rows.append(x)
+    #             cols.append(y)
+    #             data.append(0.0)
+    #                 
+    #         else:
+    #             rows.append(x)
+    #             cols.append(y)
+    #             data.append(elementvector[l, 0])
+    #     indexptr.append(len(rows))
+    #
     options = None
-    data = np.array(data)
-    rows = np.array(rows)
-    cols = np.array(cols)
-    indexptr = np.array(indexptr)
+    data = np.array(rhs["data"])
+    rows = np.array(rhs["rows"])
+    cols = np.array(rhs["cols"])
+    indexptr = np.array(rhs["indexptr"])
     shape = (N, 1)
-    op = COOMatrixOperator((data, rows, cols), indexptr, num_cells, shape, solver_options=options, name="F")
-    rhs = op.assemble(test_mu)
+    rhs_op = COOMatrixOperator((data, rows, cols), indexptr, num_cells, shape, solver_options=options, name="F")
+    rhs = rhs_op.assemble(test_mu)
     assert np.allclose(F.reshape(9, 1), rhs.matrix.todense())
 
 
