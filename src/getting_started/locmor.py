@@ -24,6 +24,7 @@ from multi.solver import build_nullspace
 from .definitions import BeamData, BeamProblem
 
 
+# FIXME maybe better inherit from pymor.operators.constructions.ProxyOperator?
 class COOMatrixOperator(Operator):
     """Wraps COO matrix data as an |Operator|.
 
