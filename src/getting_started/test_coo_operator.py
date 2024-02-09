@@ -10,6 +10,8 @@ from multi.boundary import plane_at
 from .locmor import COOMatrixOperator
 
 from pymor.parameters.base import Parameters, ParameterSpace
+from pymor.operators.constructions import LincombOperator
+from pymor.operators.numpy import NumpyMatrixOperator
 
 elementmatrix = np.array([
     [1., 0.5, 0.5, 0.25],
@@ -166,13 +168,18 @@ def test_rhs():
         lhs["indexptr"].append(len(lhs["rows"]))
         rhs["indexptr"].append(len(rhs["rows"]))
 
-    options = None
     data = np.array(lhs["data"])
     rows = np.array(lhs["rows"])
     cols = np.array(lhs["cols"])
     indexptr = np.array(lhs["indexptr"])
     shape = (N, N)
-    op = COOMatrixOperator((data, rows, cols), indexptr, num_cells, shape, solver_options=options, name="K")
+    parameters = {"mu": 4}
+    options = None
+    op = COOMatrixOperator((data, rows, cols), indexptr, num_cells, shape, parameters=parameters, solver_options=options, name="K")
+    assert op.parametric
+    # op.parametric returns False, but should be True for correct assembly I guess
+    # also LincombOperator.assemble modifies the name of the operators
+    # I should probably not mess with the name?
 
     K = op.assemble(test_mu)
     assert K.name == "K_assembled"
@@ -182,26 +189,11 @@ def test_rhs():
     apply_bcs(K_bc, b, bc_dofs, bc_vals)
     assert np.allclose(A, K_bc + Karray)
 
-    # ### Use COO matrix for RHS, but apply BCs locally
-    # data = []
-    # rows = []
-    # cols = []
-    # indexptr = []
-    # for ci in range(dofmap.num_cells):
-    #     dofs = dofmap.cell_dofs(ci)
-    #     for l, x in enumerate(dofs):
-    #         y = 0
-    #         if x in bc_dofs:
-    #             rows.append(x)
-    #             cols.append(y)
-    #             data.append(0.0)
-    #                 
-    #         else:
-    #             rows.append(x)
-    #             cols.append(y)
-    #             data.append(elementvector[l, 0])
-    #     indexptr.append(len(rows))
-    #
+    bc_op = NumpyMatrixOperator(K_bc)
+    lincombop = LincombOperator([op, bc_op], [1., 1.])
+    L = lincombop.assemble(test_mu)
+    assert np.allclose(A, L.matrix)
+
     options = None
     data = np.array(rhs["data"])
     rows = np.array(rhs["rows"])
@@ -209,8 +201,11 @@ def test_rhs():
     indexptr = np.array(rhs["indexptr"])
     shape = (N, 1)
     rhs_op = COOMatrixOperator((data, rows, cols), indexptr, num_cells, shape, solver_options=options, name="F")
+    assert not rhs_op.parametric
     rhs = rhs_op.assemble(test_mu)
+    other = rhs_op.assemble()
     assert np.allclose(F.reshape(9, 1), rhs.matrix.todense())
+    assert np.allclose(F.reshape(9, 1), other.matrix.todense())
 
 
 if __name__ == "__main__":
