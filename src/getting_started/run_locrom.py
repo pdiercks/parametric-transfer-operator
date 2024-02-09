@@ -1,16 +1,23 @@
 from pathlib import Path
+from collections import defaultdict
+
+from scipy.sparse import coo_array
 import numpy as np
 
 from mpi4py import MPI
-from dolfinx import fem, default_scalar_type
+from dolfinx import mesh, fem, default_scalar_type
 from dolfinx.io import gmshio
+from dolfinx.io.utils import XDMFFile
 from basix.ufl import element
 
+from pymor.parameters.base import Parameters
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
-from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator
-from pymor.operators.constructions import VectorOperator
+from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator, FenicsxVisualizer
+from pymor.operators.constructions import VectorOperator, LincombOperator
+from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.algorithms.projection import project
+from pymor.models.basic import StationaryModel
 
 from multi.boundary import point_at
 from multi.domain import RectangularSubdomain
@@ -20,10 +27,61 @@ from multi.materials import LinearElasticMaterial
 from multi.problems import LinElaSubProblem
 
 
-# rename to assemble_system
-# use defaultdict
-# assemble lhs and rhs in the same loop
-def assemble_operator(num_modes: int, dofmap: DofMap, A: FenicsxMatrixOperator, bases: list[np.ndarray], num_max_modes: np.ndarray, bc_dofs: np.ndarray):
+def reconstruct(U_rb: np.ndarray, dofmap: DofMap, bases: list[np.ndarray], subdomains: list[np.ndarray], V: fem.FunctionSpaceBase) -> fem.Function:
+    """Reconstructs rom solution on the global domain.
+
+    Args:
+        Urb: ROM solution in the reduced space.
+        dofmap: The dofmap of the reduced space.
+        bases: Local basis for each subdomain.
+        subdomains: The cells of each subdomain.
+        V: The global FE space (``fom.solution_space``).
+
+    Returns:
+        u: The reconstructed solution.
+
+    """
+    domain = V.mesh
+    u = fem.Function(V)
+    u_view = u.x.array # type: ignore
+    fe = V.ufl_element()
+
+    for i_subdomain, cells in enumerate(subdomains):
+
+        submesh, cell_map, _, _ = mesh.create_submesh(domain, domain.topology.dim, cells)
+        V_sub = fem.FunctionSpace(submesh, fe)
+        u_local = fem.Function(V_sub)
+        u_local_view = u_local.x.array # type: ignore
+
+        # fill u_local with rom solution
+        basis = bases[i_subdomain]
+        dofs = dofmap.cell_dofs(i_subdomain)
+        u_local_view = U_rb[0, dofs] @ basis
+
+        # fill global u
+        num_sub_cells = submesh.topology.index_map(submesh.topology.dim).size_local
+        for cell in range(num_sub_cells):
+            child_dofs = V_sub.dofmap.cell_dofs(cell)
+            parent_dofs = V.dofmap.cell_dofs(cell_map[cell])
+            for parent, child in zip(parent_dofs, child_dofs):
+                for b in range(V_sub.dofmap.bs):
+                    u_view[parent*V.dofmap.bs+b] = u_local_view[child*V_sub.dofmap.bs+b]
+    return u # type: ignore
+
+
+def assemble_system(num_modes: int, dofmap: DofMap, A: FenicsxMatrixOperator, b: VectorOperator, bases: list[np.ndarray], num_max_modes: np.ndarray, parameters: Parameters):
+    """Assembles ``operator`` and ``rhs`` for localized ROM as ``StationaryModel``.
+
+    Args:
+        num_modes: Number of fine scale modes per edge to be used.
+        dofmap: The dofmap of the global reduced space.
+        A: Local high fidelity stiffness matrix.
+        b: Local high fidelity external force vector.
+        bases: Local reduced basis for each subdomain.
+        num_max_modes: Maximum number of fine scale modes for each edge.
+        parameters: The |Parameters| the ROM depends on.
+
+    """
     from .locmor import COOMatrixOperator
 
     dofs_per_vertex = 2
@@ -33,11 +91,24 @@ def assemble_operator(num_modes: int, dofmap: DofMap, A: FenicsxMatrixOperator, 
     dofs_per_edge[num_max_modes > num_modes] = num_modes
     dofmap.distribute_dofs(dofs_per_vertex, dofs_per_edge, dofs_per_face)
 
-    diagonals = []
-    data = []
-    rows = []
-    cols = []
-    indexptr = []
+    # ### Definition of Dirichlet BCs
+    # This also depends on number of modes and can only be defined after
+    # distribution of dofs
+    origin = dofmap.grid.locate_entities_boundary(0, point_at([0.0, 0.0, 0.0]))
+    bottom_right = dofmap.grid.locate_entities_boundary(0, point_at([10.0, 0.0, 0.0]))
+    bc_dofs = []
+    for vertex in origin:
+        bc_dofs += dofmap.entity_dofs(0, vertex)
+    for vertex in bottom_right:
+        dofs = dofmap.entity_dofs(0, vertex)
+        bc_dofs.append(dofs[1]) # constrain uy, but not ux
+    assert len(bc_dofs) == 3
+    bc_dofs = np.array(bc_dofs)
+
+    lhs = defaultdict(list)
+    rhs = defaultdict(list)
+    bc_mat = defaultdict(list)
+    local_bases = []
 
     for ci in range(dofmap.num_cells):
         dofs = dofmap.cell_dofs(ci)
@@ -46,55 +117,94 @@ def assemble_operator(num_modes: int, dofmap: DofMap, A: FenicsxMatrixOperator, 
         local_basis = select_modes(
                 bases[ci], num_max_modes[ci], dofs_per_edge[ci]
                 )
-        B = A.source.from_numpy(local_basis)
+        local_bases.append(local_basis)
+        B = A.source.from_numpy(local_basis) # type: ignore
         A_local = project(A, B, B)
-        element_matrix = A_local.matrix
+        b_local = project(b, B, None)
+        element_matrix = A_local.matrix # type: ignore
+        element_vector = b_local.matrix # type: ignore
 
         for l, x in enumerate(dofs):
+
+            if x in bc_dofs:
+                rhs["rows"].append(x)
+                rhs["cols"].append(0)
+                rhs["data"].append(0.0)
+            else:
+                rhs["rows"].append(x)
+                rhs["cols"].append(0)
+                rhs["data"].append(element_vector[l, 0])
+
             for k, y in enumerate(dofs):
                 if x in bc_dofs or y in bc_dofs:
+                    # Note: in the MOR context set diagonal to zero
+                    # for the matrices arising from a_q
                     if x == y:
-                        if x not in diagonals:
-                            rows.append(x)
-                            cols.append(y)
-                            data.append(0.0)
-                            diagonals.append(x)
+                        if x not in lhs["diagonals"]: # only set diagonal entry once
+                            lhs["rows"].append(x)
+                            lhs["cols"].append(y)
+                            lhs["data"].append(0.0)
+                            lhs["diagonals"].append(x)
+                            bc_mat["rows"].append(x)
+                            bc_mat["cols"].append(y)
+                            bc_mat["data"].append(1.0)
+                            bc_mat["diagonals"].append(x)
                 else:
-                    rows.append(x)
-                    cols.append(y)
-                    data.append(element_matrix[l, k])
-        indexptr.append(len(rows))
-    data = np.array(data)
-    rows = np.array(rows)
-    cols = np.array(cols)
-    indexptr = np.array(indexptr)
-    N = dofmap.num_dofs
-    shape = (N, N)
+                    lhs["rows"].append(x)
+                    lhs["cols"].append(y)
+                    lhs["data"].append(element_matrix[l, k])
+
+
+        lhs["indexptr"].append(len(lhs["rows"]))
+        rhs["indexptr"].append(len(rhs["rows"]))
+
+    Ndofs = dofmap.num_dofs
+    data = np.array(lhs["data"])
+    rows = np.array(lhs["rows"])
+    cols = np.array(lhs["cols"])
+    indexptr = np.array(lhs["indexptr"])
+    shape = (Ndofs, Ndofs)
     options = None
-    op = COOMatrixOperator((data, rows, cols), indexptr, dofmap.num_cells, shape, solver_options=options, name="K")
-    return op
+    op = COOMatrixOperator((data, rows, cols), indexptr, dofmap.num_cells, shape, parameters=parameters, solver_options=options, name="K")
 
+    # ### Add matrix to account for BCs
+    bc_array = coo_array((bc_mat["data"], (bc_mat["rows"], bc_mat["cols"])), shape=shape)
+    bc_array.eliminate_zeros()
+    bc_op = NumpyMatrixOperator(bc_array.tocsr(), op.source.id, op.range.id, op.solver_options, "bc_mat")
 
-def assemble_rhs():
-    # assemble rhs using COOMatrixOperator works
-    # however, cannot pass COOMatrixOperator as rhs
-    # to StationaryModel.
-    # constraints:
-    # assert rhs.range == operator.range and rhs.source.is_scalar and rhs.linear
-    # How to resolve this?
-    print("...")
+    lincomb = LincombOperator([op, bc_op], [1., 1.])
+
+    data = np.array(rhs["data"])
+    rows = np.array(rhs["rows"])
+    cols = np.array(rhs["cols"])
+    indexptr = np.array(rhs["indexptr"])
+    shape = (Ndofs, 1)
+    rhs_op = COOMatrixOperator((data, rows, cols), indexptr, dofmap.num_cells, shape, parameters={}, solver_options=options, name="F")
+    return lincomb, rhs_op, local_bases
 
 
 def main(args):
     from .tasks import beam
     from .definitions import BeamProblem
+    from .fom import discretize_fom
 
     # ### logger
     set_defaults(
         {"pymor.core.logger.getLogger.filename": beam.log_run_locrom(args.distr)}
     )
-    logger = getLogger(Path(__file__).stem, level="INFO")
+    logger = getLogger(Path(__file__).stem, level="DEBUG")
 
+    # ### Discretize FOM
+
+    # read cell tags for reconstruction of reduced solution
+    with XDMFFile(MPI.COMM_WORLD, beam.fine_grid.as_posix(), "r") as fh:
+        domain = fh.read_mesh(name="Grid")
+        cell_tags = fh.read_meshtags(domain, "subdomains")
+
+    fom = discretize_fom(beam)
+    h1_product = fom.products["h1_0_semi"]
+
+    # ### Discretize operators on subdomain
     gdim = beam.gdim
     domain, _, _ = gmshio.read_from_msh(
         beam.unit_cell_grid.as_posix(), MPI.COMM_WORLD, gdim=gdim
@@ -105,50 +215,36 @@ def main(args):
     top_tag = int(137)
     omega.create_facet_tags({"top": top_tag})
 
-    # ### FE spaces
+    # FE space
     degree = beam.fe_deg
     fe = element("P", domain.basix_cell(), degree, shape=(gdim,))
     V = fem.functionspace(omega.grid, fe)
     source = FenicsxVectorSpace(V)
 
+    # base material
     E = beam.youngs_modulus
     NU = beam.poisson_ratio
     mat = LinearElasticMaterial(gdim, E, NU, plane_stress=False)
 
-    # ### Problem on unit cell domain
+    # Problem on unit cell domain
     problem = LinElaSubProblem(omega, V, phases=(mat,))
     loading = fem.Constant(
             omega.grid, (default_scalar_type(0.0), default_scalar_type(-10.0)))
     problem.add_neumann_bc(top_tag, loading)
 
-    # ### Full operators
+    # Full operators
     problem.setup_solver()
     problem.assemble_matrix()
     problem.assemble_vector()
     A = FenicsxMatrixOperator(problem.A, V, V)
-    b = VectorOperator(source.make_array([problem.b]))
-    breakpoint()
+    b = VectorOperator(source.make_array([problem.b])) # type: ignore
 
+    # ### Multiscale Problem
     beam_problem = BeamProblem(beam.coarse_grid.as_posix(), beam.fine_grid.as_posix())
     coarse_grid = beam_problem.coarse_grid
     dofmap = DofMap(coarse_grid)
 
-    # ### Definition of Dirichlet BCs
-    origin = coarse_grid.locate_entities_boundary(0, point_at([0.0, 0.0, 0.0]))
-    bottom_right = coarse_grid.locate_entities_boundary(0, point_at([10.0, 0.0, 0.0]))
-    bc_dofs = []
-    for vertex in origin:
-        bc_dofs += dofmap.entity_dofs(0, vertex)
-    for vertex in bottom_right:
-        dofs = dofmap.entity_dofs(0, vertex)
-        bc_dofs.append(dofs[1]) # constrain uy, but not ux
-    assert len(bc_dofs) == 3
-    bc_dofs = np.array(bc_dofs)
-    bc_vals = np.zeros_like(bc_dofs)
-
-    # implement def assemble_rom
-    # assemble rom for different number of modes
-    # for each rom: compute error over validation set
+    # ### Reduced bases
     bases_folder = beam.bases_path(args.distr)
     num_cells = beam.nx * beam.ny
     bases_loader = BasesLoader(bases_folder, num_cells)
@@ -157,16 +253,44 @@ def main(args):
     max_modes = np.amax(num_max_modes_per_cell)
     logger.info(f"Global maximum number of modes per edge is: {max_modes}.")
 
-    breakpoint()
-    num_fine_scale_modes = [0, 4, 8, 12, 16, 20, 24, 28, 32]
-    for nmodes in num_fine_scale_modes:
+    # ### Cell set for each subdomain
+    subdomains = []
+    for j in range(1, 11):
+        subdomains.append(cell_tags.find(j))
 
+    # Do I need to decouple assembly & error analysis?
+    P = fom.parameters.space(beam.mu_range)
+    validation_set = P.sample_randomly(1)
+    num_fine_scale_modes = list(range(0,32,4))
 
-        K = assemble_operator(nmodes, dofmap, A, bases, num_max_modes, bc_dofs)
-        # TODO assemble RHS as COOMatrixOperator?
+    vvv = FenicsxVisualizer(fom.solution_space)
 
-        # initialize Stationary model with reduced operators
-        # final lhs should be LincombOperator([COOMatrixOperator, BCsOperator], [1, 1])
+    # ### ROM Assembly and Error Analysis
+    for mu in validation_set:
+        U_fom = fom.solve(mu)
+        # vvv.visualize(U_fom, filename="./work/debug_fom.bp")
+
+        for nmodes in num_fine_scale_modes:
+
+            operator, rhs, local_bases = assemble_system(nmodes, dofmap, A, b, bases, num_max_modes, fom.parameters)
+            # bc_dofs = operator.operators[-1].matrix.indices
+            rom = StationaryModel(operator, rhs)
+            breakpoint()
+            Urb = rom.solve(mu)
+            u_rb = reconstruct(Urb.to_numpy(), dofmap, local_bases, subdomains, fom.solution_space.V) # type: ignore
+            U_rom = fom.solution_space.make_array([u_rb.vector])
+            # vvv.visualize(U_rom, filename="./work/debug_rom.bp")
+
+            ERR = U_fom - U_rom
+            # vvv.visualize(ERR, filename="./work/debug_err.bp")
+
+            err = ERR.norm(h1_product)
+            logger.debug(f"{nmodes=}\terror: {err}")
+
+    # DEBUGGING
+    # what could be going wrong?
+    # rom.operator is not assembled correctly with regard to mu? I did not check the behaviour of LincombOperator
+    # in the reconstructed solution it is probably not visible if there gaps because of the mapping to reconstruct?
 
 
 if __name__ == "__main__":

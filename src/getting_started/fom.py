@@ -107,6 +107,8 @@ def discretize_fom(ex):
     bc_mat.assemble()
 
     # inner product
+    # TODO implement other products such that these are available
+    # via fom.products for the error analysis
     inner_product = InnerProduct(V, product="h1-semi", bcs=bcs)
     product_mat = inner_product.assemble_matrix()
 
@@ -141,11 +143,9 @@ def discretize_fom(ex):
     weights = np.ones(num_subdomains)
 
     # TODO: dimensional analysis? scaling of cost?
-
     cost = GenericParameterFunctional(lambda mu: np.dot(weights, (mu["E"] - 1.0) ** 2), parameters)
     # always returns 1.
     One = ConstantOperator(compliance.range.ones(1), source=compliance.source)
-
     objective = LincombOperator([compliance, One], [1., cost])
     # TODO what is the derivative wrt mu?
 
