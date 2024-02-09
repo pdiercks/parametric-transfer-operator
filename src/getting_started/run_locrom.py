@@ -289,8 +289,10 @@ def main(args):
 
     # DEBUGGING
     # what could be going wrong?
-    # rom.operator is not assembled correctly with regard to mu? I did not check the behaviour of LincombOperator
-    # in the reconstructed solution it is probably not visible if there gaps because of the mapping to reconstruct?
+    # reconstruct rom solution locally to check continuity?
+    # looking at debug_err.bp, the mode shape seems correct, but its just the amplitude that is different ...
+    # maybe, I am overlooking something with regard to the Neumann BC ?
+    # maybe, the full operator A is wrong?
 
 
 if __name__ == "__main__":
