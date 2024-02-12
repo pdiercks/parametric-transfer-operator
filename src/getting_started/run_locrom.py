@@ -69,7 +69,7 @@ def reconstruct(U_rb: np.ndarray, dofmap: DofMap, bases: list[np.ndarray], subdo
     return u # type: ignore
 
 
-def assemble_system(num_modes: int, dofmap: DofMap, A: FenicsxMatrixOperator, b: VectorOperator, bases: list[np.ndarray], num_max_modes: np.ndarray, parameters: Parameters):
+def assemble_system(logger, num_modes: int, dofmap: DofMap, A: FenicsxMatrixOperator, b: VectorOperator, bases: list[np.ndarray], num_max_modes: np.ndarray, parameters: Parameters):
     """Assembles ``operator`` and ``rhs`` for localized ROM as ``StationaryModel``.
 
     Args:
@@ -90,6 +90,7 @@ def assemble_system(num_modes: int, dofmap: DofMap, A: FenicsxMatrixOperator, b:
     dofs_per_edge = num_max_modes.copy()
     dofs_per_edge[num_max_modes > num_modes] = num_modes
     dofmap.distribute_dofs(dofs_per_vertex, dofs_per_edge, dofs_per_face)
+    # logger.debug("Dofs per edge:\n"+f"{dofs_per_edge=}")
 
     # ### Definition of Dirichlet BCs
     # This also depends on number of modes and can only be defined after
@@ -114,9 +115,10 @@ def assemble_system(num_modes: int, dofmap: DofMap, A: FenicsxMatrixOperator, b:
         dofs = dofmap.cell_dofs(ci)
 
         # select active modes
-        local_basis = select_modes(
+        stuff = select_modes(
                 bases[ci], num_max_modes[ci], dofs_per_edge[ci]
                 )
+        local_basis = stuff.copy()
         local_bases.append(local_basis)
         B = A.source.from_numpy(local_basis) # type: ignore
         A_local = project(A, B, B)
@@ -250,7 +252,9 @@ def main(args):
     bases_loader = BasesLoader(bases_folder, num_cells)
     bases, num_max_modes = bases_loader.read_bases()
     num_max_modes_per_cell = np.amax(num_max_modes, axis=1)
+    num_min_modes_per_cell = np.amin(num_max_modes, axis=1)
     max_modes = np.amax(num_max_modes_per_cell)
+    min_modes = np.amin(num_min_modes_per_cell)
     logger.info(f"Global maximum number of modes per edge is: {max_modes}.")
 
     # ### Cell set for each subdomain
@@ -258,41 +262,67 @@ def main(args):
     for j in range(1, 11):
         subdomains.append(cell_tags.find(j))
 
-    # Do I need to decouple assembly & error analysis?
     P = fom.parameters.space(beam.mu_range)
     validation_set = P.sample_randomly(1)
-    num_fine_scale_modes = list(range(0,32,4))
+    # num_fine_scale_modes = list(range(0,66+1,1))
+    num_fine_scale_modes = list(range(min_modes))
 
     vvv = FenicsxVisualizer(fom.solution_space)
 
     # ### ROM Assembly and Error Analysis
+    errors = []
     for mu in validation_set:
         U_fom = fom.solve(mu)
         # vvv.visualize(U_fom, filename="./work/debug_fom.bp")
 
         for nmodes in num_fine_scale_modes:
 
-            operator, rhs, local_bases = assemble_system(nmodes, dofmap, A, b, bases, num_max_modes, fom.parameters)
+            operator, rhs, local_bases = assemble_system(logger, nmodes, dofmap, A, b, bases, num_max_modes, fom.parameters)
             # bc_dofs = operator.operators[-1].matrix.indices
-            rom = StationaryModel(operator, rhs)
-            breakpoint()
-            Urb = rom.solve(mu)
-            u_rb = reconstruct(Urb.to_numpy(), dofmap, local_bases, subdomains, fom.solution_space.V) # type: ignore
+
+            NDOFs = dofmap.num_dofs
+
+            # FIXME rom.solve(mu) is not working as expected!
+            # Urb = rom.solve(mu)
+
+            # FIXME
+            # StationaryModel does some caching for evaluation for some mu
+            # rom = StationaryModel(operator, rhs, name=f"rom_{dofmap.num_dofs}")
+            # data = rom.compute(solution=True, mu=mu)
+            # Urb = data['solution']
+
+            fixed_op = operator.assemble(mu)
+            fixed_rhs = rhs.as_range_array()
+            K = fixed_op.matrix.todense()
+            F = fixed_rhs.to_numpy().flatten()
+            # κ = np.linalg.cond(K)
+            # logger.debug(f"Condition number {κ=}")
+            Urb = np.linalg.solve(K, F)
+
+            u_rb = reconstruct(Urb.reshape(1, Urb.size), dofmap, local_bases, subdomains, fom.solution_space.V) # type: ignore
+            # u_rb = reconstruct(Urb.to_numpy(), dofmap, local_bases, subdomains, fom.solution_space.V) # type: ignore
             U_rom = fom.solution_space.make_array([u_rb.vector])
             # vvv.visualize(U_rom, filename="./work/debug_rom.bp")
 
             ERR = U_fom - U_rom
-            # vvv.visualize(ERR, filename="./work/debug_err.bp")
+            ufom_norm = U_fom.norm(h1_product)
+            urom_norm = U_rom.norm(h1_product)
+            if nmodes == 28:
+                vvv.visualize(ERR, filename="./work/debug_err.bp")
 
             err = ERR.norm(h1_product)
-            logger.debug(f"{nmodes=}\terror: {err}")
+            errors.append(err[0])
+            logger.debug(f"{nmodes=}\t{NDOFs=}\terror: {err}")
+            logger.debug(f"{ufom_norm=}")
+            logger.debug(f"{urom_norm=}")
 
-    # DEBUGGING
-    # what could be going wrong?
-    # reconstruct rom solution locally to check continuity?
-    # looking at debug_err.bp, the mode shape seems correct, but its just the amplitude that is different ...
-    # maybe, I am overlooking something with regard to the Neumann BC ?
-    # maybe, the full operator A is wrong?
+            # FIXME
+            # with nmodes>=29 the error starts to increase
+            # what is going wrong?
+
+    import matplotlib.pyplot as plt
+    plt.semilogy(np.arange(len(errors)), errors, "k-o")
+    plt.show()
 
 
 if __name__ == "__main__":
