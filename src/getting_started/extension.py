@@ -38,6 +38,8 @@ def main(args):
     coarsegrid = beamproblem.coarse_grid
 
     # ### Subdomain problem
+    # TODO translate the subdomain to correct global coordinates
+    # this will make postprocessing easier?
     gdim = beam.gdim
     domain, _, _ = gmshio.read_from_msh(
         beam.unit_cell_grid.as_posix(), MPI.COMM_WORLD, gdim=gdim
