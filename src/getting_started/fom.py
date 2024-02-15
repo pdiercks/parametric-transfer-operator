@@ -152,7 +152,7 @@ def discretize_fom(ex):
     fom = StationaryModel(
             operator, rhs, output_functional=objective,
             products={"h1_0_semi": h1_product},
-            visualizer=viz
+            visualizer=viz, name="FOM"
             )
 
     return fom
