@@ -77,6 +77,8 @@ class COOMatrixOperator(Operator):
         return self.assemble(mu).as_source_array()
 
     def apply_inverse(self, V, mu=None, initial_guess=None, least_squares=False):
+        breakpoint()
+        print("hello, from coo matrix operator")
         return self.assemble(mu).apply_inverse(V, initial_guess=initial_guess, least_squares=least_squares)
 
 
