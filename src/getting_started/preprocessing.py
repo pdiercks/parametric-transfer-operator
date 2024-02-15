@@ -6,7 +6,7 @@ from dolfinx import fem, mesh
 from dolfinx.io import gmshio
 from dolfinx.io.utils import XDMFFile
 from basix.ufl import element
-from multi.preprocessing import create_rectangle
+from multi.preprocessing import create_rectangle, create_voided_rectangle
 from multi.domain import StructuredQuadGrid
 
 
@@ -84,7 +84,7 @@ def generate_meshes(example) -> None:
     coarse_grid = StructuredQuadGrid(coarse_domain)
 
     # ### Unit cell grid
-    create_rectangle(
+    create_voided_rectangle(
         0.0,
         1.0,
         0.0,
