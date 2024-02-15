@@ -26,6 +26,9 @@ from multi.io import BasesLoader, select_modes
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinElaSubProblem
 
+import os
+os.environ["PYMOR_CACHE_DISABLE"] = "1"
+
 
 def reconstruct(U_rb: np.ndarray, dofmap: DofMap, bases: list[np.ndarray], subdomains: list[np.ndarray], V: fem.FunctionSpaceBase) -> fem.Function:
     """Reconstructs rom solution on the global domain.
@@ -261,114 +264,36 @@ def main(args):
     for j in range(1, 11):
         subdomains.append(cell_tags.find(j))
 
-    P = fom.parameters.space(beam.mu_range)
-    validation_set = P.sample_randomly(1)
-    # num_fine_scale_modes = list(range(0,66+1,1))
-    num_fine_scale_modes = list(range(1, 10+1))
-
-    vvv = FenicsxVisualizer(fom.solution_space)
+    # vvv = FenicsxVisualizer(fom.solution_space)
 
     # ### ROM Assembly and Error Analysis
-
-    # ROM without fine scale modes
-    # nmodes = 4
-    # operator, rhs, local_bases = assemble_system(logger, nmodes, dofmap, A, b, bases, num_max_modes, fom.parameters)
-    # rom = StationaryModel(operator, rhs)
-
-    # mu = P.sample_randomly(1)[0]
-    # Urb = rom.solve(mu)
-    # Ufom = fom.solve(mu)
-    # u_rb = reconstruct(Urb.to_numpy(), dofmap, local_bases, subdomains, fom.solution_space.V) # type: ignore
-    # U_rom = fom.solution_space.make_array([u_rb.vector])
-    # uerr = Ufom - U_rom
-    # print("by model:", uerr.norm(h1_product))
-
-    # zu Fuß
-    # fixed_op = operator.assemble(mu)
-    # fixed_rhs = rhs.as_range_array()
-    # K = fixed_op.matrix.todense()
-    # F = fixed_rhs.to_numpy().flatten()
-    # Uarr = np.linalg.solve(K, F)
-    # u_rb_ = reconstruct(Uarr.reshape(1, Uarr.size), dofmap, local_bases, subdomains, fom.solution_space.V) # type: ignore
-    # U_rom = fom.solution_space.make_array([u_rb_.vector])
-    # uerr = Ufom - U_rom
-    # print("zu fuß:", uerr.norm(h1_product))
-
-    # # mu = P.sample_randomly(1)[0]
-    # # Urb = rom.solve(mu)
-    # # Ufom = fom.solve(mu)
-    # # u_rb = reconstruct(Urb.to_numpy(), dofmap, local_bases, subdomains, fom.solution_space.V) # type: ignore
-    # # U_rom = fom.solution_space.make_array([u_rb.vector])
-    # # uerr = Ufom - U_rom
-    # # print(uerr.norm(h1_product))
-    # # print("by model:", uerr.norm(h1_product))
-    # #
-    # # zu Fuß
-    # fixed_op = operator.assemble(mu)
-    # fixed_rhs = rhs.as_range_array()
-    # K = fixed_op.matrix.todense()
-    # F = fixed_rhs.to_numpy().flatten()
-    # Uarr = np.linalg.solve(K, F)
-    # u_rb = reconstruct(Uarr.reshape(1, Uarr.size), dofmap, local_bases, subdomains, fom.solution_space.V) # type: ignore
-    # U_rom = fom.solution_space.make_array([u_rb.vector])
-    # uerr = Ufom - U_rom
-    # print("zu fuß:", uerr.norm(h1_product))
-    #
-    # errors = []
-    # U_fom = fom.solve(mu_0)
-    # Urb_0 = rom.solve(mu_0)
-    # u_rb = reconstruct(Urb_0.to_numpy(), dofmap, local_bases, subdomains, fom.solution_space.V) # type: ignore
-    # U_rom = fom.solution_space.make_array([u_rb.vector])
-    # err_0 = U_fom - U_rom
-    # errors.append(err_0.norm(h1_product)[0])
+    P = fom.parameters.space(beam.mu_range)
+    validation_set = P.sample_randomly(1)
 
     errors = []
+    num_fine_scale_modes = list(range(0, 36+1, 1))
     for nmodes in num_fine_scale_modes:
         operator, rhs, local_bases = assemble_system(logger, nmodes, dofmap, A, b, bases, num_max_modes, fom.parameters)
         # bc_dofs = operator.operators[-1].matrix.indices
-        rom = StationaryModel(operator, rhs)
+        rom = StationaryModel(operator, rhs, name="locROM")
 
         for mu in validation_set:
-            # U_fom = fom.solve(mu)
-            # data = rom.compute(solution=True, mu=mu)
-            # Urb = data['solution']
-            # before = operator.apply(operator.source.ones(), mu=mu)
+            U_fom = fom.solve(mu) # is this cached or computed everytime?
             U_rb_ = rom.solve(mu)
-            # after = operator.apply(operator.source.ones(), mu=mu)
-            # breakpoint()
 
-            # fixed_op = operator.assemble(mu)
-            # fixed_rhs = rhs.as_range_array()
-            # K = fixed_op.matrix.todense() # type: ignore
-            # F = fixed_rhs.to_numpy().flatten() # type: ignore
-            # κ = np.linalg.cond(K)
-            # logger.debug(f"Condition number {κ=}")
-            # Urb = np.linalg.solve(K, F)
+            u_rb = reconstruct(U_rb_.to_numpy(), dofmap, local_bases, subdomains, fom.solution_space.V) # type: ignore
+            U_rom = fom.solution_space.make_array([u_rb.vector])
 
-            # u_rb = reconstruct(Urb.reshape(1, Urb.size), dofmap, local_bases, subdomains, fom.solution_space.V) # type: ignore
-            # u_rb_ = reconstruct(U_rb_.to_numpy(), dofmap, local_bases, subdomains, fom.solution_space.V) # type: ignore
-            # err_rom = u_rb.x.array - u_rb_.x.array
-            # breakpoint()
-            # U_rom = fom.solution_space.make_array([u_rb.vector])
-            # U_rom = fom.solution_space.make_array([u_rb_.vector])
-            # vvv.visualize(U_rom, filename="./work/debug_rom.bp")
+            ERR = U_fom - U_rom
+            ufom_norm = U_fom.norm(h1_product) # type: ignore
+            urom_norm = U_rom.norm(h1_product)
+            err = ERR.norm(h1_product)
+            errors.append(np.max(err))
+            NDOFs = dofmap.num_dofs
+            logger.debug(f"{nmodes=}\t{NDOFs=}\terror: {err}")
+            logger.debug(f"{ufom_norm=}")
+            logger.debug(f"{urom_norm=}")
 
-            # ERR = U_fom - U_rom
-            # ufom_norm = U_fom.norm(h1_product) # type: ignore
-            # urom_norm = U_rom.norm(h1_product)
-            # if nmodes == 28:
-            #     vvv.visualize(ERR, filename="./work/debug_err.bp")
-            #
-            # err = ERR.norm(h1_product)
-            # errors.append(np.max(err))
-            # NDOFs = dofmap.num_dofs
-            # logger.debug(f"{nmodes=}\t{NDOFs=}\terror: {err}")
-            # logger.debug(f"{ufom_norm=}")
-            # logger.debug(f"{urom_norm=}")
-
-            # FIXME
-            # with nmodes>=29 the error starts to increase
-            # what is going wrong?
 
     if args.show:
         import matplotlib.pyplot as plt
@@ -380,8 +305,6 @@ if __name__ == "__main__":
     import sys
     import argparse
 
-    import os
-    os.environ["PYMOR_CACHE_DISABLE"] = "1"
 
     parser = argparse.ArgumentParser(
         description="Solve the beam problem with the localized ROM."

@@ -45,16 +45,17 @@ class COOMatrixOperator(Operator):
         self.__auto_init(locals()) # type: ignore
         self.source = NumpyVectorSpace(shape[1])
         self.range = NumpyVectorSpace(shape[0])
-        self._fixeddata = data[0].copy()
+        self._data = data[0].copy()
 
     def assemble(self, mu=None):
         assert self.parameters.assert_compatible(mu)
+
         data, rows, cols = self.data # type: ignore
         indexptr = self.indexptr # type: ignore
         num_cells = self.num_cells # type: ignore
 
-        new = self._fixeddata
-        if mu is not None:
+        new = self._data
+        if self.parametric and mu is not None:
             m = mu.to_numpy()
             new[:indexptr[0]] = data[:indexptr[0]] * m[0]
             for i in range(1, num_cells):
