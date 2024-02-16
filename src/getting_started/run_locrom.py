@@ -26,9 +26,6 @@ from multi.io import BasesLoader, select_modes
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinElaSubProblem
 
-import os
-os.environ["PYMOR_CACHE_DISABLE"] = "1"
-
 
 def reconstruct(U_rb: np.ndarray, dofmap: DofMap, bases: list[np.ndarray], subdomains: list[np.ndarray], V: fem.FunctionSpaceBase) -> fem.Function:
     """Reconstructs rom solution on the global domain.
@@ -268,36 +265,58 @@ def main(args):
 
     # ### ROM Assembly and Error Analysis
     P = fom.parameters.space(beam.mu_range)
-    validation_set = P.sample_randomly(1)
+    validation_set = P.sample_randomly(4)
 
-    errors = []
-    num_fine_scale_modes = list(range(0, 36+1, 1))
+    num_fine_scale_modes = list(range(0, 40+1, 4))
+    max_errors = []
     for nmodes in num_fine_scale_modes:
         operator, rhs, local_bases = assemble_system(logger, nmodes, dofmap, A, b, bases, num_max_modes, fom.parameters)
         # bc_dofs = operator.operators[-1].matrix.indices
         rom = StationaryModel(operator, rhs, name="locROM")
 
+        # it should be possible to compute all norms at once?
+        # fom_solutions = fom.solution_space.empty()
+        # rom_solutions = fom.solution_space.empty()
+
+        err_norms = []
         for mu in validation_set:
             U_fom = fom.solve(mu) # is this cached or computed everytime?
+            # fom_solutions.append(U_fom)
             U_rb_ = rom.solve(mu)
 
             u_rb = reconstruct(U_rb_.to_numpy(), dofmap, local_bases, subdomains, fom.solution_space.V) # type: ignore
             U_rom = fom.solution_space.make_array([u_rb.vector])
+            # rom_solutions.append(U_rom)
 
-            ERR = U_fom - U_rom
-            ufom_norm = U_fom.norm(h1_product) # type: ignore
-            urom_norm = U_rom.norm(h1_product)
-            err = ERR.norm(h1_product)
-            errors.append(np.max(err))
-            NDOFs = dofmap.num_dofs
-            logger.debug(f"{nmodes=}\t{NDOFs=}\terror: {err}")
-            logger.debug(f"{ufom_norm=}")
-            logger.debug(f"{urom_norm=}")
+            ERR = U_fom - U_rom # works
+            errn = ERR.norm(h1_product)
+            err_norms.append(errn)
+
+        # FIXME
+        # have to workaround this error; not sure if this is an issue with the bindings
+        # rom_solutions.norm() # PETSC ERROR: Segmentation Violation
+
+        # FIXME
+        # ERR = fom_solutions - rom_solutions # PETSC ERROR: Segmentation Violation
+
+        # ufom_norm = U_fom.norm(h1_product) # type: ignore
+        # urom_norm = U_rom.norm(h1_product)
+        # err = ERR.norm(h1_product)[0]
+        # errors.append(err)
+        # NDOFs = dofmap.num_dofs
+        # logger.debug(f"{nmodes=}\t{NDOFs=}\terror: {err}")
+        # logger.debug(f"{ufom_norm=}")
+        # logger.debug(f"{urom_norm=}")
+        # err_norms = ERR.norm(h1_product)
+        # max_err = np.max(errors)
+        max_err = np.max(err_norms)
+        max_errors.append(max_err)
+        logger.debug(f"{max_err=} for {nmodes=}.")
 
 
     if args.show:
         import matplotlib.pyplot as plt
-        plt.semilogy(np.arange(len(errors)), errors, "k-o")
+        plt.semilogy(num_fine_scale_modes, max_errors, "k-o")
         plt.show()
 
 
