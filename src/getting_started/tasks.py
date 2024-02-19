@@ -222,6 +222,24 @@ def task_extension():
                     }
 
 
+def task_loc_rom():
+    """Getting started: Validate the localized ROM."""
+    module = "src.getting_started.run_locrom"
+    deps = [beam.fine_grid, beam.unit_cell_grid]
+    num_cells = beam.nx * beam.ny
+    num_test = 5 # TODO
+    for distr in DISTR:
+        deps += [beam.local_basis_npz(distr, cell) for cell in range(num_cells)]
+        target = beam.loc_rom_error(distr)
+        yield {
+                "name": f"locrom_{beam.name}_{distr}",
+                "file_dep": deps,
+                "actions": ["python3 -m {} {} {} --output {}".format(module, distr, num_test, target)],
+                "targets": [target],
+                "clean": True,
+                }
+
+
 def task_paper():
     """Getting started: Compile Paper"""
     source = ROOT / "paper/paper.tex"

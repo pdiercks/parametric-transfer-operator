@@ -206,6 +206,10 @@ class BeamData:
         dir = self.bases_path(distr)
         return dir / f"basis_{cell:03}.npz"
 
+    def loc_rom_error(self, distr: str) -> Path:
+        """loc ROM error relative to FOM"""
+        return self.rf / f"loc_rom_error_{distr}.csv"
+
 
 
 class BeamProblem(MultiscaleProblemDefinition):
