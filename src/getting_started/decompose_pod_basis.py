@@ -7,14 +7,9 @@ import numpy as np
 
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
-from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxVisualizer
-from pymor.vectorarrays.numpy import NumpyVectorSpace
-from pymor.algorithms.gram_schmidt import gram_schmidt
+from pymor.bindings.fenicsx import FenicsxVectorSpace
 
-from multi.bcs import BoundaryDataFactory
-from multi.extension import extend
 from multi.misc import locate_dofs, x_dofs_vectorspace
-from multi.interpolation import make_mapping
 from multi.domain import RectangularSubdomain
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinElaSubProblem
@@ -24,7 +19,6 @@ from multi.basis_construction import compute_phi
 def main(args):
     """decompose pod basis into coarse and fine scale parts"""
     from .tasks import beam
-
     set_defaults(
         {
             "pymor.core.logger.getLogger.filename": beam.log_decompose_pod_basis(
@@ -61,15 +55,9 @@ def main(args):
     # ### Full POD basis
     pod_basis_data = np.load(beam.loc_pod_modes(args.distribution, args.configuration))
     pod_basis = source.from_numpy(pod_basis_data)
-    viz = FenicsxVisualizer(source)
-    viz.visualize(
-        pod_basis,
-        filename=beam.pod_modes_bp(args.distribution, args.configuration).as_posix(),
-    )
     logger.info(f"Size of POD basis: {len(pod_basis)}.")
 
     # ### Coarse scale basis
-    # FIXME: geom_deg is now 2, therefore cannot use full x here
     vertices = omega.coarse_grid.topology.connectivity(2, 0).links(0)
     x_vertices = mesh.compute_midpoints(omega.coarse_grid, 0, vertices)
     phi_vectors = compute_phi(problem, x_vertices)
@@ -85,115 +73,13 @@ def main(args):
     assert np.allclose(zero_dofs, np.zeros_like(zero_dofs))
 
     # ### Restriction of fine scale part to edges
-    bc_factory = BoundaryDataFactory(problem.domain.grid, problem.V)
-    edges = set(["left", "bottom", "right", "top"])
-    zero_function = fem.Function(problem.V)
-    zero_function.x.array[:] = 0.0
-    boundary_data = list()
-
-    # ### use Gram Schmidt to define edge mode sets
-    # bottom-top
-    # left-right
-    map_top_to_bottom = make_mapping(
-        problem.edge_spaces["fine"]["bottom"], problem.edge_spaces["fine"]["top"]
-    )
-    map_right_to_left = make_mapping(
-        problem.edge_spaces["fine"]["left"], problem.edge_spaces["fine"]["right"]
-    )
-
-    left = u_fine.dofs(problem.V_to_L["left"])
-    right = u_fine.dofs(problem.V_to_L["right"][map_right_to_left])
-    bottom = u_fine.dofs(problem.V_to_L["bottom"])
-    top = u_fine.dofs(problem.V_to_L["top"][map_top_to_bottom])
-    LR = NumpyVectorSpace(left.shape[-1])
-    BT = NumpyVectorSpace(bottom.shape[-1])
-
-    # FIXME inner product for GS orthonormalization
-
-    snapshots_left_right = LR.empty()
-    snapshots_left_right.append(LR.from_numpy(left))
-    snapshots_left_right.append(LR.from_numpy(right))
-    logger.info(f"Number of snapshots left/right: {len(snapshots_left_right)}.")
-    with logger.block("GS orthonormalization left/right"):
-        modes_left_right = gram_schmidt(snapshots_left_right)
-    logger.info(f"Number of modes after GS left/right: {len(modes_left_right)}.")
-
-    snapshots_bottom_top = BT.empty()
-    snapshots_bottom_top.append(BT.from_numpy(bottom))
-    snapshots_bottom_top.append(BT.from_numpy(top))
-    logger.info(f"Number of snapshots bottom/top: {len(snapshots_bottom_top)}.")
-    with logger.block("GS orthonormalization bottom/top"):
-        modes_bottom_top = gram_schmidt(snapshots_bottom_top)
-    logger.info(f"Number of modes after GS bottom/top: {len(modes_bottom_top)}.")
-
-    mask = {}  # mask used to write edge sets separately
-    start = 0
-    end = 0
+    fine_scale_modes = {}
     for edge, dofs in problem.V_to_L.items():
-        if edge in ("bottom", "top"):
-            modes = modes_bottom_top.to_numpy()
-        else:
-            modes = modes_left_right.to_numpy()
-        end += modes.shape[-1]
-        mask[edge] = np.s_[start:end]
-        start += modes.shape[-1]
-        # create BCs for extension of each mode
-        zero_boundaries = list(edges.difference([edge]))
-        for mode in modes:
-            bc = []
-            g = bc_factory.create_function_values(mode, dofs)
-            bc.append(
-                {
-                    "value": g,
-                    "boundary": problem.domain.str_to_marker(edge),
-                    "method": "geometrical",
-                }
-            )
-            for boundary in zero_boundaries:
-                bc.append(
-                    {
-                        "value": zero_function,
-                        "boundary": problem.domain.str_to_marker(boundary),
-                        "method": "geometrical",
-                    }
-                )
-            assert len(bc) == 4
-            boundary_data.append(bc)
+        fine_scale_modes[edge] = u_fine.dofs(dofs)
 
-    petsc_options = {
-        "ksp_type": "preonly",
-        "pc_type": "lu",
-        "pc_factor_mat_solver_type": "mumps",
-    }
-    extensions = extend(
-        problem, boundary_data=boundary_data, petsc_options=petsc_options
-    )
-    U = source.make_array(extensions)
-    viz.visualize(
-        U,
-        filename=beam.fine_scale_modes_bp(
-            args.distribution, args.configuration
-        ).as_posix(),
-    )
-    uf_arrays = {}
-    for edge, view in mask.items():
-        uf_arrays[edge] = U[view].to_numpy()
-
-    # ### write coarse scale basis and fine scale basis as numpy array
-    # to be used in the online phase
-    # data needs to be written for compatibility with multi.io.BasesLoader
-    # FIXME: BasesLoader expects filename basis_{cell_index}.npz
-    # Workaround: maybe do not use BasesLoader for this particular example?
-    # BasesLoader is designed for case that each coarse grid cell has different
-    # set of basis functions
-
-    # TODO: simply write npz file for each configuration
-    # BasesLoader config has to be defined to load these files
-    # for particular cells
     np.savez(
-        beam.local_basis_npz(args.distribution, args.configuration).as_posix(),
-        phi=phi.to_numpy(),
-        **uf_arrays,
+        beam.fine_scale_edge_modes_npz(args.distribution, args.configuration).as_posix(),
+        **fine_scale_modes,
     )
 
 

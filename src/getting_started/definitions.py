@@ -87,6 +87,8 @@ class BeamData:
         """create dirs"""
         self.grids_path.mkdir(exist_ok=True, parents=True)
         self.logs_path.mkdir(exist_ok=True, parents=True)
+        for distr in self.distributions:
+            self.bases_path(distr).mkdir(exist_ok=True, parents=True)
 
     @property
     def rf(self) -> Path:
@@ -100,6 +102,9 @@ class BeamData:
     @property
     def logs_path(self) -> Path:
         return self.rf / "logs"
+
+    def bases_path(self, distr: str) -> Path:
+        return self.rf / f"bases/{distr}"
 
     @property
     def coarse_grid(self) -> Path:
@@ -142,6 +147,12 @@ class BeamData:
     def log_decompose_pod_basis(self, distr: str, conf: str) -> Path:
         return self.logs_path / f"decompose_pod_basis_{distr}_{conf}.log"
 
+    def log_extension(self, distr : str, cell: int) -> Path:
+        return self.logs_path / f"extension_{distr}_{cell}.log"
+
+    def log_run_locrom(self, distr : str) -> Path:
+        return self.logs_path / f"run_locrom_{distr}.log"
+
     def loc_singular_values(self, distr: str, conf: str) -> Path:
         """singular values of POD compression for range approximation of parametric T"""
         return self.rf / f"loc_singular_values_{distr}_{conf}.npy"
@@ -154,13 +165,13 @@ class BeamData:
         """same as `loc_pod_modes` but adios2 (bp) format"""
         return self.rf / f"pod_modes_{distr}_{conf}.bp"
 
-    def fine_scale_modes_bp(self, distr: str, conf: str) -> Path:
-        """fine scale basis functions after extension"""
-        return self.rf / f"fine_scale_modes_{distr}_{conf}.bp"
+    def fine_scale_edge_modes_npz(self, distr: str, conf: str) -> Path:
+        """edge-restricted fine scale part of pod modes"""
+        return self.rf / f"fine_scale_edge_modes_{distr}_{conf}.npz"
 
-    def local_basis_npz(self, distr: str, conf: str) -> Path:
-        """final local basis functions"""
-        return self.rf / f"local_basis_{distr}_{conf}.npz"
+    def fine_scale_modes_bp(self, distr: str, cell: int) -> Path:
+        """fine scale basis functions after extension"""
+        return self.rf / f"fine_scale_modes_{distr}_{cell}.bp"
 
     def fom_test_set(self, conf: str) -> Path:
         """test set generated from FOM solutions"""
@@ -178,12 +189,35 @@ class BeamData:
         """figure of singular values of POD compression after rrf"""
         return self.rf / f"fig_loc_svals_{config}.pdf"
 
+    def config_to_cell(self, config: str) -> int:
+        """Maps config to global cell index."""
+        map = {"inner": 4, "left": 0, "right": 9}
+        return map[config]
+
+    def cell_to_config(self, cell: int) -> str:
+        """Maps global cell index to config."""
+        assert cell in list(range(self.nx * self.ny))
+        map = {0: "left", 9: "right"}
+        config = map.get(cell, "inner")
+        return config
+
+    def local_basis_npz(self, distr: str, cell: int) -> Path:
+        """final basis for loc rom assembly"""
+        dir = self.bases_path(distr)
+        return dir / f"basis_{cell:03}.npz"
+
+    def loc_rom_error(self, distr: str) -> Path:
+        """loc ROM error relative to FOM"""
+        return self.rf / f"loc_rom_error_{distr}.csv"
+
+
 
 class BeamProblem(MultiscaleProblemDefinition):
     def __init__(self, coarse_grid: str, fine_grid: str):
         super().__init__(coarse_grid, fine_grid)
         self.setup_coarse_grid(2)
         self.setup_fine_grid()
+        self.build_edge_basis_config(self.cell_sets)
 
     def config_to_cell(self, config: str) -> int:
         """Maps config to global cell index."""
@@ -192,6 +226,21 @@ class BeamProblem(MultiscaleProblemDefinition):
 
     @property
     def cell_sets(self):
+        """Returns cell sets for definition of edge basis configuration"""
+        # the order is important
+        # this way e.g. cell 1 will load modes for the left edge
+        # from basis generated for cell 1 (config inner)
+        cell_sets = {
+                "inner": set([1, 2, 3, 4, 5, 6, 7, 8]),
+                "left": set([0,]),
+                "right": set([9,]),
+                }
+        return cell_sets
+
+    @property
+    def cell_sets_oversampling(self):
+        """Returns cell sets that define oversampling domains"""
+        # see preprocessing.py
         cells = {
             "inner": set([3, 4, 5]),
             "left": set([0, 1]),

@@ -12,8 +12,12 @@ from scipy.sparse.linalg import LinearOperator, eigsh
 from scipy.special import erfinv
 from time import perf_counter
 
+from mpi4py import MPI
 from dolfinx import fem, default_scalar_type
+from dolfinx.io import gmshio
+from basix.ufl import element
 
+from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxVisualizer
 from pymor.algorithms.gram_schmidt import gram_schmidt
 from pymor.algorithms.pod import pod
 from pymor.core.defaults import defaults, set_defaults
@@ -344,6 +348,22 @@ def main(args):
     logger.info(f"Number of snapshots: {len(snapshots)}.")
     logger.info(f"Number of POD modes: {len(pod_modes)}.")
     logger.info(f"POD tolerance used: rtol={beam.pod_rtol}.")
+
+    # ### Re-instantiate fenics objects
+    gdim = beam.gdim
+    domain, _, _ = gmshio.read_from_msh(
+        beam.unit_cell_grid.as_posix(), MPI.COMM_SELF, gdim=gdim
+    )
+    degree = beam.fe_deg
+    fe = element("P", domain.basix_cell(), degree, shape=(gdim,))
+    V = fem.functionspace(domain, fe)
+    source = FenicsxVectorSpace(V)
+    pod_basis = source.from_numpy(pod_modes.to_numpy())
+    viz = FenicsxVisualizer(source)
+    viz.visualize(
+        pod_basis,
+        filename=beam.pod_modes_bp(args.distribution, args.configuration).as_posix(),
+    )
 
     # write pod modes and singular values to disk
     np.save(

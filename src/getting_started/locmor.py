@@ -32,6 +32,7 @@ class COOMatrixOperator(Operator):
         indexptr: Points to end of data for each cell.
         num_cells: Number of cells.
         shape: The shape of the matrix.
+        parameters: The |Parameters| the operator depends on.
         solver_options: Solver options.
         name: The name of the operator.
 
@@ -39,25 +40,28 @@ class COOMatrixOperator(Operator):
 
     linear = True
 
-    def __init__(self, data: Tuple[np.ndarray, np.ndarray, np.ndarray], indexptr: np.ndarray, num_cells: int, shape: Tuple[int, int], solver_options: Optional[dict] = None, name: Optional[str] = None):
+    def __init__(self, data: Tuple[np.ndarray, np.ndarray, np.ndarray], indexptr: np.ndarray, num_cells: int, shape: Tuple[int, int], parameters: Parameters = {}, solver_options: Optional[dict] = None, name: Optional[str] = None):
         assert all([d.shape == data[0].shape for d in data])
         self.__auto_init(locals()) # type: ignore
         self.source = NumpyVectorSpace(shape[1])
         self.range = NumpyVectorSpace(shape[0])
+        self._data = data[0].copy()
 
     def assemble(self, mu=None):
         assert self.parameters.assert_compatible(mu)
+
         data, rows, cols = self.data # type: ignore
         indexptr = self.indexptr # type: ignore
         num_cells = self.num_cells # type: ignore
 
-        if mu is not None:
+        new = self._data
+        if self.parametric and mu is not None:
             m = mu.to_numpy()
-            data[:indexptr[0]] *= m[0]
+            new[:indexptr[0]] = data[:indexptr[0]] * m[0]
             for i in range(1, num_cells):
-                data[indexptr[i-1]:indexptr[i]] *= m[i]
+                new[indexptr[i-1]:indexptr[i]] = data[indexptr[i-1]:indexptr[i]] * m[i]
 
-        K = coo_array((data, (rows, cols)), shape=self.shape) # type: ignore
+        K = coo_array((new, (rows, cols)), shape=self.shape) # type: ignore
         K.eliminate_zeros()
         return NumpyMatrixOperator(K.tocsr(), self.source.id, self.range.id, self.solver_options, self.name + "_assembled")
 
@@ -74,6 +78,8 @@ class COOMatrixOperator(Operator):
         return self.assemble(mu).as_source_array()
 
     def apply_inverse(self, V, mu=None, initial_guess=None, least_squares=False):
+        breakpoint()
+        print("hello, from coo matrix operator")
         return self.assemble(mu).apply_inverse(V, initial_guess=initial_guess, least_squares=least_squares)
 
 
