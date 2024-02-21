@@ -44,7 +44,7 @@ def main(args):
     cell_index = beamproblem.config_to_cell(args.configuration)
     dirichlet = beamproblem.get_dirichlet(cell_index)
     kernel_set = beamproblem.get_kernel_set(cell_index)
-    logger.info(f"{kernel_set=}")
+    logger.debug(f"{kernel_set=}")
 
     # ### Translate the unit cell domain
     unit_length = omega.xmax[0] - omega.xmin[0]
@@ -87,6 +87,7 @@ def main(args):
     data = np.load(beam.fom_test_set(args.configuration))
     U = source.from_numpy(data)
 
+    # TODO maybe have both absolute and relative errors written to disk?
     errs = compute_absolute_proj_errors(U, basis, product=product, orthonormal=True)
     np.save(beam.proj_error(args.distribution, args.configuration), errs)
 

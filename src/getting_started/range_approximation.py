@@ -213,6 +213,7 @@ def approximate_range(beam, mu, configuration, distribution="normal"):
     num_testvecs = beam.rrf_num_testvecs
     source_product = transfer_problem.source_product
     range_product = transfer_problem.range_product
+
     # TODO approximate range in context of new_rng (if number of realizations > 1)
     basis = adaptive_rrf(
         transfer_problem,
@@ -342,6 +343,7 @@ def main(args):
     snapshots.append(basis)
     for rb, _ in results:
         snapshots.append(rb)
+
     pod_data = pod(snapshots, product=range_product, rtol=beam.pod_rtol)
     pod_modes = pod_data[0]
     svals = pod_data[1]
@@ -359,6 +361,7 @@ def main(args):
     V = fem.functionspace(domain, fe)
     source = FenicsxVectorSpace(V)
     pod_basis = source.from_numpy(pod_modes.to_numpy())
+
     viz = FenicsxVisualizer(source)
     viz.visualize(
         pod_basis,
