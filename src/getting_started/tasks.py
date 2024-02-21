@@ -240,6 +240,17 @@ def task_loc_rom():
                 }
 
 
+def task_plot_loc_rom_error():
+    """Getting started: Plot localized ROM error."""
+    module = "src.getting_started.plot_locrom_error"
+    return {
+            "file_dep": [beam.loc_rom_error(d) for d in DISTR],
+            "actions": ["python3 -m {} %(targets)s".format(module)],
+            "targets": [beam.fig_loc_rom_error],
+            "clean": True,
+            }
+
+
 def task_paper():
     """Getting started: Compile Paper"""
     source = ROOT / "paper/paper.tex"

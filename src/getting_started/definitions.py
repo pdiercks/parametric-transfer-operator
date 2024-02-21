@@ -189,6 +189,11 @@ class BeamData:
         """figure of singular values of POD compression after rrf"""
         return self.rf / f"fig_loc_svals_{config}.pdf"
 
+    @property
+    def fig_loc_rom_error(self) -> Path:
+        """figure of loc rom error"""
+        return self.rf / f"fig_loc_rom_error.pdf"
+
     def config_to_cell(self, config: str) -> int:
         """Maps config to global cell index."""
         map = {"inner": 4, "left": 0, "right": 9}
