@@ -1,9 +1,8 @@
 """latin hypercube sampling"""
 
-from typing import Optional
 import numpy as np
 from pyDOE3 import lhs
-from pymor.parameters.base import Mu, Parameters, ParameterSpace
+from pymor.parameters.base import Mu, ParameterSpace
 
 
 def scale_range(samples: np.ndarray, ranges: np.ndarray):
@@ -49,8 +48,6 @@ if __name__ == "__main__":
     criterion = "center"
     samples = lhs(ndim, samples=num_samples, criterion=criterion)
     scale_range(samples, x)
-
-    breakpoint()
 
     import matplotlib.pyplot as plt
 
