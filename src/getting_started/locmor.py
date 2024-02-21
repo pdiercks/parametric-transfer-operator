@@ -6,6 +6,7 @@ from scipy.sparse import coo_array
 from mpi4py import MPI
 from dolfinx import mesh, fem
 from dolfinx.fem.petsc import set_bc
+from dolfinx.io import gmshio
 from dolfinx.io.utils import XDMFFile
 from basix.ufl import element
 
@@ -102,20 +103,8 @@ def discretize_oversampling_problem(example: BeamData, mu: Mu, configuration: st
     omega.create_facet_tags({
         "bottom": int(11), "left": int(12), "right": int(13), "top": int(14)
         })
-    tdim = omega.tdim
-    gdim = omega.gdim
 
-    # ### Definitions dependent on configuration
-    # Topology: Γ_out, Ω_in, Σ_D
-    # Dirichlet BCs on Σ_D
     mu_values = mu.to_numpy()
-    beamproblem = BeamProblem(example.coarse_grid.as_posix(), example.fine_grid.as_posix())
-    cell_index = beamproblem.config_to_cell(configuration)
-    gamma_out = beamproblem.get_gamma_out(cell_index)
-    mark_omega_in = beamproblem.get_omega_in(cell_index)
-    dirichlet = beamproblem.get_dirichlet(cell_index)
-    kernel_set = beamproblem.get_kernel_set(cell_index)
-
     if configuration == "inner":
         assert mu_values.size == 3
         assert omega.facet_tags.find(11).size == example.resolution * 3 # bottom
@@ -140,11 +129,22 @@ def discretize_oversampling_problem(example: BeamData, mu: Mu, configuration: st
     else:
         raise NotImplementedError
 
+    # ### Definitions dependent on configuration
+    # Topology: Γ_out, Ω_in, Σ_D
+    # Dirichlet BCs on Σ_D
+    beamproblem = BeamProblem(example.coarse_grid.as_posix(), example.fine_grid.as_posix())
+    cell_index = beamproblem.config_to_cell(configuration)
+    gamma_out = beamproblem.get_gamma_out(cell_index)
+    dirichlet = beamproblem.get_dirichlet(cell_index)
+    kernel_set = beamproblem.get_kernel_set(cell_index)
+
     # ### Omega in
-    cells_omega_in = mesh.locate_entities(domain, tdim, mark_omega_in)
-    omega_in, _, _, _ = mesh.create_submesh(domain, tdim, cells_omega_in)
+    gdim = example.gdim
+    unit_cell_domain, _, _ = gmshio.read_from_msh(example.unit_cell_grid.as_posix(), MPI.COMM_WORLD, gdim=gdim)
     id_omega_in = 99
-    omega_in = RectangularSubdomain(id_omega_in, omega_in)
+    omega_in = RectangularSubdomain(id_omega_in, unit_cell_domain)
+    dx_omega_in = beamproblem.get_xmin_omega_in(cell_index)
+    omega_in.translate(dx_omega_in)
 
     # ### FE spaces
     degree = example.fe_deg

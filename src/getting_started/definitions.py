@@ -2,7 +2,7 @@ from typing import Optional, Callable, Union
 from dataclasses import dataclass, field
 from pathlib import Path
 import numpy as np
-from multi.boundary import point_at, plane_at, within_range
+from multi.boundary import point_at, plane_at
 from multi.problems import MultiscaleProblemDefinition
 from dolfinx import default_scalar_type
 
@@ -62,21 +62,21 @@ class BeamData:
             "inner": {
                 "name": "E",
                 "ndim": 3,
-                "samples": 100,
+                "samples": 30,
                 "criterion": "center",
                 "random_state": 1510,
             },
             "left": {
                 "name": "E",
                 "ndim": 2,
-                "samples": 50,
+                "samples": 20,
                 "criterion": "center",
                 "random_state": 1511,
             },
             "right": {
                 "name": "E",
                 "ndim": 2,
-                "samples": 50,
+                "samples": 20,
                 "criterion": "center",
                 "random_state": 1512,
             },
@@ -147,10 +147,10 @@ class BeamData:
     def log_decompose_pod_basis(self, distr: str, conf: str) -> Path:
         return self.logs_path / f"decompose_pod_basis_{distr}_{conf}.log"
 
-    def log_extension(self, distr : str, cell: int) -> Path:
+    def log_extension(self, distr: str, cell: int) -> Path:
         return self.logs_path / f"extension_{distr}_{cell}.log"
 
-    def log_run_locrom(self, distr : str) -> Path:
+    def log_run_locrom(self, distr: str) -> Path:
         return self.logs_path / f"run_locrom_{distr}.log"
 
     def loc_singular_values(self, distr: str, conf: str) -> Path:
@@ -211,7 +211,6 @@ class BeamData:
         return self.rf / f"loc_rom_error_{distr}.csv"
 
 
-
 class BeamProblem(MultiscaleProblemDefinition):
     def __init__(self, coarse_grid: str, fine_grid: str):
         super().__init__(coarse_grid, fine_grid)
@@ -231,10 +230,10 @@ class BeamProblem(MultiscaleProblemDefinition):
         # this way e.g. cell 1 will load modes for the left edge
         # from basis generated for cell 1 (config inner)
         cell_sets = {
-                "inner": set([1, 2, 3, 4, 5, 6, 7, 8]),
-                "left": set([0,]),
-                "right": set([9,]),
-                }
+            "inner": set([1, 2, 3, 4, 5, 6, 7, 8]),
+            "left": set([0]),
+            "right": set([9]),
+        }
         return cell_sets
 
     @property
@@ -258,18 +257,19 @@ class BeamProblem(MultiscaleProblemDefinition):
             "bottom_right": (int(102), point_at([xmax[0], xmin[1], xmin[2]])),
         }
 
-    def get_omega_in(self, cell_index: Optional[int] = None) -> Callable:
+    def get_xmin_omega_in(self, cell_index: Optional[int] = None) -> np.ndarray:
+        """Returns coordinate xmin of target subdomain"""
         if cell_index is not None:
             assert cell_index in (0, 4, 9)
         if cell_index == 0:
-            marker = within_range([0.0, 0.0], [1.0, 1.0])
+            xmin = np.array([[0.0, 0.0, 0.0]])
         elif cell_index == 4:
-            marker = within_range([4.0, 0.0], [5.0, 1.0])
+            xmin = np.array([[4.0, 0.0, 0.0]])
         elif cell_index == 9:
-            marker = within_range([9.0, 0.0], [10.0, 1.0])
+            xmin = np.array([[9.0, 0.0, 0.0]])
         else:
             raise NotImplementedError
-        return marker
+        return xmin
 
     def get_dirichlet(self, cell_index: Optional[int] = None) -> Union[dict, None]:
         _, origin = self.boundaries["origin"]

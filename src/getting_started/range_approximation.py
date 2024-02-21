@@ -213,6 +213,14 @@ def approximate_range(beam, mu, configuration, distribution="normal"):
     num_testvecs = beam.rrf_num_testvecs
     source_product = transfer_problem.source_product
     range_product = transfer_problem.range_product
+
+    rhs = transfer_problem.generate_random_boundary_data(10, distribution="normal")
+    just_images = transfer_problem.solve(rhs)
+    visu = FenicsxVisualizer(transfer_problem.range)
+    visu.visualize(just_images, filename="./debug_just_images.bp")
+
+    after_gs = gram_schmidt(just_images, product=range_product, copy=True)
+    visu.visualize(after_gs, filename="./debug_after_gs.bp")
     # TODO approximate range in context of new_rng (if number of realizations > 1)
     basis = adaptive_rrf(
         transfer_problem,
@@ -283,6 +291,7 @@ def approximate_range(beam, mu, configuration, distribution="normal"):
     # raise error if extension fails?
     basis.append(U_orth)
     gram_schmidt(basis, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
+    visu.visualize(basis, filename="./debug_basis_neumann.bp")
     logger.info(
         f"{pid=},\tNumber of basis functions after adding neumann data is {len(basis)}."
     )
@@ -342,6 +351,7 @@ def main(args):
     snapshots.append(basis)
     for rb, _ in results:
         snapshots.append(rb)
+
     pod_data = pod(snapshots, product=range_product, rtol=beam.pod_rtol)
     pod_modes = pod_data[0]
     svals = pod_data[1]
@@ -359,6 +369,7 @@ def main(args):
     V = fem.functionspace(domain, fe)
     source = FenicsxVectorSpace(V)
     pod_basis = source.from_numpy(pod_modes.to_numpy())
+
     viz = FenicsxVisualizer(source)
     viz.visualize(
         pod_basis,
