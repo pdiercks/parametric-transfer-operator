@@ -102,7 +102,7 @@ def task_loc_pod_modes():
                     beam.loc_singular_values(distr, config),
                     beam.pod_modes_bp(distr, config),
                 ],
-                "clean": True,
+                "clean": [rm_rf],
             }
 
 
