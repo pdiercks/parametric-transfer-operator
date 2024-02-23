@@ -17,6 +17,7 @@ from multi.dofmap import QuadrilateralDofLayout
 from multi.extension import extend
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinElaSubProblem
+from multi.interpolation import make_mapping
 
 
 def main(args):
@@ -72,29 +73,32 @@ def main(args):
     cell_edges = coarsegrid.get_entities(1, args.cell)
 
     table = []
-    table.append(["Global edge index", "Local edge"])
+    table.append(["Global edge index", "Owning cell", "Local edge"])
 
     for local_ent, edge in enumerate(cell_edges):
         (ci, loc_edge) = beamproblem.edge_to_cell(edge)
-        table.append([edge, loc_edge])
+        table.append([edge, ci, loc_edge])
 
         # ### Fine scale edge modes
         configuration = beam.cell_to_config(ci)
         infile = beam.fine_scale_edge_modes_npz(args.distribution, configuration)
+        logger.debug(f"Reading fine scale modes for cell {args.cell} from file: {infile}")
         fine_scale_edge_modes = np.load(infile)
 
         modes = fine_scale_edge_modes[loc_edge]
+        logger.debug(f"Number of fine scale modes for local edge {loc_edge}: {len(modes)}")
         end += modes.shape[0]
 
         if args.cell == ci:
+            # args.cell owns loc_edge
             boundary = loc_edge
         else:
+            # args.cell does not own loc_edge
+            # in this case modes from neighbouring configuration are extended
+            # the mapping of DOFs between different edge spaces has to be considered
             boundary = dof_layout.local_edge_index_map[local_ent]
-
-        with logger.block(f"Current edge: {edge}:"):
-            logger.debug(f"Owned by cell: {ci}")
-            logger.debug(f"Local edge: {loc_edge}")
-            logger.debug(f"Reading fine scale modes for cell {args.cell} from file: {infile}")
+            map = make_mapping(problem.edge_spaces["fine"][boundary], problem.edge_spaces["fine"][loc_edge])
+            modes = modes[:, map]
 
         mask[boundary] = np.s_[start:end]
         start += modes.shape[0]
@@ -122,6 +126,7 @@ def main(args):
                 )
             assert len(bc) == 4
             boundary_data.append(bc)
+    logger.debug(f"Total number of extensions: {len(boundary_data)}")
 
     table_title = f"Cell index: {args.cell}."
     logger.info(format_table(table, title=table_title))
