@@ -26,6 +26,7 @@ from pymor.operators.interface import Operator
 from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.operators.constructions import NumpyConversionOperator
 from pymor.parameters.base import Parameters, ParameterSpace
+from pymor.tools.random import spawn_rng, new_rng
 
 from multi.misc import x_dofs_vectorspace
 from multi.problems import TransferProblem
@@ -313,13 +314,14 @@ def main(args):
             ).as_posix(),
         }
     )
-    logger = getLogger(Path(__file__).stem, level="INFO")
+    logger = getLogger(Path(__file__).stem, level="DEBUG")
 
     sampling_options = beam.lhs[args.configuration]
     mu_name = sampling_options.pop("name")
     ndim = sampling_options.pop("ndim")
     param = Parameters({mu_name: ndim})
     parameter_space = ParameterSpace(param, beam.mu_range)
+    logger.debug(f"{sampling_options=}")
     training_set = sample_lhs(parameter_space, mu_name, **sampling_options)
 
     logger.info(
@@ -327,24 +329,42 @@ def main(args):
         f" for training set of size {len(training_set)}."
     )
 
-    with concurrent.futures.ProcessPoolExecutor(
-        max_workers=args.max_workers
-    ) as executor:
-        results = executor.map(
-            approximate_range,
-            repeat(beam),
-            training_set,
-            repeat(args.configuration),
-            repeat(args.distribution),
-        )
+    # with concurrent.futures.ProcessPoolExecutor(
+    #     max_workers=args.max_workers
+    # ) as executor:
+    #     results = executor.map(
+    #         spawn_rng(approximate_range),
+    #         repeat(beam),
+    #         training_set,
+    #         repeat(args.configuration),
+    #         repeat(args.distribution),
+    #     )
 
-    basis, range_product = next(results)
+    # TODO simply do serial version to just test if correlated random samples
+    # are actually the reason for the quality of the basis
+    realizations = np.load(beam.realizations)
+    # TODO add real as command line argument
+    num_samples = sampling_options["samples"]
+    seed_seqs = np.random.SeedSequence(realizations[0]).generate_state(num_samples)
+    snaps = []
+    for mu, ss in zip(training_set, seed_seqs):
+        with new_rng(ss):
+            basis, range_product = approximate_range(beam, mu, args.configuration, args.distribution)
+        snaps.append(basis)
+
     snapshots = range_product.range.empty()
-    snapshots.append(basis)
-    for rb, _ in results:
-        snapshots.append(rb)
+    for b in snaps:
+        snapshots.append(b)
 
-    pod_data = pod(snapshots, product=range_product, rtol=beam.pod_rtol)
+    # basis, range_product = next(results)
+    # snapshots = range_product.range.empty()
+    # snapshots.append(basis)
+    # for rb, _ in results:
+    #     snapshots.append(rb)
+
+    # num_snapshots = [len(basis) for basis in snaps]
+    # num_modes = int(np.mean(num_snapshots) * 2)
+    pod_data = pod(snapshots, product=range_product, modes=None, rtol=beam.pod_rtol)
     pod_modes = pod_data[0]
     svals = pod_data[1]
     logger.info(f"Number of snapshots: {len(snapshots)}.")

@@ -201,6 +201,7 @@ def task_decomposition():
                 "actions": ["python3 -m {} {} {}".format(module, distr, config)],
                 "targets": [
                     beam.fine_scale_edge_modes_npz(distr, config),
+                    beam.log_decompose_pod_basis(distr, config)
                 ],
                 "clean": [rm_rf],
             }
@@ -217,7 +218,7 @@ def task_extension():
                     "name": f"xi_{beam.name}_{distr}_{cell_index}",
                     "file_dep": [beam.fine_scale_edge_modes_npz(distr, config)],
                     "actions": ["python3 -m {} {} {}".format(module, distr, cell_index)],
-                    "targets": [beam.local_basis_npz(distr, cell_index), beam.fine_scale_modes_bp(distr, cell_index)],
+                    "targets": [beam.local_basis_npz(distr, cell_index), beam.fine_scale_modes_bp(distr, cell_index), beam.log_extension(distr, cell_index)],
                     "clean": [rm_rf],
                     }
 
@@ -235,9 +236,20 @@ def task_loc_rom():
                 "name": f"locrom_{beam.name}_{distr}",
                 "file_dep": deps,
                 "actions": ["python3 -m {} {} {} --output {}".format(module, distr, num_test, target)],
-                "targets": [target],
+                "targets": [target, beam.log_run_locrom(distr)],
                 "clean": True,
                 }
+
+
+def task_plot_loc_rom_error():
+    """Getting started: Plot localized ROM error."""
+    module = "src.getting_started.plot_locrom_error"
+    return {
+            "file_dep": [beam.loc_rom_error(d) for d in DISTR],
+            "actions": ["python3 -m {} %(targets)s".format(module)],
+            "targets": [beam.fig_loc_rom_error],
+            "clean": True,
+            }
 
 
 def task_paper():
@@ -247,6 +259,7 @@ def task_paper():
     for config in CONFIGS:
         deps.append(beam.fig_loc_svals(config))
         deps.append(beam.fig_proj_error(config))
+        deps.append(beam.fig_loc_rom_error)
     return {
         "file_dep": deps,
         "actions": ["latexmk -cd -pdf %s" % source],

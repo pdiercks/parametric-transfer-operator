@@ -1,0 +1,29 @@
+import sys
+import numpy as np
+from multi.plotting_context import PlottingContext
+from multi.postprocessing import read_bam_colors
+
+
+if __name__ == "__main__":
+    from .tasks import beam
+
+    bamcd = read_bam_colors()
+    color = {'normal': bamcd["red"][0], "multivariate_normal": bamcd["blue"][0]}
+
+    with PlottingContext(sys.argv, ["paper_onecol"]) as fig:
+        fig.set_size_inches(4.773, 2.95)
+        ax = fig.subplots()
+        ax.set_xlabel("Number of fine scale basis functions per edge.")
+        ax.set_ylabel("locROM error relative to FOM.")
+
+        for distribution in beam.distributions:
+            infile = beam.loc_rom_error(distribution)
+            data = np.loadtxt(infile.as_posix(), delimiter=",")
+            modes = data[:, 0]
+            error = data[:, 1]
+            ax.semilogy(modes, error, color=color[distribution], marker="o", label=distribution)
+
+        ax.legend(loc="best")
+
+
+

@@ -7,6 +7,7 @@ from multi.problems import MultiscaleProblemDefinition
 from dolfinx import default_scalar_type
 
 ROOT = Path(__file__).parents[2]
+SRC = Path(__file__).parent
 WORK = ROOT / "work"
 
 
@@ -16,6 +17,7 @@ class BeamData:
 
     Args:
         name: The name of the example.
+        num_real: The number of realizations of this example.
         gdim: The geometric dimension of the problem.
         length: The length of the beam.
         height: The height of the beam.
@@ -39,6 +41,7 @@ class BeamData:
     """
 
     name: str = "example"
+    num_real: int = 1
     gdim: int = 2
     length: float = 10.0
     height: float = 1.0
@@ -49,13 +52,13 @@ class BeamData:
     fe_deg: int = 2
     poisson_ratio: float = 0.3
     youngs_modulus: float = 20e3
-    mu_range: tuple[float, float] = (1.0, 2.0)
+    mu_range: tuple[float, float] = (0.1, 10.0)
     rrf_ttol: float = 5e-2
     rrf_ftol: float = 1e-15
     rrf_num_testvecs: int = 20
     pod_rtol: float = 1e-5
     configurations: tuple[str, str, str] = ("inner", "left", "right")
-    distributions: tuple[str, str] = ("normal", "multivariate_normal")
+    distributions: tuple[str, ...] = ("normal",)
     range_product: str = "h1"
     lhs: dict = field(
         default_factory=lambda: {
@@ -189,6 +192,11 @@ class BeamData:
         """figure of singular values of POD compression after rrf"""
         return self.rf / f"fig_loc_svals_{config}.pdf"
 
+    @property
+    def fig_loc_rom_error(self) -> Path:
+        """figure of loc rom error"""
+        return self.rf / f"fig_loc_rom_error.pdf"
+
     def config_to_cell(self, config: str) -> int:
         """Maps config to global cell index."""
         map = {"inner": 4, "left": 0, "right": 9}
@@ -209,6 +217,19 @@ class BeamData:
     def loc_rom_error(self, distr: str) -> Path:
         """loc ROM error relative to FOM"""
         return self.rf / f"loc_rom_error_{distr}.csv"
+
+    @property
+    def realizations(self) -> Path:
+        """Returns realizations that can be used to create ``np.random.SeedSequence``"""
+        file = SRC / "realizations.npy"
+        if not file.exists():
+            self._generate_realizations(file)
+        return file
+
+    def _generate_realizations(self, outpath: Path) -> None:
+        seed = np.random.SeedSequence()
+        realizations = seed.generate_state(self.num_real)
+        np.save(outpath, realizations)
 
 
 class BeamProblem(MultiscaleProblemDefinition):
@@ -331,4 +352,6 @@ class BeamProblem(MultiscaleProblemDefinition):
 
 if __name__ == "__main__":
     data = BeamData(name="beam")
+    realizations = np.load(data.realizations)
+    print(realizations)
     problem = BeamProblem(data.coarse_grid.as_posix(), data.fine_grid.as_posix())
