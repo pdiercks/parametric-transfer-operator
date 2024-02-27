@@ -5,20 +5,20 @@ from scipy.sparse import coo_array
 import numpy as np
 
 from mpi4py import MPI
-from dolfinx import mesh, fem, default_scalar_type
+from dolfinx import fem, default_scalar_type
 from dolfinx.io import gmshio
-from dolfinx.io.utils import XDMFFile
 from basix.ufl import element
 
 from pymor.parameters.base import Parameters
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
-from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator
+from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator, FenicsxVisualizer
 from pymor.operators.constructions import VectorOperator, LincombOperator
 from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.algorithms.projection import project
 from pymor.models.basic import StationaryModel
 
+from multi.interpolation import make_mapping
 from multi.boundary import point_at
 from multi.domain import RectangularSubdomain
 from multi.dofmap import DofMap
@@ -27,12 +27,61 @@ from multi.materials import LinearElasticMaterial
 from multi.problems import LinElaSubProblem
 
 
+# FIXME: this reconstruction method does not seem to be stable wrt the mesh
+# it did work using `create_rectangle` but not for `create_voided_rectangle`
+# my best guess is that the submesh creation is not reproducible?
+# and therefore you cannot assume the same doflayout for every subspace?
+# def reconstruct(
+#     U_rb: np.ndarray,
+#     dofmap: DofMap,
+#     bases: list[np.ndarray],
+#     subspaces: list[fem.FunctionSpaceBase],
+#     cell_maps: list[np.ndarray],
+#     u_global: fem.Function,
+# ) -> None:
+#     """Reconstructs rom solution on the global domain.
+#
+#     Args:
+#         Urb: ROM solution in the reduced space.
+#         dofmap: The dofmap of the reduced space.
+#         bases: Local basis for each subdomain.
+#         subspaces: The subspace of each subdomain.
+#         cell_maps: Mapping from child (submesh cell) to parent cell.
+#         subdomains: The cells of each subdomain.
+#         u_global: The global solution field to be filled with values.
+#
+#     """
+#     V = u_global.function_space
+#     u_view = u_global.x.array  # type: ignore
+#
+#     for i_subdomain, V_sub in enumerate(subspaces):
+#         cmap = cell_maps[i_subdomain]
+#         u_local = fem.Function(V_sub)
+#         u_local_view = u_local.x.array  # type: ignore
+#
+#         # fill u_local with rom solution
+#         basis = bases[i_subdomain]
+#         dofs = dofmap.cell_dofs(i_subdomain)
+#         u_local_view[:] = U_rb[0, dofs] @ basis
+#
+#         # fill global u
+#         submesh = V_sub.mesh
+#         num_sub_cells = submesh.topology.index_map(submesh.topology.dim).size_local
+#         for cell in range(num_sub_cells):
+#             child_dofs = V_sub.dofmap.cell_dofs(cell)
+#             parent_dofs = V.dofmap.cell_dofs(cmap[cell])
+#             for parent, child in zip(parent_dofs, child_dofs):
+#                 for b in range(V_sub.dofmap.bs):
+#                     u_view[parent * V.dofmap.bs + b] = u_local_view[
+#                         child * V_sub.dofmap.bs + b
+#                     ]
+
+
 def reconstruct(
     U_rb: np.ndarray,
     dofmap: DofMap,
     bases: list[np.ndarray],
-    subspaces: list[fem.FunctionSpaceBase],
-    cell_maps: list[np.ndarray],
+    u_local: fem.Function,
     u_global: fem.Function,
 ) -> None:
     """Reconstructs rom solution on the global domain.
@@ -41,36 +90,37 @@ def reconstruct(
         Urb: ROM solution in the reduced space.
         dofmap: The dofmap of the reduced space.
         bases: Local basis for each subdomain.
-        subspaces: The subspace of each subdomain.
-        cell_maps: Mapping from child (submesh cell) to parent cell.
-        subdomains: The cells of each subdomain.
+        u_local: The local solution field.
         u_global: The global solution field to be filled with values.
 
     """
+    coarse_grid = dofmap.grid
     V = u_global.function_space
-    u_view = u_global.x.array  # type: ignore
+    Vsub = u_local.function_space
+    submesh = Vsub.mesh
+    x_submesh = submesh.geometry.x
+    u_global_view = u_global.x.array
+    # u_local_view = u_local.x.array
 
-    for i_subdomain, V_sub in enumerate(subspaces):
-        cmap = cell_maps[i_subdomain]
-        u_local = fem.Function(V_sub)
-        u_local_view = u_local.x.array  # type: ignore
+    for cell in range(dofmap.num_cells):
+
+        # translate subdomain mesh
+        vertices = coarse_grid.get_entities(0, cell)
+        dx_cell = coarse_grid.get_entity_coordinates(0, vertices)[0]
+        x_submesh += dx_cell
 
         # fill u_local with rom solution
-        basis = bases[i_subdomain]
-        dofs = dofmap.cell_dofs(i_subdomain)
-        u_local_view[:] = U_rb[0, dofs] @ basis
+        basis = bases[cell]
+        dofs = dofmap.cell_dofs(cell)
+        # u_local_view[:] = U_rb[0, dofs] @ basis
 
-        # fill global u
-        submesh = V_sub.mesh
-        num_sub_cells = submesh.topology.index_map(submesh.topology.dim).size_local
-        for cell in range(num_sub_cells):
-            child_dofs = V_sub.dofmap.cell_dofs(cell)
-            parent_dofs = V.dofmap.cell_dofs(cmap[cell])
-            for parent, child in zip(parent_dofs, child_dofs):
-                for b in range(V_sub.dofmap.bs):
-                    u_view[parent * V.dofmap.bs + b] = u_local_view[
-                        child * V_sub.dofmap.bs + b
-                    ]
+        # fill global field via dof mapping
+        V_to_Vsub = make_mapping(Vsub, V)
+        u_global_view[V_to_Vsub] = U_rb[0, dofs] @ basis
+
+        # move subdomain mesh to origin
+        x_submesh -= dx_cell
+    u_global.x.scatter_forward()
 
 
 def assemble_system(
@@ -205,7 +255,7 @@ def assemble_system(
         indexptr,
         dofmap.num_cells,
         shape,
-        parameters={},
+        parameters=Parameters({}),
         solver_options=options,
         name="F",
     )
@@ -224,12 +274,6 @@ def main(args):
     logger = getLogger(Path(__file__).stem, level="DEBUG")
 
     # ### Discretize FOM
-
-    # read cell tags for reconstruction of reduced solution
-    with XDMFFile(MPI.COMM_WORLD, beam.fine_grid.as_posix(), "r") as fh:
-        fomdomain = fh.read_mesh(name="Grid")
-        cell_tags = fh.read_meshtags(fomdomain, "subdomains")
-
     fom = discretize_fom(beam)
     h1_product = fom.products["h1_0_semi"]
 
@@ -286,29 +330,19 @@ def main(args):
     logger.info(f"Global minimum number of modes per edge is: {min_modes}.")
     logger.info(f"Global maximum number of modes per edge is: {max_modes}.")
 
-    # ### Build submeshes and subdomain FE spaces
-    cell_mappings = []
-    subspaces = []
-    fe = element("P", fomdomain.basix_cell(), degree, shape=(gdim,))
-    for j in range(1, 11):
-        cells = cell_tags.find(j)
-        submesh, cell_map, _, _ = mesh.create_submesh(fomdomain, fomdomain.topology.dim, cells)
-        V_sub = fem.functionspace(submesh, fe)
-        cell_mappings.append(cell_map)
-        subspaces.append(V_sub)
-
     # ### ROM Assembly and Error Analysis
     P = fom.parameters.space(beam.mu_range)
     validation_set = P.sample_randomly(args.num_test)
 
     # better not create functions inside loops
     u_rb = fem.Function(fom.solution_space.V)
+    u_loc = fem.Function(V)
 
     max_errors = []
     max_relerrors = []
 
     # TODO set appropriate value for number of modes
-    num_fine_scale_modes = list(range(0, 40 + 1, 4))
+    num_fine_scale_modes = list(range(0, max_modes + 1, 2))
 
     for nmodes in num_fine_scale_modes:
         operator, rhs, local_bases = assemble_system(
@@ -325,7 +359,7 @@ def main(args):
             fom_solutions.append(U_fom)
             U_rb_ = rom.solve(mu)
 
-            reconstruct(U_rb_.to_numpy(), dofmap, local_bases, subspaces, cell_mappings, u_rb)  # type: ignore
+            reconstruct(U_rb_.to_numpy(), dofmap, local_bases, u_loc, u_rb)
             # copy seems necessary here
             # without it I get a PETSC ERROR (segmentation fault)
             U_rom = fom.solution_space.make_array([u_rb.vector.copy()])  # type: ignore
