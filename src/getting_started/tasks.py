@@ -259,6 +259,7 @@ def task_paper():
     for config in CONFIGS:
         deps.append(beam.fig_loc_svals(config))
         deps.append(beam.fig_proj_error(config))
+        deps.append(beam.fig_loc_rom_error)
     return {
         "file_dep": deps,
         "actions": ["latexmk -cd -pdf %s" % source],
