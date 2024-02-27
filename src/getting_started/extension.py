@@ -146,14 +146,18 @@ def main(args):
         chi[edge] = U[view].to_numpy()
         logger.info(f"Number of fine scale modes for {edge=}: {len(chi[edge])}.")
 
-    viz = FenicsxVisualizer(source)
-    viz.visualize(U, filename=beam.fine_scale_modes_bp(args.distribution, args.cell))
-
     # ### Read coarse scale basis
     vertices = omega.coarse_grid.topology.connectivity(2, 0).links(0)
     x_vertices = mesh.compute_midpoints(omega.coarse_grid, 0, vertices)
     phi_vectors = compute_phi(problem, x_vertices)
     phi = source.make_array(phi_vectors)
+
+    # ### Write full basis 
+    full_basis = source.empty()
+    full_basis.append(phi)
+    full_basis.append(U)
+    viz = FenicsxVisualizer(source)
+    viz.visualize(full_basis, filename=beam.fine_scale_modes_bp(args.distribution, args.cell))
 
     # ### Write complete basis to single file
     np.savez(beam.local_basis_npz(args.distribution, args.cell), phi=phi.to_numpy(), **chi)
