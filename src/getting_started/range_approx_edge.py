@@ -326,7 +326,7 @@ def approximate_range(beam, mu, configuration, distribution="normal"):
     logger = getLogger(
         "range_approximation",
         level="INFO",
-        filename=beam.log_range_approximation(distribution, configuration).as_posix(),
+        filename=beam.log_edge_range_approximation(distribution, configuration).as_posix(),
     )
     pid = os.getpid()
     logger.info(f"{pid=},\tApproximating range of T for {mu=} using {distribution=}.\n")
