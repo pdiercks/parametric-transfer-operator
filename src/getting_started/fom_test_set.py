@@ -5,6 +5,8 @@ from basix.ufl import element
 from pymor.bindings.fenicsx import FenicsxVectorSpace
 from pymor.tools.random import new_rng
 from multi.domain import StructuredQuadGrid, RectangularSubdomain
+from multi.materials import LinearElasticMaterial
+from multi.problems import LinElaSubProblem
 import numpy as np
 
 
@@ -38,10 +40,20 @@ def main(args):
     dx = coarse_grid.get_entity_coordinates(0, cell_vertex)
     omega.translate(dx)
 
-    # ### Restrict snapshots to unit cell domain
+    # ### Create Edge Spaces
+    omega.create_coarse_grid(1)
+    omega.create_boundary_grids()
+
+    # ### Unit cell problem
     ufl_element = fom.solution_space.V.ufl_element()
     fe = element(ufl_element.family_name, omega.grid.basix_cell(), ufl_element.degree(), shape=ufl_element.value_shape())
     V = fem.functionspace(omega.grid, fe)
+    phases = LinearElasticMaterial(2, 20e3, 0.3) # material will not be important here
+    problem = LinElaSubProblem(omega, V, phases=(phases,))
+    problem.setup_edge_spaces()
+    problem.create_map_from_V_to_L()
+
+    # ### Restrict snapshots to unit cell domain
     source = FenicsxVectorSpace(V)
     f = fem.Function(V)
     f_fom = fem.Function(fom.solution_space.V)
@@ -59,9 +71,14 @@ def main(args):
         U = source.make_array([f.vector.copy()])
         test_set.append(U)
 
+    # ### Restrict test set to edges
+    edge_functions = {}
+    for edge, dofs in problem.V_to_L.items():
+        edge_functions[edge] = test_set.dofs(dofs)
+
     cell_to_config = {0: "left", 4: "inner", 9: "right"}
     config = cell_to_config[args.subdomain_id]
-    np.save(beam.fom_test_set(config), test_set.to_numpy())
+    np.savez(beam.fom_test_set(config), **edge_functions)
 
 
 if __name__ == "__main__":

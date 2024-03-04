@@ -10,9 +10,10 @@ def main(args):
     bamcd = read_bam_colors()
     markers = {"multivariate_normal": "x", "normal": "o"}
     colors = {
-        "inner": bamcd["red"][0],
+        "bottom": bamcd["red"][0],
         "left": bamcd["blue"][0],
         "right": bamcd["green"][0],
+        "top": bamcd["yellow"][0],
     }
     config = args.pop(2)
 
@@ -24,24 +25,23 @@ def main(args):
         ax = fig.subplots()
 
         for distr in beam.distributions:
-            label = ""
-            if distr == "multivariate_normal":
-                label = "correlated, "
-            if distr == "normal":
-                label = "uncorrelated, "
+            svals = np.load(beam.loc_singular_values_npz(distr, config))
 
-            svals = np.load(beam.loc_singular_values(distr, config))
+            for edge, color in colors.items():
+                if distr == "multivariate_normal":
+                    label = f"correlated, {config}, {edge}"
+                if distr == "normal":
+                    label = f"uncorrelated, {config}, {edge}"
 
-            color = colors[config]
-            marker = markers[distr]
-            label += config
-            ax.semilogy(
-                np.arange(svals.size),
-                svals / svals[0],
-                color=color,
-                marker=marker,
-                label=label,
-            )
+                sigma = svals[edge]
+                marker = markers[distr]
+                ax.semilogy(
+                    np.arange(sigma.size),
+                    sigma / sigma[0],
+                    color=color,
+                    marker=marker,
+                    label=label,
+                )
 
         ax.set_xlabel("Number of basis functions")
         ax.set_ylabel("Singular values")  # TODO: add formula

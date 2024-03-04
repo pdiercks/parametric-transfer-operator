@@ -6,10 +6,19 @@ from multi.postprocessing import read_bam_colors
 
 def main(args):
     from .tasks import beam
+
     bamcd = read_bam_colors()
 
-    markers = {"multivariate_normal": "x", "normal": "o"}  # use different markers per distribution
-    colors = {"inner": bamcd["red"][0], "left": bamcd["blue"][0], "right": bamcd["green"][0]}  # use different colors per configuration
+    markers = {
+        "multivariate_normal": "x",
+        "normal": "o",
+    }  # use different markers per distribution
+    colors = {
+        "bottom": bamcd["red"][0],
+        "left": bamcd["blue"][0],
+        "right": bamcd["green"][0],
+        "top": bamcd["yellow"][0],
+    }
     # FIXME: this could be done better
     # issue is that PlottingContext is designed to get argv if len(argv) == 2, but
     # I need len(argv) > 2
@@ -24,27 +33,27 @@ def main(args):
         ax = fig.subplots()
 
         for distr in beam.distributions:
-            label = ""
-            if distr == "multivariate_normal":
-                label = "correlated, "
-            if distr == "normal":
-                label = "uncorrelated, "
-
-            label += config
             infile = beam.proj_error(distr, config)
-            errors = np.load(infile)
-            num_modes = np.arange(errors.size)
-
-            color = colors[config]
+            npz_err = np.load(infile)
             marker = markers[distr]
-            ax.semilogy(num_modes, errors, color=color, marker=marker, label=label)
-            # ax.semilogy(
-            #         data["num_dofs"], data["err"],
-            #         color=clr, marker=mark, label=label
-            #         )
-            # ax.fill_between(data["num_dofs"], data["err"]-std, data["err"]+std,
-            #         alpha=0.2, color=clr
-            #         )
+
+            for edge, color in colors.items():
+
+                if distr == "multivariate_normal":
+                    label = f"correlated, {config}, {edge}"
+                if distr == "normal":
+                    label = f"uncorrelated, {config}, {edge}"
+
+                err = npz_err[edge]
+                num_modes = np.arange(err.size)
+                ax.semilogy(num_modes, err, color=color, marker=marker, label=label)
+                # ax.semilogy(
+                #         data["num_dofs"], data["err"],
+                #         color=clr, marker=mark, label=label
+                #         )
+                # ax.fill_between(data["num_dofs"], data["err"]-std, data["err"]+std,
+                #         alpha=0.2, color=clr
+                #         )
 
         ax.set_xlabel("Number of basis functions.")
         # numerator = r"\norm{u_{\mathrm{fom}} - u_{\mathrm{rom}}}"
@@ -52,7 +61,6 @@ def main(args):
         # ax.set_ylabel(r"$\nicefrac{{{}}}{{{}}}$".format(numerator, denominator))
         ax.set_ylabel("Projection error.")  # TODO: add formula
         ax.legend(loc="best")
-
 
 
 if __name__ == "__main__":

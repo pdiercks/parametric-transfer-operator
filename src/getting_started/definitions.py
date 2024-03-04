@@ -141,14 +141,11 @@ class BeamData:
         """singular values for the global POD-ROM"""
         return self.rf / "singular_values.npy"
 
-    def log_range_approximation(self, distr: str, conf: str) -> Path:
-        return self.logs_path / f"range_approximation_{distr}_{conf}.log"
+    def log_edge_range_approximation(self, distr: str, conf: str) -> Path:
+        return self.logs_path / f"edge_range_approximation_{distr}_{conf}.log"
 
     def log_projerr(self, distr: str, conf: str) -> Path:
         return self.logs_path / f"projerr_{distr}_{conf}.log"
-
-    def log_decompose_pod_basis(self, distr: str, conf: str) -> Path:
-        return self.logs_path / f"decompose_pod_basis_{distr}_{conf}.log"
 
     def log_extension(self, distr: str, cell: int) -> Path:
         return self.logs_path / f"extension_{distr}_{cell}.log"
@@ -156,17 +153,9 @@ class BeamData:
     def log_run_locrom(self, distr: str) -> Path:
         return self.logs_path / f"run_locrom_{distr}.log"
 
-    def loc_singular_values(self, distr: str, conf: str) -> Path:
+    def loc_singular_values_npz(self, distr: str, conf: str) -> Path:
         """singular values of POD compression for range approximation of parametric T"""
-        return self.rf / f"loc_singular_values_{distr}_{conf}.npy"
-
-    def loc_pod_modes(self, distr: str, conf: str) -> Path:
-        """POD modes for range approximation of parametric T"""
-        return self.rf / f"loc_pod_modes_{distr}_{conf}.npy"
-
-    def pod_modes_bp(self, distr: str, conf: str) -> Path:
-        """same as `loc_pod_modes` but adios2 (bp) format"""
-        return self.rf / f"pod_modes_{distr}_{conf}.bp"
+        return self.rf / f"loc_singular_values_{distr}_{conf}.npz"
 
     def fine_scale_edge_modes_npz(self, distr: str, conf: str) -> Path:
         """edge-restricted fine scale part of pod modes"""
@@ -178,11 +167,11 @@ class BeamData:
 
     def fom_test_set(self, conf: str) -> Path:
         """test set generated from FOM solutions"""
-        return self.rf / f"test_set_{conf}.npy"
+        return self.rf / f"test_set_{conf}.npz"
 
     def proj_error(self, distr: str, conf: str) -> Path:
         """projection error for fom test set wrt pod basis"""
-        return self.rf / f"proj_error_{distr}_{conf}.npy"
+        return self.rf / f"proj_error_{distr}_{conf}.npz"
 
     def fig_proj_error(self, conf: str) -> Path:
         """figure of projection error plot"""
