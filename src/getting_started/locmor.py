@@ -143,6 +143,10 @@ def discretize_oversampling_problem(example: BeamData, mu: Mu, configuration: st
     omega_in = RectangularSubdomain(id_omega_in, unit_cell_domain)
     dx_omega_in = beamproblem.get_xmin_omega_in(cell_index)
     omega_in.translate(dx_omega_in)
+    # create coarse grid of target subdomain
+    # required for fine scale part computation using coarse FE space
+    omega_in.create_coarse_grid(1)
+    omega_in.create_boundary_grids()
 
     # ### FE spaces
     degree = example.fe_deg
@@ -165,6 +169,10 @@ def discretize_oversampling_problem(example: BeamData, mu: Mu, configuration: st
         subproblem = LinElaSubProblem(omega_in, W, phases=(materials[-1],))
     else:
         raise NotImplementedError
+    # required for fine scale part computation using coarse FE space
+    subproblem.setup_coarse_space()
+    subproblem.setup_edge_spaces()
+    subproblem.create_map_from_V_to_L()
 
     # ### Range product operator
     # get homogeneous Dirichlet bcs if present
