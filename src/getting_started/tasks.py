@@ -78,15 +78,15 @@ def task_build_rom():
     }
 
 
-def task_loc_pod_modes():
-    """Getting started: Construct local POD basis"""
-    module = "src.getting_started.range_approximation"
-    file = SRC / "range_approximation.py"
+def task_edge_range_approximation():
+    """Getting started: Construct POD edge basis"""
+    module = "src.getting_started.range_approx_edge"
+    file = SRC / "range_approx_edge.py"
     nworkers = 4  # number of workers in pool
     for distr in DISTR:
         for config in CONFIGS:
             yield {
-                "name": f"rrf_{beam.name}_{distr}_{config}",
+                "name": f"edge_rrf_{beam.name}_{distr}_{config}",
                 "file_dep": [
                     file,
                     beam.fine_oversampling_grid(config),
@@ -97,10 +97,9 @@ def task_loc_pod_modes():
                     )
                 ],
                 "targets": [
-                    beam.log_range_approximation(distr, config),
-                    beam.loc_pod_modes(distr, config),
-                    beam.loc_singular_values(distr, config),
-                    beam.pod_modes_bp(distr, config),
+                    beam.log_edge_range_approximation(distr, config),
+                    beam.fine_scale_edge_modes_npz(distr, config),
+                    beam.loc_singular_values_npz(distr, config),
                 ],
                 "clean": [rm_rf],
             }
@@ -113,7 +112,7 @@ def task_plot_loc_svals():
     for config in beam.configurations:
         deps = [code]
         deps += [
-            beam.loc_singular_values(distr, config) for distr in beam.distributions
+            beam.loc_singular_values_npz(distr, config) for distr in beam.distributions
         ]
         yield {
             "name": f"fig_loc_svals_{beam.name}_{config}",
@@ -128,7 +127,7 @@ def task_test_sets():
     """Getting started: Generate FOM test sets"""
     module = "src.getting_started.fom_test_set"
     code = SRC / "fom_test_set.py"
-    num_solves = 50
+    num_solves = 20
     map = {"inner": 4, "left": 0, "right": 9}
     for config in CONFIGS:
         subdomain = map[config]
@@ -157,7 +156,7 @@ def task_proj_error():
                 "file_dep": [
                     code,
                     beam.unit_cell_grid,
-                    beam.loc_pod_modes(distr, config),
+                    beam.fine_scale_edge_modes_npz(distr, config),
                     beam.fom_test_set(config),
                 ],
                 "actions": ["python3 -m {} {} {}".format(module, distr, config)],
@@ -183,28 +182,6 @@ def task_plot_proj_error():
             "targets": [beam.fig_proj_error(config)],
             "clean": True,
         }
-
-
-def task_decomposition():
-    """Getting started: Decompose local POD basis"""
-    module = "src.getting_started.decompose_pod_basis"
-    code = SRC / "decompose_pod_basis.py"
-    for distr in DISTR:
-        for config in CONFIGS:
-            yield {
-                "name": f"decompose_{beam.name}_{distr}_{config}",
-                "file_dep": [
-                    code,
-                    beam.unit_cell_grid,
-                    beam.loc_pod_modes(distr, config),
-                ],
-                "actions": ["python3 -m {} {} {}".format(module, distr, config)],
-                "targets": [
-                    beam.fine_scale_edge_modes_npz(distr, config),
-                    beam.log_decompose_pod_basis(distr, config)
-                ],
-                "clean": [rm_rf],
-            }
 
 
 def task_extension():
