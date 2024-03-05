@@ -12,6 +12,7 @@ from multi.product import InnerProduct
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinElaSubProblem
 from multi.shapes import NumpyLine
+from multi.misc import x_dofs_vectorspace
 
 from pymor.core.logger import getLogger
 from pymor.core.defaults import set_defaults
@@ -101,9 +102,14 @@ def main(args):
             component = 0
         else:
             component = 1
-        xmin = np.amin(edge_space.mesh.geometry.x, axis=0)
-        xmax = np.amax(edge_space.mesh.geometry.x, axis=0)
-        nodes = np.array([xmin[component], xmax[component]])
+        # the order of `nodes` is important
+        # cannot expect `dofs` to have correct ordering
+        # that first points to `xmin` and then `xmax`
+        # xmin = np.amin(edge_space.mesh.geometry.x, axis=0)
+        # xmax = np.amax(edge_space.mesh.geometry.x, axis=0)
+        # nodes = np.array([xmin[component], xmax[component]])
+        xdofs = edge_space.tabulate_dof_coordinates()
+        nodes = xdofs[_dofs, component]
         line = NumpyLine(nodes)
         shapes = line.interpolate(edge_space, component)
         coarse_basis = source.from_numpy(shapes)
@@ -111,6 +117,7 @@ def main(args):
         dofs = bc_hom._cpp_object.dof_indices()[0]
         u_dofs = U.dofs(dofs)
         U -= coarse_basis.lincomb(u_dofs)
+        assert np.isclose(np.sum(U.dofs(dofs)), 1e-9)
 
         # compute projection error for fine scale part
         errs = compute_relative_proj_errors(

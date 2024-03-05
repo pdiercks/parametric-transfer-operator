@@ -59,8 +59,13 @@ def main(args):
     problem.setup_edge_spaces()
     problem.create_map_from_V_to_L()
 
-    bc_factory = BoundaryDataFactory(problem.domain.grid, problem.V)
+    boundary_entities = np.array([], dtype=np.intc)
     edges = set(["bottom", "left", "right", "top"])
+    for edge in edges:
+        edge_entities = mesh.locate_entities_boundary(problem.domain.grid, problem.domain.tdim-1, problem.domain.str_to_marker(edge))
+        boundary_entities = np.append(boundary_entities, edge_entities)
+
+    bc_factory = BoundaryDataFactory(problem.domain.grid, boundary_entities, problem.V)
     zero_function = fem.Function(problem.V)
     zero_function.x.array[:] = 0.0
     boundary_data = list()
@@ -137,7 +142,7 @@ def main(args):
         "pc_factor_mat_solver_type": "mumps",
     }
     extensions = extend(
-        problem, boundary_data=boundary_data, petsc_options=petsc_options
+        problem, boundary_entities, boundary_data=boundary_data, petsc_options=petsc_options
     )
     source = FenicsxVectorSpace(V)
     U = source.make_array(extensions)
