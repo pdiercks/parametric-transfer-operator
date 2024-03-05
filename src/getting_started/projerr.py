@@ -25,7 +25,7 @@ def main(args):
     set_defaults(
         {
             "pymor.core.logger.getLogger.filename": beam.log_projerr(
-                args.distribution, args.configuration
+                args.distribution, args.configuration, args.basis_type
             ),
         }
     )
@@ -137,5 +137,11 @@ if __name__ == "__main__":
         help="Configuration of oversampling problem for which the test data should be read.",
         choices=("left", "inner", "right"),
     )
+    argparser.add_argument(
+            "basis_type",
+            type=str,
+            choices=("pod", "ucuf"),
+            help="Whether to use the POD basis or the decomposed basis.",
+            )
     args = argparser.parse_args(sys.argv[1:])
     main(args)
