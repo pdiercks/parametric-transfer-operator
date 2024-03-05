@@ -25,7 +25,7 @@ def main(args):
     set_defaults(
         {
             "pymor.core.logger.getLogger.filename": beam.log_projerr(
-                args.distribution, args.configuration, args.basis_type
+                args.distribution, args.configuration
             ),
         }
     )
@@ -54,7 +54,7 @@ def main(args):
     fe = element("P", domain.basix_cell(), beam.fe_deg, shape=(beam.gdim,))
     V = fem.functionspace(domain, fe)
 
-    phases = LinearElasticMaterial(2, 20e3, 0.3) # material will not be important here
+    phases = LinearElasticMaterial(2, 20e3, 0.3)  # material will not be important here
     problem = LinElaSubProblem(omega, V, phases=(phases,))
     problem.setup_edge_spaces()
     problem.create_map_from_V_to_L()
@@ -62,7 +62,9 @@ def main(args):
     # ### Load test data
     # test data contains full displacement solution restricted to edges
     npz_testset = np.load(beam.fom_test_set(args.configuration))
-    npz_basis = np.load(beam.fine_scale_edge_modes_npz(args.distribution, args.configuration))
+    npz_basis = np.load(
+        beam.fine_scale_edge_modes_npz(args.distribution, args.configuration)
+    )
     errors = {}
 
     for edge in ["bottom", "left", "right", "top"]:
@@ -71,8 +73,8 @@ def main(args):
         # BCs for range product
         facet_dim = edge_space.mesh.topology.dim - 1
         vertices = mesh.locate_entities_boundary(
-                edge_space.mesh, facet_dim, lambda x: np.full(x[0].shape, True, dtype=bool)
-                )
+            edge_space.mesh, facet_dim, lambda x: np.full(x[0].shape, True, dtype=bool)
+        )
         _dofs = fem.locate_dofs_topological(edge_space, facet_dim, vertices)
         gdim = edge_space.mesh.geometry.dim
         bc_hom = fem.dirichletbc(
@@ -111,7 +113,9 @@ def main(args):
         U -= coarse_basis.lincomb(u_dofs)
 
         # compute projection error for fine scale part
-        errs = compute_relative_proj_errors(U, basis, product=product, orthonormal=orthonormal)
+        errs = compute_relative_proj_errors(
+            U, basis, product=product, orthonormal=orthonormal
+        )
         errors[edge] = errs
 
     # TODO maybe have both absolute and relative errors written to disk?
@@ -137,11 +141,5 @@ if __name__ == "__main__":
         help="Configuration of oversampling problem for which the test data should be read.",
         choices=("left", "inner", "right"),
     )
-    argparser.add_argument(
-            "basis_type",
-            type=str,
-            choices=("pod", "ucuf"),
-            help="Whether to use the POD basis or the decomposed basis.",
-            )
     args = argparser.parse_args(sys.argv[1:])
     main(args)
