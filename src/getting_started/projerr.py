@@ -12,6 +12,7 @@ from multi.product import InnerProduct
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinElaSubProblem
 from multi.shapes import NumpyLine
+from multi.misc import x_dofs_vectorspace
 
 from pymor.core.logger import getLogger
 from pymor.core.defaults import set_defaults
@@ -54,7 +55,7 @@ def main(args):
     fe = element("P", domain.basix_cell(), beam.fe_deg, shape=(beam.gdim,))
     V = fem.functionspace(domain, fe)
 
-    phases = LinearElasticMaterial(2, 20e3, 0.3) # material will not be important here
+    phases = LinearElasticMaterial(2, 20e3, 0.3)  # material will not be important here
     problem = LinElaSubProblem(omega, V, phases=(phases,))
     problem.setup_edge_spaces()
     problem.create_map_from_V_to_L()
@@ -62,7 +63,9 @@ def main(args):
     # ### Load test data
     # test data contains full displacement solution restricted to edges
     npz_testset = np.load(beam.fom_test_set(args.configuration))
-    npz_basis = np.load(beam.fine_scale_edge_modes_npz(args.distribution, args.configuration))
+    npz_basis = np.load(
+        beam.fine_scale_edge_modes_npz(args.distribution, args.configuration)
+    )
     errors = {}
 
     for edge in ["bottom", "left", "right", "top"]:
@@ -71,8 +74,8 @@ def main(args):
         # BCs for range product
         facet_dim = edge_space.mesh.topology.dim - 1
         vertices = mesh.locate_entities_boundary(
-                edge_space.mesh, facet_dim, lambda x: np.full(x[0].shape, True, dtype=bool)
-                )
+            edge_space.mesh, facet_dim, lambda x: np.full(x[0].shape, True, dtype=bool)
+        )
         _dofs = fem.locate_dofs_topological(edge_space, facet_dim, vertices)
         gdim = edge_space.mesh.geometry.dim
         bc_hom = fem.dirichletbc(
@@ -99,9 +102,14 @@ def main(args):
             component = 0
         else:
             component = 1
-        xmin = np.amin(edge_space.mesh.geometry.x, axis=0)
-        xmax = np.amax(edge_space.mesh.geometry.x, axis=0)
-        nodes = np.array([xmin[component], xmax[component]])
+        # the order of `nodes` is important
+        # cannot expect `dofs` to have correct ordering
+        # that first points to `xmin` and then `xmax`
+        # xmin = np.amin(edge_space.mesh.geometry.x, axis=0)
+        # xmax = np.amax(edge_space.mesh.geometry.x, axis=0)
+        # nodes = np.array([xmin[component], xmax[component]])
+        xdofs = edge_space.tabulate_dof_coordinates()
+        nodes = xdofs[_dofs, component]
         line = NumpyLine(nodes)
         shapes = line.interpolate(edge_space, component)
         coarse_basis = source.from_numpy(shapes)
@@ -109,9 +117,12 @@ def main(args):
         dofs = bc_hom._cpp_object.dof_indices()[0]
         u_dofs = U.dofs(dofs)
         U -= coarse_basis.lincomb(u_dofs)
+        assert np.isclose(np.sum(U.dofs(dofs)), 1e-9)
 
         # compute projection error for fine scale part
-        errs = compute_relative_proj_errors(U, basis, product=product, orthonormal=orthonormal)
+        errs = compute_relative_proj_errors(
+            U, basis, product=product, orthonormal=orthonormal
+        )
         errors[edge] = errs
 
     # TODO maybe have both absolute and relative errors written to disk?

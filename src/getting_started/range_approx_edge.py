@@ -205,6 +205,7 @@ def adaptive_edge_rrf_normal(
         # subtract coarse scale part
         test_cvals = test_set[edge].dofs(edge_boundary_dofs[edge])
         test_set[edge] -= N.lincomb(test_cvals)
+        assert np.isclose(np.sum(test_set[edge].dofs(edge_boundary_dofs[edge])), 1e-9)
 
         # ### initialize maxnorm
         if edge in active_edges:

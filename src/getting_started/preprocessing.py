@@ -84,7 +84,7 @@ def generate_meshes(example) -> None:
     coarse_grid = StructuredQuadGrid(coarse_domain)
 
     # ### Unit cell grid
-    create_rectangle(
+    create_voided_rectangle(
         0.0,
         1.0,
         0.0,

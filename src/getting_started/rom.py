@@ -53,6 +53,8 @@ def build_rom(fom, parameter_space, reductor, basis_size, num_samples) -> Statio
     basis, singular_values = pod(snapshots, modes=basis_size, product=reductor.products['RB'])
     reductor.extend_basis(basis, method='trivial')
 
+    fom.visualizer.visualize(basis, filename="./work/beam/monolithic_pod_basis.bp")
+
     rom = reductor.reduce()
 
     return rom, singular_values
