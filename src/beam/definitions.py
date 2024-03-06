@@ -7,8 +7,9 @@ from multi.problems import MultiscaleProblemDefinition
 from dolfinx import default_scalar_type
 
 ROOT = Path(__file__).parents[2]
-SRC = Path(__file__).parent
+FIGURES = ROOT / "figures"
 WORK = ROOT / "work"
+SRC = Path(__file__).parent
 
 
 @dataclass
@@ -175,16 +176,16 @@ class BeamData:
 
     def fig_proj_error(self, conf: str) -> Path:
         """figure of projection error plot"""
-        return self.rf / f"fig_proj_error_{conf}.pdf"
+        return FIGURES / f"fig_proj_error_{conf}.pdf"
 
     def fig_loc_svals(self, config: str) -> Path:
         """figure of singular values of POD compression after rrf"""
-        return self.rf / f"fig_loc_svals_{config}.pdf"
+        return FIGURES / f"fig_loc_svals_{config}.pdf"
 
     @property
     def fig_loc_rom_error(self) -> Path:
         """figure of loc rom error"""
-        return self.rf / f"fig_loc_rom_error.pdf"
+        return FIGURES / f"fig_loc_rom_error.pdf"
 
     def config_to_cell(self, config: str) -> int:
         """Maps config to global cell index."""
