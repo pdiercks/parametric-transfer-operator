@@ -7,7 +7,7 @@ from multi.problems import MultiscaleProblemDefinition
 from dolfinx import default_scalar_type
 
 ROOT = Path(__file__).parents[2]
-FIGURES = ROOT / "figures"
+FIGURES = ROOT / "figures" / "beam"
 WORK = ROOT / "work"
 SRC = Path(__file__).parent
 
