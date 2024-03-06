@@ -124,6 +124,10 @@ class BeamData:
     def unit_cell_grid(self) -> Path:
         return self.grids_path / "unit_cell.msh"
 
+    @property
+    def fig_unit_cell(self) -> Path:
+        return FIGURES / "unit_cell.png"
+
     def fine_oversampling_grid(self, configuration: str) -> Path:
         assert configuration in ("inner", "left", "right")
         return self.grids_path / f"fine_oversampling_grid_{configuration}.xdmf"
