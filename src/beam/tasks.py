@@ -1,4 +1,4 @@
-"""tasks for the getting started example"""
+"""tasks for the beam example"""
 
 from .definitions import BeamData, ROOT
 from pathlib import Path
@@ -7,8 +7,8 @@ import shutil
 from doit.tools import run_once
 
 os.environ["PYMOR_COLORS_DISABLE"] = "1"
-SRC = ROOT / "src/getting_started"  # source for this example
 beam = BeamData(name="beam")
+SRC = ROOT / "src" / f"{beam.name}"
 CONFIGS = beam.configurations
 DISTR = beam.distributions
 
@@ -44,7 +44,7 @@ def with_h5(xdmf: Path) -> list[Path]:
 
 
 def task_preprocessing():
-    """Getting started: Preprocessing"""
+    """Beam example: Preprocessing"""
     from .preprocessing import generate_meshes
 
     mesh_files = [beam.coarse_grid, beam.unit_cell_grid, *with_h5(beam.fine_grid)]
@@ -62,7 +62,7 @@ def task_preprocessing():
 
 
 def task_build_rom():
-    """Getting started: Build ROM"""
+    """Beam example: Build ROM"""
     return {
         "basename": f"build_rom_{beam.name}",
         "file_dep": [
@@ -72,15 +72,15 @@ def task_build_rom():
             SRC / "fom.py",
             SRC / "rom.py",
         ],
-        "actions": ["python3 -m src.getting_started.rom"],
+        "actions": [f"python3 -m src.{beam.name}.rom"],
         "targets": [beam.reduced_model, beam.singular_values],
         "clean": True,
     }
 
 
 def task_edge_range_approximation():
-    """Getting started: Construct POD edge basis"""
-    module = "src.getting_started.range_approx_edge"
+    """Beam example: Construct POD edge basis"""
+    module = f"src.{beam.name}.range_approx_edge"
     file = SRC / "range_approx_edge.py"
     nworkers = 4  # number of workers in pool
     for distr in DISTR:
@@ -106,8 +106,8 @@ def task_edge_range_approximation():
 
 
 def task_plot_loc_svals():
-    """Getting started: Figure Singular Values"""
-    module = "src.getting_started.plot_svals"
+    """Beam example: Figure Singular Values"""
+    module = f"src.{beam.name}.plot_svals"
     code = SRC / "plot_svals.py"
     for config in beam.configurations:
         deps = [code]
@@ -124,8 +124,8 @@ def task_plot_loc_svals():
 
 
 def task_test_sets():
-    """Getting started: Generate FOM test sets"""
-    module = "src.getting_started.fom_test_set"
+    """Beam example: Generate FOM test sets"""
+    module = f"src.{beam.name}.fom_test_set"
     code = SRC / "fom_test_set.py"
     num_solves = 20
     map = {"inner": 4, "left": 0, "right": 9}
@@ -146,8 +146,8 @@ def task_test_sets():
 
 
 def task_proj_error():
-    """Getting started: Projection error for FOM test sets"""
-    module = "src.getting_started.projerr"
+    """Beam example: Projection error for FOM test sets"""
+    module = f"src.{beam.name}.projerr"
     code = SRC / "projerr.py"
     for distr in DISTR:
         for config in CONFIGS:
@@ -169,8 +169,8 @@ def task_proj_error():
 
 
 def task_plot_proj_error():
-    """Getting started: Figure Projection Error"""
-    module = "src.getting_started.plot_projerr"
+    """Beam example: Figure Projection Error"""
+    module = f"src.{beam.name}.plot_projerr"
     code = SRC / "plot_projerr.py"
     for config in beam.configurations:
         deps = [code]
@@ -185,8 +185,8 @@ def task_plot_proj_error():
 
 
 def task_extension():
-    """Getting started: Extend fine scale modes and write final basis"""
-    module = "src.getting_started.extension"
+    """Beam example: Extend fine scale modes and write final basis"""
+    module = "src.{beam.name}.extension"
     num_cells = beam.nx * beam.ny
     for distr in DISTR:
         for cell_index in range(num_cells):
@@ -201,8 +201,8 @@ def task_extension():
 
 
 def task_loc_rom():
-    """Getting started: Validate the localized ROM."""
-    module = "src.getting_started.run_locrom"
+    """Beam example: Validate the localized ROM."""
+    module = f"src.{beam.name}.run_locrom"
     deps = [beam.fine_grid, beam.unit_cell_grid]
     num_cells = beam.nx * beam.ny
     num_test = 5 # TODO
@@ -219,8 +219,8 @@ def task_loc_rom():
 
 
 def task_plot_loc_rom_error():
-    """Getting started: Plot localized ROM error."""
-    module = "src.getting_started.plot_locrom_error"
+    """Beam example: Plot localized ROM error."""
+    module = f"src.{beam.name}.plot_locrom_error"
     return {
             "file_dep": [beam.loc_rom_error(d) for d in DISTR],
             "actions": ["python3 -m {} %(targets)s".format(module)],
@@ -229,14 +229,81 @@ def task_plot_loc_rom_error():
             }
 
 
+def task_optimize():
+    """Beam example: Optimization"""
+    optpy = ROOT / f"src/{beam.name}/optimization.py"
+    return {
+        "basename": f"optimize_{beam.name}",
+        "file_dep": [optpy, beam.reduced_model],
+        "actions": [f"python3 -m src.{beam.name}.optimization"],
+        "verbosity": 2,
+        "uptodate": [True],
+    }
+
+
+def task_plot_unit_cell_domain():
+    """Beam example: plot unit cell domain"""
+
+    def make_plot(targets):
+        from mpi4py import MPI
+        from dolfinx.io import gmshio
+        from multi.postprocessing import plot_domain
+        domain, _, _ = gmshio.read_from_msh(beam.unit_cell_grid.as_posix(), MPI.COMM_SELF, gdim=2)
+        plot_domain(domain, cell_tags=None, transparent=False, colormap="bam-RdBu", output=targets[0])
+
+    return {
+            "file_dep": [beam.unit_cell_grid],
+            "actions": [make_plot, "convert -trim %(targets)s %(targets)s"],
+            "targets": [beam.fig_unit_cell],
+            "uptodate": [True],
+            "clean": True,
+            }
+
+
+def task_plot_global_domain():
+    """Beam example: Plot global domain"""
+
+    def make_plot(dependencies, targets):
+        from mpi4py import MPI
+        from dolfinx.io.utils import XDMFFile
+        from multi.postprocessing import plot_domain
+        xdmf_file = Path(dependencies[0]).with_suffix(".xdmf")
+        with XDMFFile(MPI.COMM_WORLD, xdmf_file.as_posix(), "r") as xdmf:
+            domain = xdmf.read_mesh(name="Grid")
+            cell_tags = xdmf.read_meshtags(domain, "subdomains")
+        plot_domain(domain, cell_tags=cell_tags, transparent=False, colormap="bam-RdBu", output=targets[0])
+
+    return {
+            "file_dep": with_h5(beam.fine_grid),
+            "actions": [make_plot, "convert -trim %(targets)s %(targets)s"],
+            "targets": [beam.fig_fine_grid],
+            "uptodate": [True],
+            "clean": True,
+            }
+
+
+def task_fig_beam_sketch():
+    """Beam example: Compile beam sketch"""
+    target = ROOT / "figures/beam/beam_sketch.pdf"
+    return {
+            "file_dep": [SRC / "figures/beam_sketch.tex"],
+            "actions": [f"latexmk -cd -pdf -outdir={target.parent} %(dependencies)s"],
+            "targets": [target],
+            "clean": True,
+            }
+
+
 def task_paper():
-    """Getting started: Compile Paper"""
+    """Beam example: Compile Paper"""
     source = ROOT / "paper/paper.tex"
     deps = [source]
+    deps.append(beam.fig_loc_rom_error)
+    deps.append(beam.fig_fine_grid)
+    deps.append(beam.fig_unit_cell)
+    deps.append(ROOT / "figures/beam/beam_sketch.pdf")
     for config in CONFIGS:
         deps.append(beam.fig_loc_svals(config))
         deps.append(beam.fig_proj_error(config))
-        deps.append(beam.fig_loc_rom_error)
     return {
         "file_dep": deps,
         "actions": ["latexmk -cd -pdf %s" % source],
@@ -246,7 +313,7 @@ def task_paper():
 
 
 def task_show_paper():
-    """Getting started: View Paper"""
+    """Beam example: View Paper"""
     return {
         "file_dep": [ROOT / "paper/paper.pdf"],
         "actions": ["zathura %(dependencies)s"],
@@ -254,13 +321,3 @@ def task_show_paper():
     }
 
 
-def task_optimize():
-    """Getting started: Optimization"""
-    optpy = ROOT / "src/getting_started/optimization.py"
-    return {
-        "basename": f"optimize_{beam.name}",
-        "file_dep": [optpy, beam.reduced_model],
-        "actions": ["python3 -m src.getting_started.optimization"],
-        "verbosity": 2,
-        "uptodate": [True],
-    }

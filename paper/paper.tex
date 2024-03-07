@@ -40,6 +40,30 @@ All the participants whose Abstract has been accepted for presentation at the EC
 
 \section{RESULTS}
 
+\subsection{Problem setup}
+
+\begin{figure}
+    \begin{center}
+        \includegraphics[width=0.95\textwidth]{../figures/beam/beam_sketch.pdf}
+    \end{center}
+    \caption{Schematic representation of the structural problem. A simply supported beam is subjected to a constant load.}\label{fig:beam_sketch}
+\end{figure}
+
+% TODO placement
+\begin{figure}
+    \begin{center}
+        \includegraphics[width=0.65\textwidth]{../figures/beam/unit_cell.png}
+    \end{center}
+    \caption{Unit cell domain partition.}\label{fig:unit_cell_domain}
+\end{figure}
+
+\begin{figure}
+    \begin{center}
+        \includegraphics[width=0.95\textwidth]{../figures/beam/global_domain.png}
+    \end{center}
+    \caption{The partition of the global domain. The colors indicate the variation in Young's modulus for each subdomain.}\label{fig:global_domain}
+\end{figure}
+
 \subsection{Basis Construction}
 For the beam problem, there are three oversampling problems to consider (left, inner, right).
 For each of the associated parametric transfer operators, $n_{train}$ parameter samples are chosen, and
@@ -53,16 +77,16 @@ independent basis functions (POD modes).
 
 \begin{figure}[!htb]
 \minipage{0.32\textwidth}
-  \includegraphics[width=\linewidth]{../work/beam/fig_loc_svals_left.pdf}
-  \caption{A really Awesome Image}\label{fig:awesome_image1}
+  \includegraphics[width=\linewidth]{../figures/beam/fig_loc_svals_left.pdf}
+  \caption{A really Awesome Image}\label{fig:loc_svals_left}
 \endminipage\hfill
 \minipage{0.32\textwidth}
-  \includegraphics[width=\linewidth]{../work/beam/fig_loc_svals_inner.pdf}
-  \caption{A really Awesome Image}\label{fig:awesome_image2}
+  \includegraphics[width=\linewidth]{../figures/beam/fig_loc_svals_inner.pdf}
+  \caption{A really Awesome Image}\label{fig:loc_svals_inner}
 \endminipage\hfill
 \minipage{0.32\textwidth}%
-  \includegraphics[width=\linewidth]{../work/beam/fig_loc_svals_right.pdf}
-  \caption{A really Awesome Image}\label{fig:awesome_image3}
+  \includegraphics[width=\linewidth]{../figures/beam/fig_loc_svals_right.pdf}
+  \caption{A really Awesome Image}\label{fig:loc_svals_right}
 \endminipage
 \end{figure}
 
@@ -73,23 +97,23 @@ using the FOM. Each test set has size $n_{test}$.
 
 \begin{figure}[!htb]
 \minipage{0.32\textwidth}
-  \includegraphics[width=\linewidth]{../work/beam/fig_proj_error_left.pdf}
-  \caption{A really Awesome Image}\label{fig:awesome_image1}
+  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_left.pdf}
+  \caption{A really Awesome Image}\label{fig:proj_error_left}
 \endminipage\hfill
 \minipage{0.32\textwidth}
-  \includegraphics[width=\linewidth]{../work/beam/fig_proj_error_inner.pdf}
-  \caption{A really Awesome Image}\label{fig:awesome_image2}
+  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_inner.pdf}
+  \caption{A really Awesome Image}\label{fig:proj_error_inner}
 \endminipage\hfill
 \minipage{0.32\textwidth}%
-  \includegraphics[width=\linewidth]{../work/beam/fig_proj_error_right.pdf}
-  \caption{A really Awesome Image}\label{fig:awesome_image3}
+  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_right.pdf}
+  \caption{A really Awesome Image}\label{fig:proj_error_right}
 \endminipage
 \end{figure}
 
 \subsection{Localized ROM}
 
 \begin{figure}[!htb]
-    \includegraphics[width=\linewidth]{../work/beam/fig_loc_rom_error.pdf}
+    \includegraphics[width=\linewidth]{../figures/beam/fig_loc_rom_error.pdf}
     \caption{A really Awesome Image}\label{fig:loc_rom_error}
 \end{figure}
 

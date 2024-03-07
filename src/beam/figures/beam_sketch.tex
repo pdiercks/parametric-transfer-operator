@@ -1,0 +1,36 @@
+\documentclass[tikz]{standalone}
+
+\usepackage{bm}
+\usepackage{stanli}
+\usepackage{BAMcolors}
+
+\usepackage[active, tightpage]{preview}
+\PreviewEnvironment{tikzpicture}
+\setlength\PreviewBorder{2mm}
+
+\begin{document}
+    \begin{tikzpicture}
+        \def\width{10cm}
+        \def\height{1cm}
+        \draw[thick] (0cm, 0cm) rectangle (\width, \height);
+
+        \point{a}{0cm}{0cm};
+        \point{b}{\width}{0cm};
+        \point{c}{\width}{\height};
+        \point{d}{0cm}{\height};
+        \point{e}{\width / 2}{\height};
+
+        % CSYS
+        \draw[thick, color=BAMred1, -stealth] (0, 0) -- +(1, 0) node[below] {$x$};
+        \draw[thick, color=BAMred1, -stealth] (0, 0) -- +(0, -1) node[below] {$z$};
+
+        \support{1}{a};
+        \support{2}{b};
+
+        \hinge{1}{a};
+        \hinge{1}{b};
+
+        \lineload{2}{d}{c}[0.7][0.7][0.099];
+        \notation{1}{e}{$\bm{t}(\bm{x})$}[above=1cm];
+    \end{tikzpicture}
+\end{document}

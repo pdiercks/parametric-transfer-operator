@@ -5,14 +5,17 @@ This is work in progress for a paper on the extension of the work in [this paper
 ## Tree
 The following directory structure is used:
 
-* src (inputfiles / source code + subdirs for examples)
+* src (any source code)
 * system (system information)
-* figures (.tex, .py)
-* tables (.tex)
-* paper (latex sources)
-* journal (final version as pdf)
+* figures (.pdf, .png)
+* tables (.pdf)
+* paper (latex sources and pdf)
+* journal (final version of the pdf)
 * notes (.md, .tex)
 
-The results are not stored in git for now.
-Each instance of the workflow will be stored locally under `./work`.
+The `src` directory contains any source code to run the example problems and any
+code for plotting or creation of figures.
+Each instance of the workflow will be stored locally under `./work` with a
+subdirectory for each example. The output of the `doit` workflow is `paper/paper.pdf`.
+Each figure and table included in the paper is stored separately in `figures` and `tables`.
 The `notes` dir is used to write down ideas and important equations (project sheet).
