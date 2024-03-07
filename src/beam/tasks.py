@@ -277,7 +277,7 @@ def task_plot_unit_cell_domain():
         plot_domain(domain, cell_tags=None, transparent=False, colormap="bam-RdBu", output=targets[0])
 
     return {
-            "actions": [make_plot],
+            "actions": [make_plot, "convert -trim %(targets)s %(targets)s"],
             "targets": [beam.fig_unit_cell],
             "uptodate": [True],
             "clean": True,
