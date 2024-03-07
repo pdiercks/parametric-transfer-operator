@@ -229,31 +229,6 @@ def task_plot_loc_rom_error():
             }
 
 
-def task_paper():
-    """Beam example: Compile Paper"""
-    source = ROOT / "paper/paper.tex"
-    deps = [source]
-    for config in CONFIGS:
-        deps.append(beam.fig_loc_svals(config))
-        deps.append(beam.fig_proj_error(config))
-        deps.append(beam.fig_loc_rom_error)
-    return {
-        "file_dep": deps,
-        "actions": ["latexmk -cd -pdf %s" % source],
-        "targets": [source.with_suffix(".pdf")],
-        "clean": ["latexmk -cd -C %s" % source],
-    }
-
-
-def task_show_paper():
-    """Beam example: View Paper"""
-    return {
-        "file_dep": [ROOT / "paper/paper.pdf"],
-        "actions": ["zathura %(dependencies)s"],
-        "uptodate": [False],
-    }
-
-
 def task_optimize():
     """Beam example: Optimization"""
     optpy = ROOT / f"src/{beam.name}/optimization.py"
@@ -316,3 +291,33 @@ def task_fig_beam_sketch():
             "targets": [target],
             "clean": True,
             }
+
+
+def task_paper():
+    """Beam example: Compile Paper"""
+    source = ROOT / "paper/paper.tex"
+    deps = [source]
+    deps.append(beam.fig_loc_rom_error)
+    deps.append(beam.fig_fine_grid)
+    deps.append(beam.fig_unit_cell)
+    deps.append(ROOT / "figures/beam/beam_sketch.pdf")
+    for config in CONFIGS:
+        deps.append(beam.fig_loc_svals(config))
+        deps.append(beam.fig_proj_error(config))
+    return {
+        "file_dep": deps,
+        "actions": ["latexmk -cd -pdf %s" % source],
+        "targets": [source.with_suffix(".pdf")],
+        "clean": ["latexmk -cd -C %s" % source],
+    }
+
+
+def task_show_paper():
+    """Beam example: View Paper"""
+    return {
+        "file_dep": [ROOT / "paper/paper.pdf"],
+        "actions": ["zathura %(dependencies)s"],
+        "uptodate": [False],
+    }
+
+
