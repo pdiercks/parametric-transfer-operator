@@ -277,8 +277,31 @@ def task_plot_unit_cell_domain():
         plot_domain(domain, cell_tags=None, transparent=False, colormap="bam-RdBu", output=targets[0])
 
     return {
+            "file_dep": [beam.unit_cell_grid],
             "actions": [make_plot, "convert -trim %(targets)s %(targets)s"],
             "targets": [beam.fig_unit_cell],
+            "uptodate": [True],
+            "clean": True,
+            }
+
+
+def task_plot_global_domain():
+    """Beam example: Plot global domain"""
+
+    def make_plot(dependencies, targets):
+        from mpi4py import MPI
+        from dolfinx.io.utils import XDMFFile
+        from multi.postprocessing import plot_domain
+        xdmf_file = Path(dependencies[0]).with_suffix(".xdmf")
+        with XDMFFile(MPI.COMM_WORLD, xdmf_file.as_posix(), "r") as xdmf:
+            domain = xdmf.read_mesh(name="Grid")
+            cell_tags = xdmf.read_meshtags(domain, "subdomains")
+        plot_domain(domain, cell_tags=cell_tags, transparent=False, colormap="bam-RdBu", output=targets[0])
+
+    return {
+            "file_dep": with_h5(beam.fine_grid),
+            "actions": [make_plot, "convert -trim %(targets)s %(targets)s"],
+            "targets": [beam.fig_fine_grid],
             "uptodate": [True],
             "clean": True,
             }

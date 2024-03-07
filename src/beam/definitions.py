@@ -121,6 +121,10 @@ class BeamData:
         return self.grids_path / "fine_grid.xdmf"
 
     @property
+    def fig_fine_grid(self) -> Path:
+        return FIGURES / "global_domain.png"
+
+    @property
     def unit_cell_grid(self) -> Path:
         return self.grids_path / "unit_cell.msh"
 
