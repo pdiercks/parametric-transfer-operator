@@ -305,3 +305,14 @@ def task_plot_global_domain():
             "uptodate": [True],
             "clean": True,
             }
+
+
+def task_fig_beam_sketch():
+    """Beam example: Compile beam sketch"""
+    target = ROOT / "figures/beam/beam_sketch.pdf"
+    return {
+            "file_dep": [SRC / "figures/beam_sketch.tex"],
+            "actions": [f"latexmk -cd -pdf -outdir={target.parent} %(dependencies)s"],
+            "targets": [target],
+            "clean": True,
+            }
