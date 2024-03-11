@@ -12,7 +12,6 @@ from multi.product import InnerProduct
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinElaSubProblem
 from multi.shapes import NumpyLine
-from multi.misc import x_dofs_vectorspace
 
 from pymor.core.logger import getLogger
 from pymor.core.defaults import set_defaults
@@ -26,10 +25,11 @@ def main(args):
     set_defaults(
         {
             "pymor.core.logger.getLogger.filename": beam.log_projerr(
-                args.distribution, args.configuration
+                args.distribution, args.configuration, args.name
             ),
         }
     )
+    # FIXME logger not used
     logger = getLogger(Path(__file__).stem, level="INFO")
 
     # ### Unit cell domain
@@ -64,8 +64,9 @@ def main(args):
     # test data contains full displacement solution restricted to edges
     npz_testset = np.load(beam.fom_test_set(args.configuration))
     npz_basis = np.load(
-        beam.fine_scale_edge_modes_npz(args.distribution, args.configuration)
+        beam.fine_scale_edge_modes_npz(args.distribution, args.configuration, args.name)
     )
+
     errors = {}
 
     for edge in ["bottom", "left", "right", "top"]:
@@ -126,7 +127,7 @@ def main(args):
         errors[edge] = errs
 
     # TODO maybe have both absolute and relative errors written to disk?
-    np.savez(beam.proj_error(args.distribution, args.configuration), **errors)
+    np.savez(beam.proj_error(args.distribution, args.configuration, args.name), **errors)
 
 
 if __name__ == "__main__":
@@ -147,6 +148,12 @@ if __name__ == "__main__":
         type=str,
         help="Configuration of oversampling problem for which the test data should be read.",
         choices=("left", "inner", "right"),
+    )
+    argparser.add_argument(
+        "name",
+        type=str,
+        help="Name of the training strategy used to compute the local basis.",
+        choices=("hapod", "heuristic"),
     )
     args = argparser.parse_args(sys.argv[1:])
     main(args)

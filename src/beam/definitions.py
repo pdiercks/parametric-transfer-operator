@@ -147,14 +147,11 @@ class BeamData:
         """singular values for the global POD-ROM"""
         return self.rf / "singular_values.npy"
 
-    def log_edge_range_approximation(self, distr: str, conf: str) -> Path:
-        return self.logs_path / f"edge_range_approximation_{distr}_{conf}.log"
+    def log_edge_range_approximation(self, distr: str, conf: str, name: str) -> Path:
+        return self.logs_path / f"edge_range_approximation_{distr}_{conf}_{name}.log"
 
-    def log_heuristic_range_approx(self, distr: str, conf: str) -> Path:
-        return self.logs_path / f"heuristic_range_approx_{distr}_{conf}.log"
-
-    def log_projerr(self, distr: str, conf: str) -> Path:
-        return self.logs_path / f"projerr_{distr}_{conf}.log"
+    def log_projerr(self, distr: str, conf: str, name: str) -> Path:
+        return self.logs_path / f"projerr_{distr}_{conf}_{name}.log"
 
     def log_extension(self, distr: str, cell: int) -> Path:
         return self.logs_path / f"extension_{distr}_{cell}.log"
@@ -166,9 +163,9 @@ class BeamData:
         """singular values of POD compression for range approximation of parametric T"""
         return self.rf / f"loc_singular_values_{distr}_{conf}.npz"
 
-    def fine_scale_edge_modes_npz(self, distr: str, conf: str) -> Path:
+    def fine_scale_edge_modes_npz(self, distr: str, conf: str, name: str) -> Path:
         """edge-restricted fine scale part of pod modes"""
-        return self.rf / f"fine_scale_edge_modes_{distr}_{conf}.npz"
+        return self.rf / f"fine_scale_edge_modes_{distr}_{conf}_{name}.npz"
 
     def fine_scale_modes_bp(self, distr: str, cell: int) -> Path:
         """fine scale basis functions after extension"""
@@ -178,13 +175,13 @@ class BeamData:
         """test set generated from FOM solutions"""
         return self.rf / f"test_set_{conf}.npz"
 
-    def proj_error(self, distr: str, conf: str) -> Path:
+    def proj_error(self, distr: str, conf: str, name: str) -> Path:
         """projection error for fom test set wrt pod basis"""
-        return self.rf / f"proj_error_{distr}_{conf}.npz"
+        return self.rf / f"proj_error_{distr}_{conf}_{name}.npz"
 
-    def fig_proj_error(self, conf: str) -> Path:
+    def fig_proj_error(self, conf: str, name: str) -> Path:
         """figure of projection error plot"""
-        return FIGURES / f"fig_proj_error_{conf}.pdf"
+        return FIGURES / f"fig_proj_error_{conf}_{name}.pdf"
 
     def fig_loc_svals(self, config: str) -> Path:
         """figure of singular values of POD compression after rrf"""

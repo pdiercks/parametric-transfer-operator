@@ -11,6 +11,7 @@ beam = BeamData(name="beam")
 SRC = ROOT / "src" / f"{beam.name}"
 CONFIGS = beam.configurations
 DISTR = beam.distributions
+NAMES = beam.training_strategies
 
 
 def rm_rf(task, dryrun):
@@ -97,9 +98,34 @@ def task_edge_range_approximation():
                     )
                 ],
                 "targets": [
-                    beam.log_edge_range_approximation(distr, config),
-                    beam.fine_scale_edge_modes_npz(distr, config),
+                    beam.log_edge_range_approximation(distr, config, "hapod"),
+                    beam.fine_scale_edge_modes_npz(distr, config, "hapod"),
                     beam.loc_singular_values_npz(distr, config),
+                ],
+                "clean": [rm_rf],
+            }
+
+
+def task_heuristic_edge_range_approximation():
+    """Beam example: Construct fine scale edge basis via heuristic range finder"""
+    module = f"src.{beam.name}.heuristic_range_approx"
+    file = SRC / "heuristic_range_approx.py"
+    for distr in DISTR:
+        for config in CONFIGS:
+            yield {
+                "name": f"heuristic_rrf_{beam.name}_{distr}_{config}",
+                "file_dep": [
+                    file,
+                    beam.fine_oversampling_grid(config),
+                ],
+                "actions": [
+                    "python3 -m {} {} {}".format(
+                        module, distr, config
+                    )
+                ],
+                "targets": [
+                    beam.log_edge_range_approximation(distr, config, "heuristic"),
+                    beam.fine_scale_edge_modes_npz(distr, config, "heuristic"),
                 ],
                 "clean": [rm_rf],
             }
@@ -149,23 +175,24 @@ def task_proj_error():
     """Beam example: Projection error for FOM test sets"""
     module = f"src.{beam.name}.projerr"
     code = SRC / "projerr.py"
+
     for distr in DISTR:
         for config in CONFIGS:
-            yield {
-                "name": f"proj_err_{beam.name}_{distr}_{config}",
-                "file_dep": [
-                    code,
-                    beam.unit_cell_grid,
-                    beam.fine_scale_edge_modes_npz(distr, config),
-                    beam.fom_test_set(config),
-                ],
-                "actions": ["python3 -m {} {} {}".format(module, distr, config)],
-                "targets": [
-                    beam.proj_error(distr, config),
-                    beam.log_projerr(distr, config),
-                ],
-                "clean": True,
-            }
+            for name in NAMES:
+                basis = beam.fine_scale_edge_modes_npz(distr, config, name)
+                deps = [code, beam.unit_cell_grid, beam.fom_test_set(config)]
+                deps.append(basis)
+                yield {
+                    "name": f"proj_err_{name}_{distr}_{config}",
+                    "file_dep": deps,
+                    # TODO add basis as cli argument
+                    "actions": ["python3 -m {} {} {} {}".format(module, distr, config, name)],
+                    "targets": [
+                        beam.proj_error(distr, config, name),
+                        beam.log_projerr(distr, config, name),
+                    ],
+                    "clean": True,
+                }
 
 
 def task_plot_proj_error():
@@ -173,15 +200,16 @@ def task_plot_proj_error():
     module = f"src.{beam.name}.plot_projerr"
     code = SRC / "plot_projerr.py"
     for config in beam.configurations:
-        deps = [code]
-        deps += [beam.proj_error(distr, config) for distr in beam.distributions]
-        yield {
-            "name": f"fig_proj_err_{beam.name}_{config}",
-            "file_dep": deps,
-            "actions": ["python3 -m {} %(targets)s {}".format(module, config)],
-            "targets": [beam.fig_proj_error(config)],
-            "clean": True,
-        }
+        for name in ["hapod", "heuristic"]:
+            deps = [code]
+            deps += [beam.proj_error(distr, config, name) for distr in beam.distributions]
+            yield {
+                "name": f"fig_proj_err_{name}_{config}",
+                "file_dep": deps,
+                "actions": ["python3 -m {} %(targets)s {}".format(module, config)],
+                "targets": [beam.fig_proj_error(config, name)],
+                "clean": True,
+            }
 
 
 def task_extension():
@@ -189,11 +217,12 @@ def task_extension():
     module = "src.{beam.name}.extension"
     num_cells = beam.nx * beam.ny
     for distr in DISTR:
+        for name in NAMES:
         for cell_index in range(num_cells):
             config = beam.cell_to_config(cell_index)
             yield {
                     "name": f"xi_{beam.name}_{distr}_{cell_index}",
-                    "file_dep": [beam.fine_scale_edge_modes_npz(distr, config)],
+                    "file_dep": [beam.fine_scale_edge_modes_npz(distr, config, name)],
                     "actions": ["python3 -m {} {} {}".format(module, distr, cell_index)],
                     "targets": [beam.local_basis_npz(distr, cell_index), beam.fine_scale_modes_bp(distr, cell_index), beam.log_extension(distr, cell_index)],
                     "clean": [rm_rf],
