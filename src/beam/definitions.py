@@ -37,7 +37,7 @@ class BeamData:
         configurations: The configurations, i.e. oversampling problems.
         distributions: The distributions used in the randomized range finder.
         range_product: The inner product to use (rrf, projection error).
-        lhs: Parameters for Latin-Hypercube-Sampling for each configuration.
+        lhs_options: Parameters for Latin-Hypercube-Sampling for each configuration.
 
     """
 
@@ -61,28 +61,25 @@ class BeamData:
     configurations: tuple[str, str, str] = ("inner", "left", "right")
     distributions: tuple[str, ...] = ("normal",)
     range_product: str = "h1"
-    lhs: dict = field(
+    lhs_options: dict = field(
         default_factory=lambda: {
             "inner": {
                 "name": "E",
                 "ndim": 3,
                 "samples": 30,
                 "criterion": "center",
-                "random_state": 1510,
             },
             "left": {
                 "name": "E",
                 "ndim": 2,
                 "samples": 20,
                 "criterion": "center",
-                "random_state": 1511,
             },
             "right": {
                 "name": "E",
                 "ndim": 2,
                 "samples": 20,
                 "criterion": "center",
-                "random_state": 1512,
             },
         }
     )
@@ -152,6 +149,9 @@ class BeamData:
 
     def log_edge_range_approximation(self, distr: str, conf: str) -> Path:
         return self.logs_path / f"edge_range_approximation_{distr}_{conf}.log"
+
+    def log_heuristic_range_approx(self, distr: str, conf: str) -> Path:
+        return self.logs_path / f"heuristic_range_approx_{distr}_{conf}.log"
 
     def log_projerr(self, distr: str, conf: str) -> Path:
         return self.logs_path / f"projerr_{distr}_{conf}.log"
