@@ -68,19 +68,19 @@ class BeamData:
             "inner": {
                 "name": "E",
                 "ndim": 3,
-                "samples": 30,
+                "samples": 60,
                 "criterion": "center",
             },
             "left": {
                 "name": "E",
                 "ndim": 2,
-                "samples": 20,
+                "samples": 40,
                 "criterion": "center",
             },
             "right": {
                 "name": "E",
                 "ndim": 2,
-                "samples": 20,
+                "samples": 40,
                 "criterion": "center",
             },
         }
