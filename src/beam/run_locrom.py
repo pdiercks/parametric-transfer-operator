@@ -269,7 +269,7 @@ def main(args):
 
     # ### logger
     set_defaults(
-        {"pymor.core.logger.getLogger.filename": beam.log_run_locrom(args.distr)}
+        {"pymor.core.logger.getLogger.filename": beam.log_run_locrom(args.distr, args.name)}
     )
     logger = getLogger(Path(__file__).stem, level="DEBUG")
 
@@ -319,7 +319,7 @@ def main(args):
     dofmap = DofMap(coarse_grid)
 
     # ### Reduced bases
-    bases_folder = beam.bases_path(args.distr)
+    bases_folder = beam.bases_path(args.distr, args.name)
     num_cells = beam.nx * beam.ny
     bases_loader = BasesLoader(bases_folder, num_cells)
     bases, num_max_modes = bases_loader.read_bases()
@@ -398,6 +398,12 @@ if __name__ == "__main__":
         type=str,
         help="The distribution used for sampling.",
         choices=("normal", "multivariate_normal"),
+    )
+    parser.add_argument(
+        "name",
+        type=str,
+        help="The name of the training strategy.",
+        choices=("hapod", "heuristic"),
     )
     parser.add_argument(
         "num_test", type=int, help="Size of the test set used for validation."

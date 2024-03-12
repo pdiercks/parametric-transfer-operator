@@ -28,11 +28,11 @@ def main(args):
     set_defaults(
         {
             "pymor.core.logger.getLogger.filename": beam.log_extension(
-                args.distribution, args.cell
+                args.distribution, args.name, args.cell
             )
         }
     )
-    logger = getLogger(Path(__file__).stem, level="DEBUG")
+    logger = getLogger(Path(__file__).stem, level="INFO")
 
     # problem definition
     beamproblem = BeamProblem(beam.coarse_grid.as_posix(), beam.fine_grid.as_posix())
@@ -62,7 +62,11 @@ def main(args):
     boundary_entities = np.array([], dtype=np.intc)
     edges = set(["bottom", "left", "right", "top"])
     for edge in edges:
-        edge_entities = mesh.locate_entities_boundary(problem.domain.grid, problem.domain.tdim-1, problem.domain.str_to_marker(edge))
+        edge_entities = mesh.locate_entities_boundary(
+            problem.domain.grid,
+            problem.domain.tdim - 1,
+            problem.domain.str_to_marker(edge),
+        )
         boundary_entities = np.append(boundary_entities, edge_entities)
 
     bc_factory = BoundaryDataFactory(problem.domain.grid, boundary_entities, problem.V)
@@ -86,12 +90,16 @@ def main(args):
 
         # ### Fine scale edge modes
         configuration = beam.cell_to_config(ci)
-        infile = beam.fine_scale_edge_modes_npz(args.distribution, configuration)
-        logger.debug(f"Reading fine scale modes for cell {args.cell} from file: {infile}")
+        infile = beam.fine_scale_edge_modes_npz(args.distribution, configuration, args.name)
+        logger.debug(
+            f"Reading fine scale modes for cell {args.cell} from file: {infile}"
+        )
         fine_scale_edge_modes = np.load(infile)
 
         modes = fine_scale_edge_modes[loc_edge]
-        logger.debug(f"Number of fine scale modes for local edge {loc_edge}: {len(modes)}")
+        logger.debug(
+            f"Number of fine scale modes for local edge {loc_edge}: {len(modes)}"
+        )
         end += modes.shape[0]
 
         if args.cell == ci:
@@ -102,7 +110,10 @@ def main(args):
             # in this case modes from neighbouring configuration are extended
             # the mapping of DOFs between different edge spaces has to be considered
             boundary = dof_layout.local_edge_index_map[local_ent]
-            map = make_mapping(problem.edge_spaces["fine"][boundary], problem.edge_spaces["fine"][loc_edge])
+            map = make_mapping(
+                problem.edge_spaces["fine"][boundary],
+                problem.edge_spaces["fine"][loc_edge],
+            )
             modes = modes[:, map]
 
         mask[boundary] = np.s_[start:end]
@@ -142,7 +153,10 @@ def main(args):
         "pc_factor_mat_solver_type": "mumps",
     }
     extensions = extend(
-        problem, boundary_entities, boundary_data=boundary_data, petsc_options=petsc_options
+        problem,
+        boundary_entities,
+        boundary_data=boundary_data,
+        petsc_options=petsc_options,
     )
     source = FenicsxVectorSpace(V)
     U = source.make_array(extensions)
@@ -157,15 +171,22 @@ def main(args):
     phi_vectors = compute_phi(problem, x_vertices)
     phi = source.make_array(phi_vectors)
 
-    # ### Write full basis 
+    # ### Write full basis
     full_basis = source.empty()
     full_basis.append(phi)
     full_basis.append(U)
     viz = FenicsxVisualizer(source)
-    viz.visualize(full_basis, filename=beam.fine_scale_modes_bp(args.distribution, args.cell))
+    viz.visualize(
+        full_basis,
+        filename=beam.fine_scale_modes_bp(args.distribution, args.name, args.cell),
+    )
 
     # ### Write complete basis to single file
-    np.savez(beam.local_basis_npz(args.distribution, args.cell), phi=phi.to_numpy(), **chi)
+    np.savez(
+        beam.local_basis_npz(args.distribution, args.name, args.cell),
+        phi=phi.to_numpy(),
+        **chi,
+    )
 
 
 if __name__ == "__main__":
@@ -180,6 +201,12 @@ if __name__ == "__main__":
         type=str,
         help="The distribution used in the range approximation.",
         choices=("normal", "multivariate_normal"),
+    )
+    parser.add_argument(
+        "name",
+        type=str,
+        help="The name of the training strategy.",
+        choices=("hapod", "heuristic"),
     )
     parser.add_argument("cell", type=int, help="The coarse grid cell index.")
     args = parser.parse_args(sys.argv[1:])

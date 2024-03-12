@@ -4,7 +4,7 @@ import numpy as np
 from scipy.sparse import coo_array
 
 from mpi4py import MPI
-from dolfinx import mesh, fem
+from dolfinx import fem, default_scalar_type
 from dolfinx.fem.petsc import set_bc
 from dolfinx.io import gmshio
 from dolfinx.io.utils import XDMFFile
@@ -155,12 +155,17 @@ def discretize_oversampling_problem(example: BeamData, mu: Mu, configuration: st
     W = fem.functionspace(omega_in.grid, fe) # range space
 
     # ### Oversampling problem
-    E = example.youngs_modulus
-    NU = example.poisson_ratio
-    materials = tuple([LinearElasticMaterial(gdim, E * mu_i, NU, plane_stress=False) for mu_i in mu_values])
+    emod_base = example.youngs_modulus
+    nu_base = example.poisson_ratio
+    emoduli = [fem.Constant(omega.grid, default_scalar_type(emod_base * mu_i)) for mu_i in mu_values]
+    nu_vals = [fem.Constant(omega.grid, default_scalar_type(nu_base * 1.0)) for _ in range(mu_values.size)]
+    materials = tuple([LinearElasticMaterial(gdim, E=e, NU=nu, plane_stress=False) for e, nu in zip(emoduli, nu_vals)])
     oversampling_problem = LinearElasticityProblem(omega, V, phases=materials)
 
     # ### Problem on target subdomain
+    # definition of correct material for consistency
+    # however, unless energy inner product is used as inner product for the range
+    # space, this should not have influence on the solution
     if configuration == "inner":
         subproblem = LinElaSubProblem(omega_in, W, phases=(materials[1],))
     elif configuration == "left":

@@ -11,6 +11,7 @@ beam = BeamData(name="beam")
 SRC = ROOT / "src" / f"{beam.name}"
 CONFIGS = beam.configurations
 DISTR = beam.distributions
+NAMES = beam.training_strategies
 
 
 def rm_rf(task, dryrun):
@@ -78,7 +79,7 @@ def task_build_rom():
     }
 
 
-def task_edge_range_approximation():
+def task_edge_range_approx():
     """Beam example: Construct POD edge basis"""
     module = f"src.{beam.name}.range_approx_edge"
     file = SRC / "range_approx_edge.py"
@@ -97,9 +98,34 @@ def task_edge_range_approximation():
                     )
                 ],
                 "targets": [
-                    beam.log_edge_range_approximation(distr, config),
-                    beam.fine_scale_edge_modes_npz(distr, config),
+                    beam.log_edge_range_approximation(distr, config, "hapod"),
+                    beam.fine_scale_edge_modes_npz(distr, config, "hapod"),
                     beam.loc_singular_values_npz(distr, config),
+                ],
+                "clean": [rm_rf],
+            }
+
+
+def task_heuristic_edge_range_approx():
+    """Beam example: Construct fine scale edge basis via heuristic range finder"""
+    module = f"src.{beam.name}.heuristic_range_approx"
+    file = SRC / "heuristic_range_approx.py"
+    for distr in DISTR:
+        for config in CONFIGS:
+            yield {
+                "name": f"heuristic_rrf_{beam.name}_{distr}_{config}",
+                "file_dep": [
+                    file,
+                    beam.fine_oversampling_grid(config),
+                ],
+                "actions": [
+                    "python3 -m {} {} {}".format(
+                        module, distr, config
+                    )
+                ],
+                "targets": [
+                    beam.log_edge_range_approximation(distr, config, "heuristic"),
+                    beam.fine_scale_edge_modes_npz(distr, config, "heuristic"),
                 ],
                 "clean": [rm_rf],
             }
@@ -149,23 +175,24 @@ def task_proj_error():
     """Beam example: Projection error for FOM test sets"""
     module = f"src.{beam.name}.projerr"
     code = SRC / "projerr.py"
+
     for distr in DISTR:
         for config in CONFIGS:
-            yield {
-                "name": f"proj_err_{beam.name}_{distr}_{config}",
-                "file_dep": [
-                    code,
-                    beam.unit_cell_grid,
-                    beam.fine_scale_edge_modes_npz(distr, config),
-                    beam.fom_test_set(config),
-                ],
-                "actions": ["python3 -m {} {} {}".format(module, distr, config)],
-                "targets": [
-                    beam.proj_error(distr, config),
-                    beam.log_projerr(distr, config),
-                ],
-                "clean": True,
-            }
+            for name in NAMES:
+                basis = beam.fine_scale_edge_modes_npz(distr, config, name)
+                deps = [code, beam.unit_cell_grid, beam.fom_test_set(config)]
+                deps.append(basis)
+                yield {
+                    "name": f"proj_err_{name}_{distr}_{config}",
+                    "file_dep": deps,
+                    # TODO add basis as cli argument
+                    "actions": ["python3 -m {} {} {} {}".format(module, distr, config, name)],
+                    "targets": [
+                        beam.proj_error(distr, config, name),
+                        beam.log_projerr(distr, config, name),
+                    ],
+                    "clean": True,
+                }
 
 
 def task_plot_proj_error():
@@ -173,31 +200,33 @@ def task_plot_proj_error():
     module = f"src.{beam.name}.plot_projerr"
     code = SRC / "plot_projerr.py"
     for config in beam.configurations:
-        deps = [code]
-        deps += [beam.proj_error(distr, config) for distr in beam.distributions]
-        yield {
-            "name": f"fig_proj_err_{beam.name}_{config}",
-            "file_dep": deps,
-            "actions": ["python3 -m {} %(targets)s {}".format(module, config)],
-            "targets": [beam.fig_proj_error(config)],
-            "clean": True,
-        }
+        for name in ["hapod", "heuristic"]:
+            deps = [code]
+            deps += [beam.proj_error(distr, config, name) for distr in beam.distributions]
+            yield {
+                "name": f"fig_proj_err_{name}_{config}",
+                "file_dep": deps,
+                "actions": ["python3 -m {} {} {} --output %(targets)s".format(module, config, name)],
+                "targets": [beam.fig_proj_error(config, name)],
+                "clean": True,
+            }
 
 
 def task_extension():
     """Beam example: Extend fine scale modes and write final basis"""
-    module = "src.{beam.name}.extension"
+    module = f"src.{beam.name}.extension"
     num_cells = beam.nx * beam.ny
     for distr in DISTR:
-        for cell_index in range(num_cells):
-            config = beam.cell_to_config(cell_index)
-            yield {
-                    "name": f"xi_{beam.name}_{distr}_{cell_index}",
-                    "file_dep": [beam.fine_scale_edge_modes_npz(distr, config)],
-                    "actions": ["python3 -m {} {} {}".format(module, distr, cell_index)],
-                    "targets": [beam.local_basis_npz(distr, cell_index), beam.fine_scale_modes_bp(distr, cell_index), beam.log_extension(distr, cell_index)],
-                    "clean": [rm_rf],
-                    }
+        for name in NAMES:
+            for cell_index in range(num_cells):
+                config = beam.cell_to_config(cell_index)
+                yield {
+                        "name": f"xi_{name}_{distr}_{cell_index}",
+                        "file_dep": [beam.fine_scale_edge_modes_npz(distr, config, name)],
+                        "actions": ["python3 -m {} {} {} {}".format(module, distr, name, cell_index)],
+                        "targets": [beam.local_basis_npz(distr, name, cell_index), beam.fine_scale_modes_bp(distr, name, cell_index), beam.log_extension(distr, name, cell_index)],
+                        "clean": [rm_rf],
+                        }
 
 
 def task_loc_rom():
@@ -207,22 +236,23 @@ def task_loc_rom():
     num_cells = beam.nx * beam.ny
     num_test = 5 # TODO
     for distr in DISTR:
-        deps += [beam.local_basis_npz(distr, cell) for cell in range(num_cells)]
-        target = beam.loc_rom_error(distr)
-        yield {
-                "name": f"locrom_{beam.name}_{distr}",
-                "file_dep": deps,
-                "actions": ["python3 -m {} {} {} --output {}".format(module, distr, num_test, target)],
-                "targets": [target, beam.log_run_locrom(distr)],
-                "clean": True,
-                }
+        for name in NAMES:
+            deps += [beam.local_basis_npz(distr, name, cell) for cell in range(num_cells)]
+            target = beam.loc_rom_error(distr, name)
+            yield {
+                    "name": f"locrom_{name}_{distr}",
+                    "file_dep": deps,
+                    "actions": ["python3 -m {} {} {} {} --output {}".format(module, distr, name, num_test, target)],
+                    "targets": [target, beam.log_run_locrom(distr, name)],
+                    "clean": True,
+                    }
 
 
 def task_plot_loc_rom_error():
     """Beam example: Plot localized ROM error."""
     module = f"src.{beam.name}.plot_locrom_error"
     return {
-            "file_dep": [beam.loc_rom_error(d) for d in DISTR],
+            "file_dep": [beam.loc_rom_error(d, name) for d in DISTR for name in NAMES],
             "actions": ["python3 -m {} %(targets)s".format(module)],
             "targets": [beam.fig_loc_rom_error],
             "clean": True,
@@ -303,7 +333,8 @@ def task_paper():
     deps.append(ROOT / "figures/beam/beam_sketch.pdf")
     for config in CONFIGS:
         deps.append(beam.fig_loc_svals(config))
-        deps.append(beam.fig_proj_error(config))
+        for name in NAMES:
+            deps.append(beam.fig_proj_error(config, name))
     return {
         "file_dep": deps,
         "actions": ["latexmk -cd -pdf %s" % source],

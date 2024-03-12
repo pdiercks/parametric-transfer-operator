@@ -8,7 +8,7 @@ if __name__ == "__main__":
     from .tasks import beam
 
     bamcd = read_bam_colors()
-    color = {'normal': bamcd["red"][0], "multivariate_normal": bamcd["blue"][0]}
+    color = {'hapod': bamcd["red"][0], "heuristic": bamcd["blue"][0]}
 
     with PlottingContext(sys.argv, ["paper_onecol"]) as fig:
         fig.set_size_inches(4.773, 2.95)
@@ -17,11 +17,12 @@ if __name__ == "__main__":
         ax.set_ylabel("locROM error relative to FOM.")
 
         for distribution in beam.distributions:
-            infile = beam.loc_rom_error(distribution)
-            data = np.loadtxt(infile.as_posix(), delimiter=",")
-            modes = data[:, 0]
-            error = data[:, 1]
-            ax.semilogy(modes, error, color=color[distribution], marker="o", label=distribution)
+            for name in beam.training_strategies:
+                infile = beam.loc_rom_error(distribution, name)
+                data = np.loadtxt(infile.as_posix(), delimiter=",")
+                modes = data[:, 0]
+                error = data[:, 1]
+                ax.semilogy(modes, error, color=color[name], marker="o", label=name)
 
         ax.legend(loc="best")
 
