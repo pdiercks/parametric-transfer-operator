@@ -1,4 +1,3 @@
-import sys
 import numpy as np
 from multi.plotting_context import PlottingContext
 from multi.postprocessing import read_bam_colors
@@ -19,12 +18,8 @@ def main(args):
         "right": bamcd["green"][0],
         "top": bamcd["yellow"][0],
     }
-    # FIXME: this could be done better
-    # issue is that PlottingContext is designed to get argv if len(argv) == 2, but
-    # I need len(argv) > 2
-    config = args.pop(2)
 
-    with PlottingContext(args, ["paper_onecol"]) as fig:
+    with PlottingContext([__file__, args.output], ["paper_onecol"]) as fig:
         # figure.figsize: 4.773, 2.950
         width = 4.773
         height = 2.95
@@ -32,29 +27,39 @@ def main(args):
         fig.set_size_inches(factor * width, factor * height)
         ax = fig.subplots()
 
-        for distr in beam.distributions:
-            infile = beam.proj_error(distr, config)
-            npz_err = np.load(infile)
-            marker = markers[distr]
+        config = args.configuration
+        name = args.name
+        distr = beam.distributions[0]
 
-            for edge, color in colors.items():
+        infile = beam.proj_error(distr, config, name)
+        npz_err = np.load(infile)
+        marker = markers[distr]
 
-                if distr == "multivariate_normal":
-                    label = f"correlated, {config}, {edge}"
-                if distr == "normal":
-                    label = f"uncorrelated, {config}, {edge}"
+        ymin = []
 
-                err = npz_err[edge]
-                num_modes = np.arange(err.size)
-                ax.semilogy(num_modes, err, color=color, marker=marker, label=label)
-                # ax.semilogy(
-                #         data["num_dofs"], data["err"],
-                #         color=clr, marker=mark, label=label
-                #         )
-                # ax.fill_between(data["num_dofs"], data["err"]-std, data["err"]+std,
-                #         alpha=0.2, color=clr
-                #         )
+        for edge, color in colors.items():
+            label = ""
+            if distr == "multivariate_normal":
+                label = f"correlated, {config}, {edge}"
+            if distr == "normal":
+                label = f"uncorrelated, {config}, {edge}"
 
+            err = npz_err[edge]
+            num_modes = np.arange(err.size)
+            ax.semilogy(num_modes, err, color=color, marker=marker, label=label)
+            ymin.append(err[-1])
+            # ax.semilogy(
+            #         data["num_dofs"], data["err"],
+            #         color=clr, marker=mark, label=label
+            #         )
+            # ax.fill_between(data["num_dofs"], data["err"]-std, data["err"]+std,
+            #         alpha=0.2, color=clr
+            #         )
+
+        ax.set_ylim(min(ymin), 5.0)
+        exponents = np.linspace(-12, 0, 7)
+        base = np.array([10], dtype=float)
+        ax.set_yticks(np.power(base, exponents))
         ax.set_xlabel("Number of basis functions.")
         # numerator = r"\norm{u_{\mathrm{fom}} - u_{\mathrm{rom}}}"
         # denominator = r"\norm{u_{\mathrm{fom}}}"
@@ -64,4 +69,21 @@ def main(args):
 
 
 if __name__ == "__main__":
-    main(sys.argv)
+    import sys, argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "configuration",
+        type=str,
+        help="The type of oversampling problem.",
+        choices=("inner", "left", "right"),
+    )
+    parser.add_argument(
+        "name",
+        type=str,
+        help="The name of the training strategy.",
+        choices=("hapod", "heuristic"),
+    )
+    parser.add_argument("--output", type=str, help="Write plot to filepath.")
+    args = parser.parse_args(sys.argv[1:])
+    main(args)

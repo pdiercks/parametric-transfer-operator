@@ -206,7 +206,7 @@ def task_plot_proj_error():
             yield {
                 "name": f"fig_proj_err_{name}_{config}",
                 "file_dep": deps,
-                "actions": ["python3 -m {} %(targets)s {}".format(module, config)],
+                "actions": ["python3 -m {} {} {} --output %(targets)s".format(module, config, name)],
                 "targets": [beam.fig_proj_error(config, name)],
                 "clean": True,
             }
