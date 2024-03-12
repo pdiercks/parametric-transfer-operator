@@ -8,7 +8,7 @@ if __name__ == "__main__":
     from .tasks import beam
 
     bamcd = read_bam_colors()
-    color = {'normal': bamcd["red"][0], "multivariate_normal": bamcd["blue"][0]}
+    color = {'hapod': bamcd["red"][0], "heuristic": bamcd["blue"][0]}
 
     with PlottingContext(sys.argv, ["paper_onecol"]) as fig:
         fig.set_size_inches(4.773, 2.95)
@@ -22,7 +22,7 @@ if __name__ == "__main__":
                 data = np.loadtxt(infile.as_posix(), delimiter=",")
                 modes = data[:, 0]
                 error = data[:, 1]
-                ax.semilogy(modes, error, color=color[distribution], marker="o", label=name)
+                ax.semilogy(modes, error, color=color[name], marker="o", label=name)
 
         ax.legend(loc="best")
 
