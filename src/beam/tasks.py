@@ -223,7 +223,7 @@ def task_extension():
                 yield {
                         "name": f"xi_{name}_{distr}_{cell_index}",
                         "file_dep": [beam.fine_scale_edge_modes_npz(distr, config, name)],
-                        "actions": ["python3 -m {} {} {}".format(module, distr, cell_index)],
+                        "actions": ["python3 -m {} {} {}".format(module, distr, name, cell_index)],
                         "targets": [beam.local_basis_npz(distr, name, cell_index), beam.fine_scale_modes_bp(distr, name, cell_index), beam.log_extension(distr, name, cell_index)],
                         "clean": [rm_rf],
                         }
