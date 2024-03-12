@@ -36,6 +36,7 @@ class BeamData:
         pod_rtol: Relative tolerance for POD algo.
         configurations: The configurations, i.e. oversampling problems.
         distributions: The distributions used in the randomized range finder.
+        training_strategies: The training strategies that are studied.
         range_product: The inner product to use (rrf, projection error).
         lhs_options: Parameters for Latin-Hypercube-Sampling for each configuration.
 
@@ -60,6 +61,7 @@ class BeamData:
     pod_rtol: float = 1e-5
     configurations: tuple[str, str, str] = ("inner", "left", "right")
     distributions: tuple[str, ...] = ("normal",)
+    training_strategies: tuple[str, ...] = ("hapod", "heuristic")
     range_product: str = "h1"
     lhs_options: dict = field(
         default_factory=lambda: {
@@ -89,7 +91,8 @@ class BeamData:
         self.grids_path.mkdir(exist_ok=True, parents=True)
         self.logs_path.mkdir(exist_ok=True, parents=True)
         for distr in self.distributions:
-            self.bases_path(distr).mkdir(exist_ok=True, parents=True)
+            for name in self.training_strategies:
+                self.bases_path(distr, name).mkdir(exist_ok=True, parents=True)
 
     @property
     def rf(self) -> Path:
@@ -104,8 +107,8 @@ class BeamData:
     def logs_path(self) -> Path:
         return self.rf / "logs"
 
-    def bases_path(self, distr: str) -> Path:
-        return self.rf / f"bases/{distr}"
+    def bases_path(self, distr: str, name: str) -> Path:
+        return self.rf / f"bases/{distr}/{name}"
 
     @property
     def coarse_grid(self) -> Path:
@@ -153,8 +156,8 @@ class BeamData:
     def log_projerr(self, distr: str, conf: str, name: str) -> Path:
         return self.logs_path / f"projerr_{distr}_{conf}_{name}.log"
 
-    def log_extension(self, distr: str, cell: int) -> Path:
-        return self.logs_path / f"extension_{distr}_{cell}.log"
+    def log_extension(self, distr: str, name: str, cell: int) -> Path:
+        return self.logs_path / f"extension_{distr}_{name}_{cell}.log"
 
     def log_run_locrom(self, distr: str) -> Path:
         return self.logs_path / f"run_locrom_{distr}.log"
@@ -167,9 +170,9 @@ class BeamData:
         """edge-restricted fine scale part of pod modes"""
         return self.rf / f"fine_scale_edge_modes_{distr}_{conf}_{name}.npz"
 
-    def fine_scale_modes_bp(self, distr: str, cell: int) -> Path:
+    def fine_scale_modes_bp(self, distr: str, name: str, cell: int) -> Path:
         """fine scale basis functions after extension"""
-        return self.rf / f"fine_scale_modes_{distr}_{cell}.bp"
+        return self.rf / f"fine_scale_modes_{distr}_{name}_{cell}.bp"
 
     def fom_test_set(self, conf: str) -> Path:
         """test set generated from FOM solutions"""
@@ -204,14 +207,14 @@ class BeamData:
         config = map.get(cell, "inner")
         return config
 
-    def local_basis_npz(self, distr: str, cell: int) -> Path:
+    def local_basis_npz(self, distr: str, name: str, cell: int) -> Path:
         """final basis for loc rom assembly"""
-        dir = self.bases_path(distr)
+        dir = self.bases_path(distr, name)
         return dir / f"basis_{cell:03}.npz"
 
-    def loc_rom_error(self, distr: str) -> Path:
+    def loc_rom_error(self, distr: str, name: str) -> Path:
         """loc ROM error relative to FOM"""
-        return self.rf / f"loc_rom_error_{distr}.csv"
+        return self.rf / f"loc_rom_error_{distr}_{name}.csv"
 
     @property
     def realizations(self) -> Path:

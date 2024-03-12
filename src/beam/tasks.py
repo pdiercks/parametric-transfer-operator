@@ -218,15 +218,15 @@ def task_extension():
     num_cells = beam.nx * beam.ny
     for distr in DISTR:
         for name in NAMES:
-        for cell_index in range(num_cells):
-            config = beam.cell_to_config(cell_index)
-            yield {
-                    "name": f"xi_{beam.name}_{distr}_{cell_index}",
-                    "file_dep": [beam.fine_scale_edge_modes_npz(distr, config, name)],
-                    "actions": ["python3 -m {} {} {}".format(module, distr, cell_index)],
-                    "targets": [beam.local_basis_npz(distr, cell_index), beam.fine_scale_modes_bp(distr, cell_index), beam.log_extension(distr, cell_index)],
-                    "clean": [rm_rf],
-                    }
+            for cell_index in range(num_cells):
+                config = beam.cell_to_config(cell_index)
+                yield {
+                        "name": f"xi_{name}_{distr}_{cell_index}",
+                        "file_dep": [beam.fine_scale_edge_modes_npz(distr, config, name)],
+                        "actions": ["python3 -m {} {} {}".format(module, distr, cell_index)],
+                        "targets": [beam.local_basis_npz(distr, name, cell_index), beam.fine_scale_modes_bp(distr, name, cell_index), beam.log_extension(distr, name, cell_index)],
+                        "clean": [rm_rf],
+                        }
 
 
 def task_loc_rom():
@@ -236,22 +236,23 @@ def task_loc_rom():
     num_cells = beam.nx * beam.ny
     num_test = 5 # TODO
     for distr in DISTR:
-        deps += [beam.local_basis_npz(distr, cell) for cell in range(num_cells)]
-        target = beam.loc_rom_error(distr)
-        yield {
-                "name": f"locrom_{beam.name}_{distr}",
-                "file_dep": deps,
-                "actions": ["python3 -m {} {} {} --output {}".format(module, distr, num_test, target)],
-                "targets": [target, beam.log_run_locrom(distr)],
-                "clean": True,
-                }
+        for name in NAMES:
+            deps += [beam.local_basis_npz(distr, name, cell) for cell in range(num_cells)]
+            target = beam.loc_rom_error(distr, name)
+            yield {
+                    "name": f"locrom_{name}_{distr}",
+                    "file_dep": deps,
+                    "actions": ["python3 -m {} {} {} --output {}".format(module, distr, num_test, target)],
+                    "targets": [target, beam.log_run_locrom(distr)],
+                    "clean": True,
+                    }
 
 
 def task_plot_loc_rom_error():
     """Beam example: Plot localized ROM error."""
     module = f"src.{beam.name}.plot_locrom_error"
     return {
-            "file_dep": [beam.loc_rom_error(d) for d in DISTR],
+            "file_dep": [beam.loc_rom_error(d, name) for d in DISTR for name in NAMES],
             "actions": ["python3 -m {} %(targets)s".format(module)],
             "targets": [beam.fig_loc_rom_error],
             "clean": True,
@@ -332,7 +333,8 @@ def task_paper():
     deps.append(ROOT / "figures/beam/beam_sketch.pdf")
     for config in CONFIGS:
         deps.append(beam.fig_loc_svals(config))
-        deps.append(beam.fig_proj_error(config))
+        for name in NAMES:
+            deps.append(beam.fig_proj_error(config, name))
     return {
         "file_dep": deps,
         "actions": ["latexmk -cd -pdf %s" % source],
