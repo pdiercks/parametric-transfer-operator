@@ -404,10 +404,15 @@ def main(args):
             testing_set,
         )
 
+    # convert to numpy
+    output = {}
+    for k, vector_array in bases.items():
+        output[k] = vector_array.to_numpy()
+
     # write fine scale basis
     np.savez(
         beam.fine_scale_edge_modes_npz(args.distribution, args.configuration, "heuristic"),
-        **bases,
+        **output,
     )
 
 
