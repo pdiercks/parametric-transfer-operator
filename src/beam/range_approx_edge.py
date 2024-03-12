@@ -467,19 +467,37 @@ def main(args):
     set_defaults(
         {
             "pymor.core.logger.getLogger.filename": beam.log_edge_range_approximation(
-                args.distribution, args.configuration
+                args.distribution, args.configuration, "hapod"
             ).as_posix(),
         }
     )
-    logger = getLogger(Path(__file__).stem, level="DEBUG")
+    logger = getLogger(Path(__file__).stem, level="INFO")
 
-    sampling_options = beam.lhs[args.configuration]
-    mu_name = sampling_options.pop("name")
-    ndim = sampling_options.pop("ndim")
+    sampling_options = beam.lhs_options[args.configuration]
+    logger.debug(f"{sampling_options=}")
+
+    # TODO simply do serial version to just test if correlated random samples
+    # are actually the reason for the quality of the basis
+    realizations = np.load(beam.realizations)
+    lhs_seed = np.random.SeedSequence(realizations[0]).generate_state(1)
+    # TODO add real as command line argument
+
+    mu_name = sampling_options.get("name")
+    ndim = sampling_options.get("ndim")
+    samples = sampling_options.get("samples")
+    criterion = sampling_options.get("criterion")
+    # seed sequences for the randomized range finder for each transfer operator
+    seed_seqs_rrf = np.random.SeedSequence(realizations[0]).generate_state(samples+1)[1:]
+
     param = Parameters({mu_name: ndim})
     parameter_space = ParameterSpace(param, beam.mu_range)
-    logger.debug(f"{sampling_options=}")
-    training_set = sample_lhs(parameter_space, mu_name, **sampling_options)
+    training_set = sample_lhs(
+        parameter_space,
+        mu_name,
+        samples=samples,
+        criterion=criterion,
+        random_state=lhs_seed,
+    )
 
     logger.info(
         "Starting range approximation of transfer operators"
@@ -497,17 +515,11 @@ def main(args):
     #         repeat(args.distribution),
     #     )
 
-    # TODO simply do serial version to just test if correlated random samples
-    # are actually the reason for the quality of the basis
-    realizations = np.load(beam.realizations)
-    # TODO add real as command line argument
-    num_samples = sampling_options["samples"]
-    seed_seqs = np.random.SeedSequence(realizations[0]).generate_state(num_samples)
 
 
     # first sample
     mu = training_set[0]
-    ss = seed_seqs[0]
+    ss = seed_seqs_rrf[0]
     with new_rng(ss):
         bases, range_products = approximate_range(
                 beam, mu, args.configuration, args.distribution
@@ -518,7 +530,7 @@ def main(args):
         snapshots[edge] = basis.space.empty()
         snapshots[edge].append(basis)
 
-    for mu, ss in zip(training_set[1:], seed_seqs[1:]):
+    for mu, ss in zip(training_set[1:], seed_seqs_rrf[1:]):
         with new_rng(ss):
             bases, _ = approximate_range(
                 beam, mu, args.configuration, args.distribution
@@ -559,7 +571,7 @@ def main(args):
 
     # write pod modes and singular values to disk
     np.savez(
-        beam.fine_scale_edge_modes_npz(args.distribution, args.configuration), **pod_modes
+        beam.fine_scale_edge_modes_npz(args.distribution, args.configuration, "hapod"), **pod_modes
     )
     np.savez(beam.loc_singular_values_npz(args.distribution, args.configuration), **pod_svals)
 
