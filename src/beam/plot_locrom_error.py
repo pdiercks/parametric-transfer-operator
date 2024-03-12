@@ -17,11 +17,12 @@ if __name__ == "__main__":
         ax.set_ylabel("locROM error relative to FOM.")
 
         for distribution in beam.distributions:
-            infile = beam.loc_rom_error(distribution)
-            data = np.loadtxt(infile.as_posix(), delimiter=",")
-            modes = data[:, 0]
-            error = data[:, 1]
-            ax.semilogy(modes, error, color=color[distribution], marker="o", label=distribution)
+            for name in beam.training_strategies:
+                infile = beam.loc_rom_error(distribution, name)
+                data = np.loadtxt(infile.as_posix(), delimiter=",")
+                modes = data[:, 0]
+                error = data[:, 1]
+                ax.semilogy(modes, error, color=color[distribution], marker="o", label=name)
 
         ax.legend(loc="best")
 
