@@ -159,8 +159,8 @@ class BeamData:
     def log_extension(self, distr: str, name: str, cell: int) -> Path:
         return self.logs_path / f"extension_{distr}_{name}_{cell}.log"
 
-    def log_run_locrom(self, distr: str) -> Path:
-        return self.logs_path / f"run_locrom_{distr}.log"
+    def log_run_locrom(self, distr: str, name: str) -> Path:
+        return self.logs_path / f"run_locrom_{distr}_{name}.log"
 
     def loc_singular_values_npz(self, distr: str, conf: str) -> Path:
         """singular values of POD compression for range approximation of parametric T"""

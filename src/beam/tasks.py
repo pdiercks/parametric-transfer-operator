@@ -243,7 +243,7 @@ def task_loc_rom():
                     "name": f"locrom_{name}_{distr}",
                     "file_dep": deps,
                     "actions": ["python3 -m {} {} {} --output {}".format(module, distr, num_test, target)],
-                    "targets": [target, beam.log_run_locrom(distr)],
+                    "targets": [target, beam.log_run_locrom(distr, name)],
                     "clean": True,
                     }
 
