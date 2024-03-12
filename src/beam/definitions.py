@@ -315,7 +315,6 @@ class BeamProblem(MultiscaleProblemDefinition):
 
     def get_neumann(self, cell_index: Optional[int] = None):
         # is the same for all oversampling problems
-        # see range_approximation.py
         return None
 
     def get_kernel_set(self, cell_index: int) -> tuple[int, ...]:
