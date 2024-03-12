@@ -90,7 +90,7 @@ def main(args):
 
         # ### Fine scale edge modes
         configuration = beam.cell_to_config(ci)
-        infile = beam.fine_scale_edge_modes_npz(args.distribution, configuration)
+        infile = beam.fine_scale_edge_modes_npz(args.distribution, configuration, args.name)
         logger.debug(
             f"Reading fine scale modes for cell {args.cell} from file: {infile}"
         )
