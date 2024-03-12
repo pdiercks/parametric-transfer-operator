@@ -73,40 +73,57 @@ The range approximation of the $n_{train}$ transfer operators yields $n_{train}$
 basis functions, which are further compressed via POD, to obtain the final parameter
 independent basis functions (POD modes).
 
-\subsubsection{Singular values of POD modes}
+\subsubsection{Distributed approximate POD}
 
 \begin{figure}[!htb]
 \minipage{0.32\textwidth}
   \includegraphics[width=\linewidth]{../figures/beam/fig_loc_svals_left.pdf}
-  \caption{A really Awesome Image}\label{fig:loc_svals_left}
+  \caption{Singular valus left}\label{fig:loc_svals_left}
 \endminipage\hfill
 \minipage{0.32\textwidth}
   \includegraphics[width=\linewidth]{../figures/beam/fig_loc_svals_inner.pdf}
-  \caption{A really Awesome Image}\label{fig:loc_svals_inner}
+  \caption{Singular valus inner}\label{fig:loc_svals_inner}
 \endminipage\hfill
 \minipage{0.32\textwidth}%
   \includegraphics[width=\linewidth]{../figures/beam/fig_loc_svals_right.pdf}
-  \caption{A really Awesome Image}\label{fig:loc_svals_right}
+  \caption{Singular valus right}\label{fig:loc_svals_right}
 \endminipage
 \end{figure}
 
 
-\subsubsection{Projection Error}
-The projection error is computed for a test set for each configuration that was computed
-using the FOM. Each test set has size $n_{test}$.
+% \subsubsection{Projection Error}
+% The projection error is computed for a test set for each configuration that was computed
+% using the FOM. Each test set has size $n_{test}$.
 
 \begin{figure}[!htb]
 \minipage{0.32\textwidth}
-  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_left.pdf}
-  \caption{A really Awesome Image}\label{fig:proj_error_left}
+  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_left_hapod.pdf}
+  \caption{Projection error hapod}\label{fig:proj_error_left_hapod}
 \endminipage\hfill
 \minipage{0.32\textwidth}
-  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_inner.pdf}
-  \caption{A really Awesome Image}\label{fig:proj_error_inner}
+  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_inner_hapod.pdf}
+  \caption{Projection error hapod}\label{fig:proj_error_inner_hapod}
 \endminipage\hfill
 \minipage{0.32\textwidth}%
-  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_right.pdf}
-  \caption{A really Awesome Image}\label{fig:proj_error_right}
+  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_right_hapod.pdf}
+  \caption{Projection error hapod}\label{fig:proj_error_right_hapod}
+\endminipage
+\end{figure}
+
+\subsubsection{Heuristic range finder}
+
+\begin{figure}[!htb]
+\minipage{0.32\textwidth}
+  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_left_heuristic.pdf}
+  \caption{Projection error }\label{fig:proj_error_left_heuristic}
+\endminipage\hfill
+\minipage{0.32\textwidth}
+  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_inner_heuristic.pdf}
+  \caption{Projection error }\label{fig:proj_error_inner_heuristic}
+\endminipage\hfill
+\minipage{0.32\textwidth}%
+  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_right_heuristic.pdf}
+  \caption{Projection error }\label{fig:proj_error_right_heuristic}
 \endminipage
 \end{figure}
 
