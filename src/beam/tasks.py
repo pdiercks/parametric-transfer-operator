@@ -79,7 +79,7 @@ def task_build_rom():
     }
 
 
-def task_edge_range_approximation():
+def task_edge_range_approx():
     """Beam example: Construct POD edge basis"""
     module = f"src.{beam.name}.range_approx_edge"
     file = SRC / "range_approx_edge.py"
@@ -106,7 +106,7 @@ def task_edge_range_approximation():
             }
 
 
-def task_heuristic_edge_range_approximation():
+def task_heuristic_edge_range_approx():
     """Beam example: Construct fine scale edge basis via heuristic range finder"""
     module = f"src.{beam.name}.heuristic_range_approx"
     file = SRC / "heuristic_range_approx.py"
