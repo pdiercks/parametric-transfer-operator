@@ -172,6 +172,12 @@ class BeamData:
         """length of each edge basis after rrf algo in hapod training"""
         return self.rf / f"hapod_rrf_bases_length_{distr}_{conf}.npz"
 
+    def hapod_table(self, conf: str) -> Path:
+        return self.rf / f"hapod_table_{conf}.csv"
+
+    def pod_data(self, distr: str, conf: str) -> Path:
+        return self.rf / f"pod_data_{distr}_{conf}.json"
+
     def fine_scale_edge_modes_npz(self, distr: str, conf: str, name: str) -> Path:
         """edge-restricted fine scale part of pod modes"""
         return self.rf / f"fine_scale_edge_modes_{distr}_{conf}_{name}.npz"

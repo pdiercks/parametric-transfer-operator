@@ -102,6 +102,7 @@ def task_hapod():
                     beam.fine_scale_edge_modes_npz(distr, config, "hapod"),
                     beam.loc_singular_values_npz(distr, config),
                     beam.hapod_rrf_bases_length(distr, config),
+                    beam.pod_data(distr, config),
                 ],
                 "clean": [rm_rf],
             }

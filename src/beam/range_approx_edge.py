@@ -1,6 +1,7 @@
 """approximate the range of transfer operators for fixed parameter values"""
 
 import os
+import json
 from typing import Optional
 # from itertools import repeat
 from pathlib import Path
@@ -555,11 +556,15 @@ def main(args):
     pod_table.append(["Edge", "Number of Snapshots", "Number of POD modes", "Rel. Tolerance"])
     pod_modes = {}
     pod_svals = {}
+    pod_data = {}
+
     for edge, snapshot_data in snapshots.items():
         modes, svals = pod(snapshot_data, product=range_products[edge], modes=None, rtol=beam.pod_rtol)
         pod_modes[edge] = modes.to_numpy()
         pod_svals[edge] = svals
         pod_table.append([edge, len(snapshot_data), len(modes), beam.pod_rtol])
+        pod_data[edge] = (len(modes), len(snapshot_data))
+
     logger.info(format_table(pod_table, title="\nPOD of edge basis functions"))
 
     # write output: fine scale edge modes, singular values, rrf bases length
@@ -568,6 +573,9 @@ def main(args):
     )
     np.savez(beam.loc_singular_values_npz(args.distribution, args.configuration), **pod_svals)
     np.savez(beam.hapod_rrf_bases_length(args.distribution, args.configuration), **rrf_bases_length)
+    with beam.pod_data(args.distribution, args.configuration).open("w") as fh:
+        fh.write(json.dumps(pod_data))
+
 
 
 if __name__ == "__main__":
