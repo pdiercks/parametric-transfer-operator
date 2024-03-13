@@ -38,6 +38,7 @@ class BeamData:
         distributions: The distributions used in the randomized range finder.
         training_strategies: The training strategies that are studied.
         range_product: The inner product to use (rrf, projection error).
+        validation_seed: Random seed used for validation set in local ROM error computation.
         lhs_options: Parameters for Latin-Hypercube-Sampling for each configuration.
 
     """
@@ -63,6 +64,7 @@ class BeamData:
     distributions: tuple[str, ...] = ("normal",)
     training_strategies: tuple[str, ...] = ("hapod", "heuristic")
     range_product: str = "h1"
+    validation_seed: int = 7348
     lhs_options: dict = field(
         default_factory=lambda: {
             "inner": {
