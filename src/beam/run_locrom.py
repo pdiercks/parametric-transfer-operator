@@ -12,11 +12,12 @@ from basix.ufl import element
 from pymor.parameters.base import Parameters
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
-from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator, FenicsxVisualizer
+from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator
 from pymor.operators.constructions import VectorOperator, LincombOperator
 from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.algorithms.projection import project
 from pymor.models.basic import StationaryModel
+from pymor.tools.random import new_rng
 
 from multi.interpolation import make_mapping
 from multi.boundary import point_at
@@ -332,7 +333,8 @@ def main(args):
 
     # ### ROM Assembly and Error Analysis
     P = fom.parameters.space(beam.mu_range)
-    validation_set = P.sample_randomly(args.num_test)
+    with new_rng(beam.validation_seed):
+        validation_set = P.sample_randomly(args.num_test)
 
     # better not create functions inside loops
     u_rb = fem.Function(fom.solution_space.V)
