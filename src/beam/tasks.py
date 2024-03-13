@@ -373,7 +373,7 @@ def task_compile_tables():
         yield {
                 "name": f"{src.stem}",
                 "file_dep": [src] + data,
-                "actions": [f"latexmk -cd -pdf -outdir={ROOT / 'tables'} {src}"],
+                "actions": [f"latexmk -pdf -outdir={ROOT / 'tables'} {src}"],
                 "targets": [ROOT / "tables" / (src.stem + ".pdf")],
                 "clean": True,
                 }
@@ -394,9 +394,9 @@ def task_paper():
             deps.append(beam.fig_proj_error(config, name))
     return {
         "file_dep": deps,
-        "actions": ["latexmk -cd -pdf %s" % source],
+        "actions": [f"latexmk -pdf -outdir={ROOT / 'paper'} {source}"],
         "targets": [source.with_suffix(".pdf")],
-        "clean": ["latexmk -cd -C %s" % source],
+        "clean": ["latexmk -C %s" % source],
     }
 
 

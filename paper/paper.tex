@@ -6,6 +6,11 @@
 \usepackage{amsfonts}
 \usepackage{amssymb}
 
+\usepackage{standalone}
+\usepackage{booktabs}
+\usepackage{pgfplotstable}
+\pgfplotsset{compat=1.18}
+
 \title{INSTRUCTIONS TO PREPARE A FULL PAPER FOR THE 9th EUROPEAN CONGRESS ON COMPUTATIONAL METHODS IN APPLIED SCIENCES AND ENGINEERING\break ECCOMAS CONGRESS 2024}
 
 \author{FIRST A. AUTHOR$^1$, SECOND B. AUTHOR$^2$ AND THIRD C. AUTHOR$^1$}
@@ -44,7 +49,7 @@ All the participants whose Abstract has been accepted for presentation at the EC
 
 \begin{figure}
     \begin{center}
-        \includegraphics[width=0.95\textwidth]{../figures/beam/beam_sketch.pdf}
+        \includegraphics[width=0.95\textwidth]{./figures/beam/beam_sketch.pdf}
     \end{center}
     \caption{Schematic representation of the structural problem. A simply supported beam is subjected to a constant load.}\label{fig:beam_sketch}
 \end{figure}
@@ -52,14 +57,14 @@ All the participants whose Abstract has been accepted for presentation at the EC
 % TODO placement
 \begin{figure}
     \begin{center}
-        \includegraphics[width=0.65\textwidth]{../figures/beam/unit_cell.png}
+        \includegraphics[width=0.65\textwidth]{./figures/beam/unit_cell.png}
     \end{center}
     \caption{Unit cell domain partition.}\label{fig:unit_cell_domain}
 \end{figure}
 
 \begin{figure}
     \begin{center}
-        \includegraphics[width=0.95\textwidth]{../figures/beam/global_domain.png}
+        \includegraphics[width=0.95\textwidth]{./figures/beam/global_domain.png}
     \end{center}
     \caption{The partition of the global domain. The colors indicate the variation in Young's modulus for each subdomain.}\label{fig:global_domain}
 \end{figure}
@@ -77,15 +82,15 @@ independent basis functions (POD modes).
 
 \begin{figure}[!htb]
 \minipage{0.32\textwidth}
-  \includegraphics[width=\linewidth]{../figures/beam/fig_loc_svals_left.pdf}
+  \includegraphics[width=\linewidth]{./figures/beam/fig_loc_svals_left.pdf}
   \caption{Singular valus left}\label{fig:loc_svals_left}
 \endminipage\hfill
 \minipage{0.32\textwidth}
-  \includegraphics[width=\linewidth]{../figures/beam/fig_loc_svals_inner.pdf}
+  \includegraphics[width=\linewidth]{./figures/beam/fig_loc_svals_inner.pdf}
   \caption{Singular valus inner}\label{fig:loc_svals_inner}
 \endminipage\hfill
 \minipage{0.32\textwidth}%
-  \includegraphics[width=\linewidth]{../figures/beam/fig_loc_svals_right.pdf}
+  \includegraphics[width=\linewidth]{./figures/beam/fig_loc_svals_right.pdf}
   \caption{Singular valus right}\label{fig:loc_svals_right}
 \endminipage
 \end{figure}
@@ -97,40 +102,50 @@ independent basis functions (POD modes).
 
 \begin{figure}[!htb]
 \minipage{0.32\textwidth}
-  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_left_hapod.pdf}
+  \includegraphics[width=\linewidth]{./figures/beam/fig_proj_error_left_hapod.pdf}
   \caption{Projection error hapod}\label{fig:proj_error_left_hapod}
 \endminipage\hfill
 \minipage{0.32\textwidth}
-  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_inner_hapod.pdf}
+  \includegraphics[width=\linewidth]{./figures/beam/fig_proj_error_inner_hapod.pdf}
   \caption{Projection error hapod}\label{fig:proj_error_inner_hapod}
 \endminipage\hfill
 \minipage{0.32\textwidth}%
-  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_right_hapod.pdf}
+  \includegraphics[width=\linewidth]{./figures/beam/fig_proj_error_right_hapod.pdf}
   \caption{Projection error hapod}\label{fig:proj_error_right_hapod}
 \endminipage
 \end{figure}
+
+\begin{table}
+    \caption{HAPOD inner}\label{tab:hapod_inner}
+    \input{./src/beam/tables/hapod_inner.tex}
+\end{table}
 
 \subsubsection{Heuristic range finder}
 
 \begin{figure}[!htb]
 \minipage{0.32\textwidth}
-  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_left_heuristic.pdf}
+  \includegraphics[width=\linewidth]{./figures/beam/fig_proj_error_left_heuristic.pdf}
   \caption{Projection error }\label{fig:proj_error_left_heuristic}
 \endminipage\hfill
 \minipage{0.32\textwidth}
-  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_inner_heuristic.pdf}
+  \includegraphics[width=\linewidth]{./figures/beam/fig_proj_error_inner_heuristic.pdf}
   \caption{Projection error }\label{fig:proj_error_inner_heuristic}
 \endminipage\hfill
 \minipage{0.32\textwidth}%
-  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_right_heuristic.pdf}
+  \includegraphics[width=\linewidth]{./figures/beam/fig_proj_error_right_heuristic.pdf}
   \caption{Projection error }\label{fig:proj_error_right_heuristic}
 \endminipage
 \end{figure}
 
+\begin{table}
+    \caption{Heuristic rrf inner}\label{tab:heuristic_inner}
+    \input{./src/beam/tables/heuristic_inner.tex}
+\end{table}
+
 \subsection{Localized ROM}
 
 \begin{figure}[!htb]
-    \includegraphics[width=\linewidth]{../figures/beam/fig_loc_rom_error.pdf}
+    \includegraphics[width=\linewidth]{./figures/beam/fig_loc_rom_error.pdf}
     \caption{A really Awesome Image}\label{fig:loc_rom_error}
 \end{figure}
 
