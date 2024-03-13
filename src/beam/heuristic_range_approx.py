@@ -1,3 +1,4 @@
+import json
 import numpy as np
 from pathlib import Path
 
@@ -40,7 +41,9 @@ def lhs_design(beam, sampling_options):
     return training_set
 
 
-def solve_neumann_problem(beam, beam_problem, transfer_problem, mu, args, neumann_snapshots):
+def solve_neumann_problem(
+    beam, beam_problem, transfer_problem, mu, args, neumann_snapshots
+):
     neumann_problem = transfer_problem.problem
     neumann_problem.clear_bcs()
     omega = neumann_problem.domain
@@ -95,7 +98,10 @@ def solve_neumann_problem(beam, beam_problem, transfer_problem, mu, args, neuman
         U_orth = U_in
     else:
         U_orth = orthogonal_part(
-            U_in, transfer_problem.kernel, product=transfer_problem.range_product, orthonormal=True
+            U_in,
+            transfer_problem.kernel,
+            product=transfer_problem.range_product,
+            orthonormal=True,
         )
 
     # fine scale part of neumann snapshot
@@ -319,7 +325,9 @@ def approximate_range(
             edge_space = range_spaces[edge]
 
             # restrict the training sample to the edge
-            udofs = edge_space.from_numpy(U.dofs(transfer_problem.subproblem.V_to_L[edge]))
+            udofs = edge_space.from_numpy(
+                U.dofs(transfer_problem.subproblem.V_to_L[edge])
+            )
             coeff = udofs.dofs(edge_boundary_dofs[edge])
             ufine = udofs - coarse_basis[edge].lincomb(coeff)
 
@@ -335,10 +343,12 @@ def approximate_range(
 
         logger.info(f"Iteration: {num_solves}:\t{maxnorm=}.")
 
+    rrf_bases_length = {}
     with logger.block("Completed range approximation"):
         logger.info(f"Number of iterations: {num_solves}")
         for edge in edges:
             logger.info(f"Number of modes {edge}: {len(fine_scale_edge_bases[edge])}")
+            rrf_bases_length[edge] = len(fine_scale_edge_bases[edge])
 
     # Multiscale problem definition
     beam_problem = BeamProblem(beam.coarse_grid.as_posix(), beam.fine_grid.as_posix())
@@ -346,17 +356,36 @@ def approximate_range(
     for i in range(num_solves):
         mu = training_set[i]
         # FIXME avoid adding more functions if extension fails for i < num_solves
-        solve_neumann_problem(beam, beam_problem, transfer_problem, mu, args, neumann_snaps)
+        solve_neumann_problem(
+            beam, beam_problem, transfer_problem, mu, args, neumann_snaps
+        )
 
     for edge, snapshots in neumann_snaps.items():
-        extend_basis(snapshots, fine_scale_edge_bases[edge], product=range_products[edge],
-                     method="pod", pod_modes=len(snapshots))
+        extend_basis(
+            snapshots,
+            fine_scale_edge_bases[edge],
+            product=range_products[edge],
+            method="pod",
+            pod_modes=len(snapshots),
+        )
 
+    final_basis_size = {}
+    neumann_modes = {}
     with logger.block("Completed Neumann data extension"):
         for edge in edges:
             logger.info(f"Number of modes {edge}: {len(fine_scale_edge_bases[edge])}")
-    return fine_scale_edge_bases
+            final_basis_size[edge] = len(fine_scale_edge_bases[edge])
+            neumann_modes[edge] = len(fine_scale_edge_bases[edge]) - rrf_bases_length[edge]
 
+    heuristic_data = {
+        "final_basis_size": final_basis_size,
+        "neumann_modes": neumann_modes,
+        "rrf_bases_length": rrf_bases_length,
+    }
+    with beam.heuristic_data(args.distribution, args.configuration).open("w") as fh:
+        fh.write(json.dumps(heuristic_data))
+
+    return fine_scale_edge_bases
 
 
 def main(args):
@@ -411,7 +440,9 @@ def main(args):
 
     # write fine scale basis
     np.savez(
-        beam.fine_scale_edge_modes_npz(args.distribution, args.configuration, "heuristic"),
+        beam.fine_scale_edge_modes_npz(
+            args.distribution, args.configuration, "heuristic"
+        ),
         **output,
     )
 

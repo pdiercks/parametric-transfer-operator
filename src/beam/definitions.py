@@ -178,6 +178,12 @@ class BeamData:
     def pod_data(self, distr: str, conf: str) -> Path:
         return self.rf / f"pod_data_{distr}_{conf}.json"
 
+    def heuristic_data(self, distr: str, conf: str) -> Path:
+        return self.rf / f"heuristic_data_{distr}_{conf}.json"
+
+    def heuristic_table(self, conf: str) -> Path:
+        return self.rf / f"heuristic_table_{conf}.csv"
+
     def fine_scale_edge_modes_npz(self, distr: str, conf: str, name: str) -> Path:
         """edge-restricted fine scale part of pod modes"""
         return self.rf / f"fine_scale_edge_modes_{distr}_{conf}_{name}.npz"

@@ -128,6 +128,7 @@ def task_heuristic_rrf():
                 "targets": [
                     beam.log_edge_range_approximation(distr, config, "heuristic"),
                     beam.fine_scale_edge_modes_npz(distr, config, "heuristic"),
+                    beam.heuristic_data(distr, config),
                 ],
                 "clean": [rm_rf],
             }
@@ -342,14 +343,37 @@ def task_hapod_table_csv():
                 }
 
 
+def task_heuristic_table_csv():
+    """Beam example: Generate heuristic table in csv format"""
+    module = f"src.{beam.name}.generate_heuristic_table"
+    distr = "normal"
+    deps = []
+    for config in CONFIGS:
+        deps.append(beam.heuristic_data(distr, config))
+        yield {
+                "name": f"{config}",
+                "file_dep": deps,
+                "actions": ["python3 -m {} {}".format(module, config)],
+                "targets": [beam.heuristic_table(config)],
+                "clean": True,
+                }
+
+
 def task_compile_tables():
     """Beam example: Compile standalone tables"""
     sources = list((SRC / "tables").glob("*.tex"))
     for src in sources:
+        data = []
+        name = src.stem
+        train, config = name.split("_")
+        if train.startswith("hapod"):
+            data.append(beam.hapod_table(config))
+        if train.startswith("heuristic"):
+            data.append(beam.heuristic_table(config))
         yield {
                 "name": f"{src.stem}",
-                "file_dep": [src],
-                "actions": [f"latexmk -cd -pdf -outdir={ROOT / 'tables'} %(dependencies)s"],
+                "file_dep": [src] + data,
+                "actions": [f"latexmk -cd -pdf -outdir={ROOT / 'tables'} {src}"],
                 "targets": [ROOT / "tables" / (src.stem + ".pdf")],
                 "clean": True,
                 }
