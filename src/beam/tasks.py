@@ -325,6 +325,37 @@ def task_fig_beam_sketch():
             }
 
 
+def task_hapod_table_csv():
+    """Beam example: Generate HAPOD table in csv format"""
+    module = f"src.{beam.name}.generate_hapod_table"
+    distr = "normal"
+    deps = []
+    for config in CONFIGS:
+        deps.append(beam.hapod_rrf_bases_length(distr, config))
+        deps.append(beam.pod_data(distr, config))
+        yield {
+                "name": f"{config}",
+                "file_dep": deps,
+                "actions": ["python3 -m {} {}".format(module, config)],
+                "targets": [beam.hapod_table(config)],
+                "clean": True,
+                }
+
+
+def task_compile_tables():
+    """Beam example: Compile standalone tables"""
+    sources = list((SRC / "tables").glob("*.tex"))
+    for src in sources:
+        yield {
+                "name": f"{src.stem}",
+                "file_dep": [src],
+                "actions": [f"latexmk -cd -pdf -outdir={ROOT / 'tables'} %(dependencies)s"],
+                "targets": [ROOT / "tables" / (src.stem + ".pdf")],
+                "clean": True,
+                }
+
+
+
 def task_paper():
     """Beam example: Compile Paper"""
     source = ROOT / "paper/paper.tex"

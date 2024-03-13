@@ -1,7 +1,6 @@
 import csv
 import json
 import numpy as np
-from collections import defaultdict
 
 
 def main(args):
@@ -13,17 +12,17 @@ def main(args):
     rrf_bases_length = np.load(beam.hapod_rrf_bases_length("normal", args.configuration))
     avg_bases_length = {}
     for edge in edges:
-        avg_bases_length[edge] = np.average(rrf_bases_length[edge])
+        avg_bases_length[edge] = np.around(np.average(rrf_bases_length[edge]), decimals=0)
 
     with beam.pod_data("normal", args.configuration).open("r") as fh:
         data = fh.read()
         pod_data = json.loads(data)
 
-    basis_size = defaultdict(list)
-    num_snapshots = defaultdict(list)
+    basis_size = {}
+    num_snapshots = {}
     for edge, data in pod_data.items():
-        basis_size[edge].append(data[0])
-        num_snapshots[edge].append(data[1])
+        basis_size[edge] = data[0]
+        num_snapshots[edge] = data[1]
 
     table = []
     top_row = ["Edge", "Basis size", "Snapshots", "Average basis size after RRF"]
@@ -38,7 +37,7 @@ def main(args):
 
     with beam.hapod_table(args.configuration).open("w") as fh:
 
-        fh.write(f"# {train_set_size=}, {num_testvecs=}")
+        fh.write(f"# {train_set_size=}, {num_testvecs=}\n")
         csv_writer = csv.writer(fh, delimiter=",")
         for row in table:
             csv_writer.writerow(row)
