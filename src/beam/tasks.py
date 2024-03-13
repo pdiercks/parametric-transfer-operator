@@ -62,10 +62,10 @@ def task_preprocessing():
     }
 
 
-def task_build_rom():
-    """Beam example: Build ROM"""
+def task_mono_rom():
+    """Beam example: Build monolithic ROM"""
     return {
-        "basename": f"build_rom_{beam.name}",
+        "basename": f"monolithic_rom_{beam.name}",
         "file_dep": [
             beam.coarse_grid,
             beam.unit_cell_grid,
@@ -79,15 +79,15 @@ def task_build_rom():
     }
 
 
-def task_edge_range_approx():
-    """Beam example: Construct POD edge basis"""
+def task_hapod():
+    """Beam example: Construct edge basis via HAPOD"""
     module = f"src.{beam.name}.range_approx_edge"
     file = SRC / "range_approx_edge.py"
     nworkers = 4  # number of workers in pool
     for distr in DISTR:
         for config in CONFIGS:
             yield {
-                "name": f"edge_rrf_{beam.name}_{distr}_{config}",
+                "name": f"{beam.name}_{distr}_{config}",
                 "file_dep": [
                     file,
                     beam.fine_oversampling_grid(config),
@@ -107,14 +107,14 @@ def task_edge_range_approx():
             }
 
 
-def task_heuristic_edge_range_approx():
-    """Beam example: Construct fine scale edge basis via heuristic range finder"""
+def task_heuristic_rrf():
+    """Beam example: Construct edge basis via heuristic range finder"""
     module = f"src.{beam.name}.heuristic_range_approx"
     file = SRC / "heuristic_range_approx.py"
     for distr in DISTR:
         for config in CONFIGS:
             yield {
-                "name": f"heuristic_rrf_{beam.name}_{distr}_{config}",
+                "name": f"{beam.name}_{distr}_{config}",
                 "file_dep": [
                     file,
                     beam.fine_oversampling_grid(config),
@@ -142,7 +142,7 @@ def task_plot_loc_svals():
             beam.loc_singular_values_npz(distr, config) for distr in beam.distributions
         ]
         yield {
-            "name": f"fig_loc_svals_{beam.name}_{config}",
+            "name": f"{beam.name}_{config}",
             "file_dep": deps,
             "actions": ["python3 -m {} %(targets)s {}".format(module, config)],
             "targets": [beam.fig_loc_svals(config)],
@@ -159,7 +159,7 @@ def task_test_sets():
     for config in CONFIGS:
         subdomain = map[config]
         yield {
-            "name": f"test_set_{config}_{beam.name}",
+            "name": f"{beam.name}_{config}",
             "file_dep": [
                 code,
                 beam.coarse_grid,
@@ -184,7 +184,7 @@ def task_proj_error():
                 deps = [code, beam.unit_cell_grid, beam.fom_test_set(config)]
                 deps.append(basis)
                 yield {
-                    "name": f"proj_err_{name}_{distr}_{config}",
+                    "name": f"{name}_{distr}_{config}",
                     "file_dep": deps,
                     # TODO add basis as cli argument
                     "actions": ["python3 -m {} {} {} {}".format(module, distr, config, name)],
@@ -205,7 +205,7 @@ def task_plot_proj_error():
             deps = [code]
             deps += [beam.proj_error(distr, config, name) for distr in beam.distributions]
             yield {
-                "name": f"fig_proj_err_{name}_{config}",
+                "name": f"{name}_{config}",
                 "file_dep": deps,
                 "actions": ["python3 -m {} {} {} --output %(targets)s".format(module, config, name)],
                 "targets": [beam.fig_proj_error(config, name)],
@@ -222,7 +222,7 @@ def task_extension():
             for cell_index in range(num_cells):
                 config = beam.cell_to_config(cell_index)
                 yield {
-                        "name": f"xi_{name}_{distr}_{cell_index}",
+                        "name": f"{name}_{distr}_{cell_index}",
                         "file_dep": [beam.fine_scale_edge_modes_npz(distr, config, name)],
                         "actions": ["python3 -m {} {} {} {}".format(module, distr, name, cell_index)],
                         "targets": [beam.local_basis_npz(distr, name, cell_index), beam.fine_scale_modes_bp(distr, name, cell_index), beam.log_extension(distr, name, cell_index)],
@@ -241,7 +241,7 @@ def task_loc_rom():
             deps += [beam.local_basis_npz(distr, name, cell) for cell in range(num_cells)]
             target = beam.loc_rom_error(distr, name)
             yield {
-                    "name": f"locrom_{name}_{distr}",
+                    "name": f"{name}_{distr}",
                     "file_dep": deps,
                     "actions": ["python3 -m {} {} {} {} --output {}".format(module, distr, name, num_test, target)],
                     "targets": [target, beam.log_run_locrom(distr, name)],
