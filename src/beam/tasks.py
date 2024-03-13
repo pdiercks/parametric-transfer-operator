@@ -101,6 +101,7 @@ def task_edge_range_approx():
                     beam.log_edge_range_approximation(distr, config, "hapod"),
                     beam.fine_scale_edge_modes_npz(distr, config, "hapod"),
                     beam.loc_singular_values_npz(distr, config),
+                    beam.hapod_rrf_bases_length(distr, config),
                 ],
                 "clean": [rm_rf],
             }

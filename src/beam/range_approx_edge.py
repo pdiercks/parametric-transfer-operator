@@ -4,6 +4,7 @@ import os
 from typing import Optional
 # from itertools import repeat
 from pathlib import Path
+from collections import defaultdict
 # import concurrent.futures
 import numpy as np
 from scipy.linalg import eigh
@@ -36,6 +37,7 @@ from multi.shapes import NumpyLine
 
 
 def adaptive_edge_rrf_normal(
+    logger,
     transfer_problem: TransferProblem,
     active_edges,
     source_product: Optional[Operator] = None,
@@ -106,7 +108,6 @@ def adaptive_edge_rrf_normal(
 
     """
 
-    logger = getLogger("adaptive_edge_rrf", level="DEBUG")
     tp = transfer_problem
 
     distribution = "normal"
@@ -262,7 +263,7 @@ def adaptive_edge_rrf_normal(
             norm = M.norm(range_products[edge])
             maxnorm[edge_index_map[edge]] = np.max(norm)
 
-        logger.info(f"{maxnorm=}")
+        logger.debug(f"{maxnorm=}")
 
     return pod_bases, range_products, num_solves
 
@@ -361,6 +362,7 @@ def approximate_range(beam, mu, configuration, distribution="normal"):
 
     # TODO approximate range in context of new_rng (if number of realizations > 1)
     edge_bases, range_products, num_solves = adaptive_edge_rrf_normal(
+        logger,
         transfer_problem,
         active_edges,
         source_product=source_product,
@@ -369,6 +371,8 @@ def approximate_range(beam, mu, configuration, distribution="normal"):
         failure_tolerance=ftol,
         num_testvecs=num_testvecs,
     )
+    logger.info(f"\nNumber of transfer operator evaluations: {num_solves}.")
+
     table_basis_length = []
     table_basis_length.append(["Edge", "Basis length"])
     for edge, rb in edge_bases.items():
@@ -441,6 +445,13 @@ def approximate_range(beam, mu, configuration, distribution="normal"):
                 product=range_products[edge],
                 method="gram_schmidt",
                 )
+
+    table_basis_length = []
+    table_basis_length.append(["Edge", "Basis length"])
+    for edge, rb in edge_bases.items():
+        table_basis_length.append([edge, len(rb)])
+    table_title = f"\nNumber of basis functions after adding Neumann mode ({pid=})."
+    logger.info(format_table(table_basis_length, title=table_title))
 
     # ### Conversion to picklable objects
     # passing data along processes requires picklable data
@@ -515,7 +526,7 @@ def main(args):
     #         repeat(args.distribution),
     #     )
 
-
+    rrf_bases_length = defaultdict(list)
 
     # first sample
     mu = training_set[0]
@@ -529,6 +540,7 @@ def main(args):
     for edge, basis in bases.items():
         snapshots[edge] = basis.space.empty()
         snapshots[edge].append(basis)
+        rrf_bases_length[edge].append(len(basis))
 
     for mu, ss in zip(training_set[1:], seed_seqs_rrf[1:]):
         with new_rng(ss):
@@ -537,27 +549,8 @@ def main(args):
             )
         for edge, rb in bases.items():
             snapshots[edge].append(rb)
+            rrf_bases_length[edge].append(len(rb))
 
-    # gather edge bases (for each edge)
-    # do POD for each of the edges
-    # save final pod modes and singular values
-
-    # no need to reinstantiate fenics objects
-    # direclty save edge basis functions for each edge
-    # as input to extension task
-
-    # snapshots = range_product.range.empty()
-    # for b in snaps:
-    #     snapshots.append(b)
-
-    # basis, range_product = next(results)
-    # snapshots = range_product.range.empty()
-    # snapshots.append(basis)
-    # for rb, _ in results:
-    #     snapshots.append(rb)
-
-    # num_snapshots = [len(basis) for basis in snaps]
-    # num_modes = int(np.mean(num_snapshots) * 2)
     pod_table = []
     pod_table.append(["Edge", "Number of Snapshots", "Number of POD modes", "Rel. Tolerance"])
     pod_modes = {}
@@ -569,11 +562,12 @@ def main(args):
         pod_table.append([edge, len(snapshot_data), len(modes), beam.pod_rtol])
     logger.info(format_table(pod_table, title="\nPOD of edge basis functions"))
 
-    # write pod modes and singular values to disk
+    # write output: fine scale edge modes, singular values, rrf bases length
     np.savez(
         beam.fine_scale_edge_modes_npz(args.distribution, args.configuration, "hapod"), **pod_modes
     )
     np.savez(beam.loc_singular_values_npz(args.distribution, args.configuration), **pod_svals)
+    np.savez(beam.hapod_rrf_bases_length(args.distribution, args.configuration), **rrf_bases_length)
 
 
 if __name__ == "__main__":
