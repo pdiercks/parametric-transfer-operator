@@ -97,6 +97,11 @@ class BeamData:
                 self.bases_path(distr, name).mkdir(exist_ok=True, parents=True)
 
     @property
+    def plotting_style(self) -> Path:
+        """eccomas proceedings mplstyle"""
+        return ROOT / "src/proceedings.mplstyle"
+
+    @property
     def rf(self) -> Path:
         """run folder"""
         return WORK / f"{self.name}"
@@ -167,6 +172,22 @@ class BeamData:
     def loc_singular_values_npz(self, distr: str, conf: str) -> Path:
         """singular values of POD compression for range approximation of parametric T"""
         return self.rf / f"loc_singular_values_{distr}_{conf}.npz"
+
+    def hapod_rrf_bases_length(self, distr: str, conf: str) -> Path:
+        """length of each edge basis after rrf algo in hapod training"""
+        return self.rf / f"hapod_rrf_bases_length_{distr}_{conf}.npz"
+
+    def hapod_table(self, conf: str) -> Path:
+        return self.rf / f"hapod_table_{conf}.csv"
+
+    def pod_data(self, distr: str, conf: str) -> Path:
+        return self.rf / f"pod_data_{distr}_{conf}.json"
+
+    def heuristic_data(self, distr: str, conf: str) -> Path:
+        return self.rf / f"heuristic_data_{distr}_{conf}.json"
+
+    def heuristic_table(self, conf: str) -> Path:
+        return self.rf / f"heuristic_table_{conf}.csv"
 
     def fine_scale_edge_modes_npz(self, distr: str, conf: str, name: str) -> Path:
         """edge-restricted fine scale part of pod modes"""

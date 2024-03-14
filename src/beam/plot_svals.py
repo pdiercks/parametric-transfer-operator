@@ -17,21 +17,16 @@ def main(args):
     }
     config = args.pop(2)
 
-    with PlottingContext(args, ["paper_onecol"]) as fig:
-        width = 4.773
-        height = 2.95
-        factor = 1.0
-        fig.set_size_inches(factor * width, factor * height)
+    with PlottingContext(args, [beam.plotting_style.as_posix()]) as fig:
+        width = 3.149 # 1/2 of the printing box width
+        height = 1.946
+        fig.set_size_inches(width, height)
         ax = fig.subplots()
 
         for distr in beam.distributions:
             svals = np.load(beam.loc_singular_values_npz(distr, config))
 
             for edge, color in colors.items():
-                if distr == "multivariate_normal":
-                    label = f"correlated, {config}, {edge}"
-                if distr == "normal":
-                    label = f"uncorrelated, {config}, {edge}"
 
                 sigma = svals[edge]
                 marker = markers[distr]
@@ -40,7 +35,7 @@ def main(args):
                     sigma / sigma[0],
                     color=color,
                     marker=marker,
-                    label=label,
+                    label=edge,
                 )
 
         ax.set_xlabel("Number of basis functions")

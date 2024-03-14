@@ -6,6 +6,11 @@
 \usepackage{amsfonts}
 \usepackage{amssymb}
 
+\usepackage{standalone}
+\usepackage{booktabs}
+\usepackage{pgfplotstable}
+\pgfplotsset{compat=1.18}
+
 \title{INSTRUCTIONS TO PREPARE A FULL PAPER FOR THE 9th EUROPEAN CONGRESS ON COMPUTATIONAL METHODS IN APPLIED SCIENCES AND ENGINEERING\break ECCOMAS CONGRESS 2024}
 
 \author{FIRST A. AUTHOR$^1$, SECOND B. AUTHOR$^2$ AND THIRD C. AUTHOR$^1$}
@@ -34,6 +39,12 @@ of {\it ECCOMAS CONGRESS 2024}. }
 
 \section{INTRODUCTION}
 
+\makeatletter
+orig: \f@size
+\verb+\normalsize+ \normalsize \f@size
+\makeatother
+It seems that the font size is actually set to 11pt, although 12pt should be used in the body of the text.
+
 All the participants whose Abstract has been accepted for presentation at the ECCOMAS 2022 Congress are kindly requested to submit the Full Paper electronically via the web page of the \href{https://eccomas2024.org/lisbon}{Congress}, before \textbf{July 1st, 2024}. Congress Proceedings (including full papers only) will be published on Scipedia with DOI number after the congress and will be submitted for indexation to SCOPUS database. Submission of the full paper is not mandatory. The Full Paper should be written following the format of macros for submission. The file has to be translated into Portable Document Format (PDF) before submission via the Conference site. The organizers do not commit themselves to include in the Proceedings any Full Paper received later than the above-mentioned deadline. The corresponding author should be the speaker, and is expected to register and pay his registration fee during the advance period (before \textbf{April 1st, 2024}) for the paper to be included in the technical programme of the ECCOMAS 2024.
 
 \section{METHODS}
@@ -44,7 +55,7 @@ All the participants whose Abstract has been accepted for presentation at the EC
 
 \begin{figure}
     \begin{center}
-        \includegraphics[width=0.95\textwidth]{../figures/beam/beam_sketch.pdf}
+        \includegraphics[width=0.95\textwidth]{./figures/beam/beam_sketch.pdf}
     \end{center}
     \caption{Schematic representation of the structural problem. A simply supported beam is subjected to a constant load.}\label{fig:beam_sketch}
 \end{figure}
@@ -52,14 +63,14 @@ All the participants whose Abstract has been accepted for presentation at the EC
 % TODO placement
 \begin{figure}
     \begin{center}
-        \includegraphics[width=0.65\textwidth]{../figures/beam/unit_cell.png}
+        \includegraphics[width=0.65\textwidth]{./figures/beam/unit_cell.png}
     \end{center}
     \caption{Unit cell domain partition.}\label{fig:unit_cell_domain}
 \end{figure}
 
 \begin{figure}
     \begin{center}
-        \includegraphics[width=0.95\textwidth]{../figures/beam/global_domain.png}
+        \includegraphics[width=0.95\textwidth]{./figures/beam/global_domain.png}
     \end{center}
     \caption{The partition of the global domain. The colors indicate the variation in Young's modulus for each subdomain.}\label{fig:global_domain}
 \end{figure}
@@ -76,18 +87,20 @@ independent basis functions (POD modes).
 \subsubsection{Distributed approximate POD}
 
 \begin{figure}[!htb]
-\minipage{0.32\textwidth}
-  \includegraphics[width=\linewidth]{../figures/beam/fig_loc_svals_left.pdf}
+\minipage{0.49\textwidth}
+  \includegraphics[]{./figures/beam/fig_loc_svals_left.pdf}
   \caption{Singular valus left}\label{fig:loc_svals_left}
 \endminipage\hfill
-\minipage{0.32\textwidth}
-  \includegraphics[width=\linewidth]{../figures/beam/fig_loc_svals_inner.pdf}
-  \caption{Singular valus inner}\label{fig:loc_svals_inner}
-\endminipage\hfill
-\minipage{0.32\textwidth}%
-  \includegraphics[width=\linewidth]{../figures/beam/fig_loc_svals_right.pdf}
+\minipage{0.49\textwidth}
+  \includegraphics[]{./figures/beam/fig_loc_svals_right.pdf}
   \caption{Singular valus right}\label{fig:loc_svals_right}
+\endminipage\hfill\\%
+\begin{center}
+\minipage{0.49\textwidth}
+  \includegraphics[]{./figures/beam/fig_loc_svals_inner.pdf}
+  \caption{Singular valus inner}\label{fig:loc_svals_inner}
 \endminipage
+\end{center}
 \end{figure}
 
 
@@ -96,42 +109,59 @@ independent basis functions (POD modes).
 % using the FOM. Each test set has size $n_{test}$.
 
 \begin{figure}[!htb]
-\minipage{0.32\textwidth}
-  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_left_hapod.pdf}
+\minipage{0.49\textwidth}
+  \includegraphics{./figures/beam/fig_proj_error_left_hapod.pdf}
   \caption{Projection error hapod}\label{fig:proj_error_left_hapod}
 \endminipage\hfill
-\minipage{0.32\textwidth}
-  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_inner_hapod.pdf}
-  \caption{Projection error hapod}\label{fig:proj_error_inner_hapod}
-\endminipage\hfill
-\minipage{0.32\textwidth}%
-  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_right_hapod.pdf}
+\minipage{0.49\textwidth}
+  \includegraphics{./figures/beam/fig_proj_error_right_hapod.pdf}
   \caption{Projection error hapod}\label{fig:proj_error_right_hapod}
+\endminipage\hfill\\
+\begin{center}
+\minipage{0.49\textwidth}%
+  \includegraphics{./figures/beam/fig_proj_error_inner_hapod.pdf}
+  \caption{Projection error hapod}\label{fig:proj_error_inner_hapod}
 \endminipage
+\end{center}
 \end{figure}
+
+\begin{table}
+    \centering
+    \caption{HAPOD inner}\label{tab:hapod_inner}
+    \input{./src/beam/tables/hapod_inner.tex}
+\end{table}
 
 \subsubsection{Heuristic range finder}
 
 \begin{figure}[!htb]
-\minipage{0.32\textwidth}
-  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_left_heuristic.pdf}
+\minipage{0.49\textwidth}
+  \includegraphics{./figures/beam/fig_proj_error_left_heuristic.pdf}
   \caption{Projection error }\label{fig:proj_error_left_heuristic}
 \endminipage\hfill
-\minipage{0.32\textwidth}
-  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_inner_heuristic.pdf}
-  \caption{Projection error }\label{fig:proj_error_inner_heuristic}
-\endminipage\hfill
-\minipage{0.32\textwidth}%
-  \includegraphics[width=\linewidth]{../figures/beam/fig_proj_error_right_heuristic.pdf}
+\minipage{0.49\textwidth}
+  \includegraphics{./figures/beam/fig_proj_error_right_heuristic.pdf}
   \caption{Projection error }\label{fig:proj_error_right_heuristic}
+\endminipage\hfill\\
+\begin{center}
+\minipage{0.49\textwidth}%
+  \includegraphics{./figures/beam/fig_proj_error_inner_heuristic.pdf}
+  \caption{Projection error }\label{fig:proj_error_inner_heuristic}
 \endminipage
+\end{center}
 \end{figure}
+
+\begin{table}
+    \centering
+    \caption{Heuristic rrf inner}\label{tab:heuristic_inner}
+    \input{./src/beam/tables/heuristic_inner.tex}
+\end{table}
 
 \subsection{Localized ROM}
 
 \begin{figure}[!htb]
-    \includegraphics[width=\linewidth]{../figures/beam/fig_loc_rom_error.pdf}
-    \caption{A really Awesome Image}\label{fig:loc_rom_error}
+    \centering
+    \includegraphics{./figures/beam/fig_loc_rom_error.pdf}
+    \caption{Local ROM error relative to FOM.}\label{fig:loc_rom_error}
 \end{figure}
 
 \section{FORMAT OF REFERENCES}
