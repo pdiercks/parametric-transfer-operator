@@ -19,12 +19,10 @@ def main(args):
         "top": bamcd["yellow"][0],
     }
 
-    with PlottingContext([__file__, args.output], ["paper_onecol"]) as fig:
-        # figure.figsize: 4.773, 2.950
-        width = 4.773
-        height = 2.95
-        factor = 1.0
-        fig.set_size_inches(factor * width, factor * height)
+    with PlottingContext([__file__, args.output], [beam.plotting_style.as_posix()]) as fig:
+        width = 3.149 # 1/2 of the printing box width
+        height = 1.946
+        fig.set_size_inches(width, height)
         ax = fig.subplots()
 
         config = args.configuration
@@ -38,15 +36,10 @@ def main(args):
         ymin = []
 
         for edge, color in colors.items():
-            label = ""
-            if distr == "multivariate_normal":
-                label = f"correlated, {config}, {edge}"
-            if distr == "normal":
-                label = f"uncorrelated, {config}, {edge}"
 
             err = npz_err[edge]
             num_modes = np.arange(err.size)
-            ax.semilogy(num_modes, err, color=color, marker=marker, label=label)
+            ax.semilogy(num_modes, err, color=color, marker=marker, label=edge)
             ymin.append(err[-1])
             # ax.semilogy(
             #         data["num_dofs"], data["err"],

@@ -10,8 +10,7 @@ if __name__ == "__main__":
     bamcd = read_bam_colors()
     color = {'hapod': bamcd["red"][0], "heuristic": bamcd["blue"][0]}
 
-    with PlottingContext(sys.argv, ["paper_onecol"]) as fig:
-        fig.set_size_inches(4.773, 2.95)
+    with PlottingContext(sys.argv, [beam.plotting_style.as_posix()]) as fig:
         ax = fig.subplots()
         ax.set_xlabel("Number of fine scale basis functions per edge.")
         ax.set_ylabel("locROM error relative to FOM.")
@@ -25,6 +24,3 @@ if __name__ == "__main__":
                 ax.semilogy(modes, error, color=color[name], marker="o", label=name)
 
         ax.legend(loc="best")
-
-
-

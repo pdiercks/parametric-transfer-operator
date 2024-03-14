@@ -97,6 +97,11 @@ class BeamData:
                 self.bases_path(distr, name).mkdir(exist_ok=True, parents=True)
 
     @property
+    def plotting_style(self) -> Path:
+        """eccomas proceedings mplstyle"""
+        return ROOT / "src/proceedings.mplstyle"
+
+    @property
     def rf(self) -> Path:
         """run folder"""
         return WORK / f"{self.name}"
