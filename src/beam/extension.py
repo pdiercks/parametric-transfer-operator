@@ -54,7 +54,7 @@ def main(args):
     E = beam.youngs_modulus
     NU = beam.poisson_ratio
     mat = LinearElasticMaterial(gdim, E, NU, plane_stress=False)
-    problem = LinElaSubProblem(omega, V, phases=(mat,))
+    problem = LinElaSubProblem(omega, V, phases=mat)
     problem.setup_coarse_space()
     problem.setup_edge_spaces()
     problem.create_map_from_V_to_L()

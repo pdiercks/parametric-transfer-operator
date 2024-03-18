@@ -301,7 +301,7 @@ def main(args):
     mat = LinearElasticMaterial(gdim, E, NU, plane_stress=False)
 
     # Problem on unit cell domain
-    problem = LinElaSubProblem(omega, V, phases=(mat,))
+    problem = LinElaSubProblem(omega, V, phases=mat)
     loading = fem.Constant(
         omega.grid, (default_scalar_type(0.0), default_scalar_type(-10.0))
     )

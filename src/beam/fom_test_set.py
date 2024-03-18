@@ -49,7 +49,7 @@ def main(args):
     fe = element(ufl_element.family_name, omega.grid.basix_cell(), ufl_element.degree(), shape=ufl_element.value_shape())
     V = fem.functionspace(omega.grid, fe)
     phases = LinearElasticMaterial(2, 20e3, 0.3) # material will not be important here
-    problem = LinElaSubProblem(omega, V, phases=(phases,))
+    problem = LinElaSubProblem(omega, V, phases=phases)
     problem.setup_edge_spaces()
     problem.create_map_from_V_to_L()
 
