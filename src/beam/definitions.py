@@ -249,6 +249,14 @@ class BeamData:
         return self.rf / f"rom_minimization_data_{distr}_{name}.out"
 
     @property
+    def fig_fom_opt(self) -> Path:
+        return FIGURES / "fig_fom_opt.pdf"
+
+    @property
+    def fig_rom_opt(self) -> Path:
+        return FIGURES / "fig_rom_opt.pdf"
+
+    @property
     def realizations(self) -> Path:
         """Returns realizations that can be used to create ``np.random.SeedSequence``"""
         file = SRC / "realizations.npy"

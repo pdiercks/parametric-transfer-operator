@@ -300,6 +300,21 @@ def task_optimize():
     }
 
 
+def task_plot_opt_data():
+    """Beam example: Plot optimization data"""
+    module = f"src.{beam.name}.plot_optimization_data"
+    data = {"fom": (beam.fom_minimization_data, beam.fig_fom_opt), "rom": (beam.rom_minimization_data("normal", "heuristic"), beam.fig_rom_opt)}
+    for model, (dep, target) in data.items():
+        yield {
+                "name": model,
+                "file_dep": [dep],
+                "actions": ["python3 -m {} %(dependencies)s %(targets)s".format(module)],
+                "targets": [target],
+                "clean": True,
+                }
+
+
+
 def task_plot_unit_cell_domain():
     """Beam example: plot unit cell domain"""
 
