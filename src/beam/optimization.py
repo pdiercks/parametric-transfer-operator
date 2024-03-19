@@ -59,12 +59,12 @@ def main(args):
     # TODO plot Price term over the evaluation_points ?
 
     opt_fom_result = solve_optimization_problem(
-        initial_guess, bounds, fom, fom_minimization_data, gradient=False
+        args, initial_guess, bounds, fom, fom_minimization_data, gradient=False
     )
     mu_ref = opt_fom_result.x
 
     opt_rom_result = solve_optimization_problem(
-        initial_guess, bounds, rom, rom_minimization_data, gradient=False
+        args, initial_guess, bounds, rom, rom_minimization_data, gradient=False
     )
 
     print("\nResult of optimization with FOM and FD")
@@ -149,7 +149,7 @@ def report(result, parse, data, reference_mu=None):
 
 
 def solve_optimization_problem(
-    initial_guess, bounds, model, minimization_data, gradient=False
+    cli, initial_guess, bounds, model, minimization_data, gradient=False
 ):
     """solve optimization problem"""
 
@@ -160,6 +160,15 @@ def solve_optimization_problem(
     def eval_objective_functional(mu):
         return model.output(mu)[0, 0]
 
+    method = cli.method
+    if method == "L-BFGS-B":
+        options = {"ftol": 1e-2, "gtol": 1e-3}
+    elif method == "SLSQP":
+        options = {"ftol": 1e-2}
+    else:
+        raise NotImplementedError
+
+
     tic = perf_counter()
     opt_result = minimize(
         partial(
@@ -169,10 +178,10 @@ def solve_optimization_problem(
             minimization_data,
         ),
         initial_guess.to_numpy(),
-        method="L-BFGS-B",
+        method=method,
         jac=gradient,
         bounds=bounds,
-        options={"ftol": 1e-6, "gtol": 1e-3},
+        options=options,
     )
     minimization_data["time"] = perf_counter() - tic
 
@@ -269,7 +278,8 @@ if __name__ == "__main__":
     import sys, argparse
 
     parser = argparse.ArgumentParser(
-        description="Minimize the compliance (QoI) using FOM and localized ROM."
+        description="Minimize the compliance (QoI) using FOM and localized ROM.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     parser.add_argument(
         "distr",
@@ -287,6 +297,13 @@ if __name__ == "__main__":
             "num_modes",
             type=int,
             help="Number of fine scale modes to be used with local ROM."
+            )
+    parser.add_argument(
+            "--method",
+            type=str,
+            choices=("L-BFGS-B", "SLSQP"),
+            help="The solver to use for the minimization problem.",
+            default="L-BFGS-B"
             )
     parser.add_argument("--show", action="store_true", help="Show QoI over iterations.")
     args = parser.parse_args(sys.argv[1:])
