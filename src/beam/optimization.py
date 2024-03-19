@@ -9,6 +9,7 @@ from mpi4py import MPI
 
 import numpy as np
 from pymor.models.basic import StationaryModel
+from pymor.core.pickle import dump
 
 
 def main(args):
@@ -56,16 +57,23 @@ def main(args):
     print(f"{J_mu_min=}")
     print(f"{J_mu_max=}")
 
-    # TODO plot Price term over the evaluation_points ?
-
     opt_fom_result = solve_optimization_problem(
         args, initial_guess, bounds, fom, fom_minimization_data, gradient=False
     )
     mu_ref = opt_fom_result.x
+    fom_minimization_data['num_iter'] = opt_fom_result.nit
+    fom_minimization_data["mu_min"] = mu_ref
+    fom_minimization_data["J(mu_min)"] = opt_fom_result.fun
+    fom_minimization_data["status"] = opt_fom_result.status
 
     opt_rom_result = solve_optimization_problem(
         args, initial_guess, bounds, rom, rom_minimization_data, gradient=False
     )
+    rom_minimization_data['num_iter'] = opt_rom_result.nit
+    rom_minimization_data["mu_min"] = opt_rom_result.x
+    rom_minimization_data["J(mu_min)"] = opt_rom_result.fun
+    rom_minimization_data["status"] = opt_rom_result.status
+    rom_minimization_data["abs_err_mu_min"] = np.linalg.norm(opt_rom_result.x - mu_ref)
 
     print("\nResult of optimization with FOM and FD")
     report(opt_fom_result, fom.parameters.parse, fom_minimization_data)
@@ -75,27 +83,37 @@ def main(args):
         opt_rom_result, fom.parameters.parse, rom_minimization_data, reference_mu=mu_ref
     )
 
+    def get_prices(mus):
+        f = lambda mu: np.sum( (mu - 0.1) ** 2)
+        prices = []
+        for mu in mus:
+            prices.append(f(mu))
+        return prices
+
+    for k, data in enumerate([fom_minimization_data, rom_minimization_data]):
+        jvalues = data["evaluations"]
+        mus = data["evaluation_points"]
+        price = get_prices(mus)
+        compl = np.array(jvalues) - np.array(price)
+        iters = np.arange(data["num_evals"])
+
+        data["prices"] = price
+        data["compliance"] = compl
+        data["iterations"] = iters
+
     if args.show:
         import matplotlib.pyplot as plt
-
-        def get_prices(mus):
-            f = lambda mu: np.sum( (mu - 0.1) ** 2)
-            prices = []
-            for mu in mus:
-                prices.append(f(mu))
-            return prices
 
         fig = plt.figure(constrained_layout=True)
         axes = fig.subplots(nrows=2, ncols=1, sharex=True)
         
         fig.suptitle("Minimization of the objective functional J")
-
         for k, data in enumerate([fom_minimization_data, rom_minimization_data]):
+
+            iters = data["iterations"]
+            price = data["prices"]
+            compl = data["compliance"]
             jvalues = data["evaluations"]
-            mus = data["evaluation_points"]
-            price = get_prices(mus)
-            compl = np.array(jvalues) - np.array(price)
-            iters = np.arange(data["num_evals"])
 
             axes[k].plot(iters, price, "b-", label="price P")
             axes[k].plot(iters, compl, "r-", label="compliance C")
@@ -112,8 +130,16 @@ def main(args):
 
         plt.show()
 
-    # TODO
     # ### Write outputs
+    fom_minimization_data["method"] = args.method
+    rom_minimization_data["method"] = args.method
+    rom_minimization_data["num_modes"] = args.num_modes
+
+    with beam.fom_minimization_data.open("wb") as fh:
+        dump(fom_minimization_data, fh)
+
+    with beam.rom_minimization_data(args.distr, args.name).open("wb") as fh:
+        dump(rom_minimization_data, fh)
 
 
 def record_results(function, parse, data, mu):
@@ -167,7 +193,6 @@ def solve_optimization_problem(
         options = {"ftol": 1e-2}
     else:
         raise NotImplementedError
-
 
     tic = perf_counter()
     opt_result = minimize(
