@@ -16,13 +16,14 @@ The range of each parameter component $\mu_i$ is currently set to $[0.1, 10]$.
 
 ## Setup
 
-<img src="./img/beamsetup.png" alt="Beam setup" width="400"/>
+<img src="../../figures/beam/beam_sketch.pdf" alt="Beam setup" width="400"/>
 
 ## Full fine scale mesh
 
-<img src="./img/beam_subdomains.png" alt="Beam with subdomain IDs" width="400"/>
+<img src="../../figures/beam/global_domain.png" alt="Beam with subdomain IDs" width="400"/>
 
 ## Displacement solution
+Exemplary displacement solution. Outdated.
 
 <img src="./img/beam_displacement.png" alt="Deflection of the beam" width="400"/>
 
