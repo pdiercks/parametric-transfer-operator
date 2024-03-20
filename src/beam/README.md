@@ -2,11 +2,11 @@
 In this example a heterogeneous beam structure is optimized.
 The design variables are the Young's Moduli $E_q$, $q=1, \ldots, N$ for the $N$ subdomains.
 Each subdomain corresponds to a unit cell (square with a hole).
-The objective function is the compliance plus some cost functional
+The objective function $J$ is the compliance plus some cost functional
 
 $$
 \begin{equation}
-C(\boldsymbol{u}_{\mu}, \mu) = \boldsymbol{f}_{\mathrm{ext}}^T \boldsymbol{u}_{\mu} + \sum_{i=1}^N w_i(\mu_i- \mathrm{min}(\mu_i))^2\,.
+J(\boldsymbol{u}_{\mu}, \mu) = \boldsymbol{f}_{\mathrm{ext}}^T \boldsymbol{u}_{\mu} + \sum_{i=1}^N w_i(\mu_i- \mathrm{min}(\mu_i))^2\,.
 \end{equation}
 $$
 
