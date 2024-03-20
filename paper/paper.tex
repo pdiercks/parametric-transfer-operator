@@ -5,6 +5,8 @@
 \usepackage{amsmath}
 \usepackage{amsfonts}
 \usepackage{amssymb}
+\usepackage{physics}
+\usepackage{siunitx}
 
 \usepackage{standalone}
 \usepackage{booktabs}
@@ -163,6 +165,21 @@ independent basis functions (POD modes).
     \includegraphics{./figures/beam/fig_loc_rom_error.pdf}
     \caption{Local ROM error relative to FOM.}\label{fig:loc_rom_error}
 \end{figure}
+
+\subsection{Optimization problem}
+
+\begin{table}
+    \caption{Result of the optimization with FOM and ROM.}\label{tab:minimization_data}
+    \centering
+    \input{./src/beam/tables/minimization_data.tex}
+\end{table}
+
+\begin{table}
+    \caption{Comparison of reduced optimal solution $\mu_N^{\ast}$ and true optimal solution $\mu^{\ast}$.}\label{tab:minimization_comparison}
+    \centering
+    \input{./src/beam/tables/minimization_comparison.tex}
+\end{table}
+
 
 \section{FORMAT OF REFERENCES}
 

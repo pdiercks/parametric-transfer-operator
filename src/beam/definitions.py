@@ -240,6 +240,31 @@ class BeamData:
         return self.rf / f"loc_rom_error_{distr}_{name}.csv"
 
     @property
+    def fom_minimization_data(self) -> Path:
+        """FOM minimization data"""
+        return self.rf / "fom_minimization_data.out"
+
+    def rom_minimization_data(self, distr: str, name: str) -> Path:
+        """ROM minimization data"""
+        return self.rf / f"rom_minimization_data_{distr}_{name}.out"
+
+    @property
+    def minimization_data_table(self) -> Path:
+        return self.rf / "minimization_data.csv"
+
+    @property
+    def minimization_comparison_table(self) -> Path:
+        return self.rf / "minimization_comparison.csv"
+
+    @property
+    def fig_fom_opt(self) -> Path:
+        return FIGURES / "fig_fom_opt.pdf"
+
+    @property
+    def fig_rom_opt(self) -> Path:
+        return FIGURES / "fig_rom_opt.pdf"
+
+    @property
     def realizations(self) -> Path:
         """Returns realizations that can be used to create ``np.random.SeedSequence``"""
         file = SRC / "realizations.npy"

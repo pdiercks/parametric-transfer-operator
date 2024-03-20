@@ -131,7 +131,7 @@ def assemble_system(
     b: VectorOperator,
     bases: list[np.ndarray],
     num_max_modes: np.ndarray,
-    parameters: Parameters,
+    parameters: Parameters
 ):
     """Assembles ``operator`` and ``rhs`` for localized ROM as ``StationaryModel``.
 

@@ -143,7 +143,8 @@ def discretize_fom(ex):
     weights = np.ones(num_subdomains)
 
     # TODO: dimensional analysis? scaling of cost?
-    cost = GenericParameterFunctional(lambda mu: np.dot(weights, (mu["E"] - 0.1) ** 2), parameters)
+    mu_i_min = ex.mu_range[0]
+    cost = GenericParameterFunctional(lambda mu: np.dot(weights, (mu["E"] - mu_i_min) ** 2), parameters)
     # always returns 1.
     One = ConstantOperator(compliance.range.ones(1), source=compliance.source)
     objective = LincombOperator([compliance, One], [1., cost])
