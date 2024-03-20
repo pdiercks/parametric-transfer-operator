@@ -1,0 +1,33 @@
+\documentclass{standalone}
+
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{pgfplotstable}
+\pgfplotsset{compat=1.18}
+
+% Setup siunitx:
+\sisetup{
+  round-mode          = places, % Rounds numbers
+  round-precision     = 2, % to 2 places
+}
+
+\begin{document}
+
+\pgfplotstabletypeset[
+  col sep=comma,
+  % columns={Model,Iterations,Evaluations,Time,{Output J}},
+  display columns/3/.style={column name={Time}, precision=3},
+  display columns/4/.style={column name={Output $J$}, sci zerofill, precision=3},
+  every head row/.style={
+    before row={\toprule}, % have a rule at top
+    % set unit for each column
+    after row={
+        & - & - & \si{\second} & \si{\newton\milli\metre}\\
+    \midrule}
+    },
+  every last row/.style={after row=\bottomrule}, % rule at bottom
+  column type=r,
+  columns/Model/.style={string type,column type=l},
+]{./work/beam/minimization_data.csv}
+
+\end{document}

@@ -249,6 +249,14 @@ class BeamData:
         return self.rf / f"rom_minimization_data_{distr}_{name}.out"
 
     @property
+    def minimization_data_table(self) -> Path:
+        return self.rf / "minimization_data.csv"
+
+    @property
+    def minimization_comparison_table(self) -> Path:
+        return self.rf / "minimization_comparison.csv"
+
+    @property
     def fig_fom_opt(self) -> Path:
         return FIGURES / "fig_fom_opt.pdf"
 

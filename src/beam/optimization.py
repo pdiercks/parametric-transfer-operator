@@ -1,10 +1,10 @@
 """Solution of an optimization problem"""
 
-# check pymordemos/linear_optimization.py
-# - [x] optimize with the FOM using FD
-# - [x] optimize with the ROM using FD
-# - [ ] optimize with the FOM using pymor gradient computation (if possible)
-# - [ ] optimize with the ROM using pymor gradient computation (if possible)
+# NOTE
+# the below code was written based on the pyMOR Tutorial
+# "Model order reduction for PDE-constrained optimization problems"
+# See https://docs.pymor.org/2023-2-0/tutorial_optimization.html
+
 from mpi4py import MPI
 
 import numpy as np
@@ -16,9 +16,6 @@ def main(args):
     """solve optimization problem for different models"""
     from .tasks import beam
     from .fom import discretize_fom
-
-    # TODO add logger
-    # TODO gather output data
 
     # ### Build FOM
     fom = discretize_fom(beam)
@@ -42,26 +39,26 @@ def main(args):
     }
 
     num_subdomains = beam.nx * beam.ny
-    initial_guess = fom.parameters.parse([5. for _ in range(num_subdomains)])
+    initial_guess = fom.parameters.parse([5.0 for _ in range(num_subdomains)])
     parameter_space = fom.parameters.space(beam.mu_range)
     bounds = [parameter_space.ranges["E"] for _ in range(num_subdomains)]
 
-    mu_min = fom.parameters.parse([0.1 for _ in range(num_subdomains)])
-    mu_max = fom.parameters.parse([10.0 for _ in range(num_subdomains)])
+    # mu_min = fom.parameters.parse([0.1 for _ in range(num_subdomains)])
+    # mu_max = fom.parameters.parse([10.0 for _ in range(num_subdomains)])
 
     # values of compliance using weights ω_i = 0.0!
     # C_mu_min = fom.output(mu_min)[0, 0] # 507.808
     # C_mu_max = fom.output(mu_max)[0, 0] # 5.07808
-    J_mu_min = fom.output(mu_min)[0, 0]
-    J_mu_max = fom.output(mu_max)[0, 0]
-    print(f"{J_mu_min=}")
-    print(f"{J_mu_max=}")
+    # J_mu_min = fom.output(mu_min)[0, 0] # type: ignore
+    # J_mu_max = fom.output(mu_max)[0, 0] # type: ignore
+    # print(f"FOM {J_mu_min=}")
+    # print(f"FOM {J_mu_max=}")
 
     opt_fom_result = solve_optimization_problem(
         args, initial_guess, bounds, fom, fom_minimization_data, gradient=False
     )
     mu_ref = opt_fom_result.x
-    fom_minimization_data['num_iter'] = opt_fom_result.nit
+    fom_minimization_data["num_iter"] = opt_fom_result.nit
     fom_minimization_data["mu_min"] = mu_ref
     fom_minimization_data["J(mu_min)"] = opt_fom_result.fun
     fom_minimization_data["status"] = opt_fom_result.status
@@ -69,11 +66,17 @@ def main(args):
     opt_rom_result = solve_optimization_problem(
         args, initial_guess, bounds, rom, rom_minimization_data, gradient=False
     )
-    rom_minimization_data['num_iter'] = opt_rom_result.nit
-    rom_minimization_data["mu_min"] = opt_rom_result.x
-    rom_minimization_data["J(mu_min)"] = opt_rom_result.fun
+    rom_minimization_data["num_iter"] = opt_rom_result.nit
+    rom_minimization_data["mu_N_min"] = opt_rom_result.x
+    rom_minimization_data["J_N(mu_N_min)"] = opt_rom_result.fun
     rom_minimization_data["status"] = opt_rom_result.status
-    rom_minimization_data["abs_err_mu_min"] = np.linalg.norm(opt_rom_result.x - mu_ref)
+    rom_minimization_data["abs_err_mu"] = np.linalg.norm(opt_rom_result.x - mu_ref)
+    rom_minimization_data["abs_err_J"] = abs(opt_rom_result.fun - opt_fom_result.fun)
+    # FOM output evaluated at mu_min found by ROM
+    mu_N_min = fom.parameters.parse(opt_rom_result.x)
+    J_mu_N_min = fom.output(mu_N_min)[0, 0] # type: ignore
+    rom_minimization_data["J(mu_N_min)"] = J_mu_N_min
+    rom_minimization_data["suboptimality"] = abs(J_mu_N_min - opt_fom_result.fun) / opt_fom_result.fun
 
     print("\nResult of optimization with FOM and FD")
     report(opt_fom_result, fom.parameters.parse, fom_minimization_data)
@@ -84,7 +87,7 @@ def main(args):
     )
 
     def get_prices(mus):
-        f = lambda mu: np.sum( (mu - 0.1) ** 2)
+        f = lambda mu: np.sum((mu - 0.1) ** 2)
         prices = []
         for mu in mus:
             prices.append(f(mu))
@@ -106,27 +109,26 @@ def main(args):
 
         fig = plt.figure(constrained_layout=True)
         axes = fig.subplots(nrows=2, ncols=1, sharex=True)
-        
+
         fig.suptitle("Minimization of the objective functional J")
         for k, data in enumerate([fom_minimization_data, rom_minimization_data]):
-
             iters = data["iterations"]
             price = data["prices"]
             compl = data["compliance"]
             jvalues = data["evaluations"]
 
-            axes[k].plot(iters, price, "b-", label="price P")
-            axes[k].plot(iters, compl, "r-", label="compliance C")
-            axes[k].plot(iters, jvalues, "k-", label="J = C + P")
+            axes[k].plot(iters, price, "b-", label="price P")  # type: ignore
+            axes[k].plot(iters, compl, "r-", label="compliance C")  # type: ignore
+            axes[k].plot(iters, jvalues, "k-", label="J = C + P")  # type: ignore
 
-            axes[k].set_ylabel("QoI evaluations")
-            axes[k].set_xlabel("Number of iterations")
+            axes[k].set_ylabel("QoI evaluations")  # type: ignore
+            axes[k].set_xlabel("Number of iterations")  # type: ignore
 
             title = "Optimization using FOM"
             if k == 1:
                 title = "Optimization using ROM"
-            axes[k].set_title(title)
-        axes[1].legend(loc="best")
+            axes[k].set_title(title)  # type: ignore
+        axes[1].legend(loc="best")  # type: ignore
 
         plt.show()
 
@@ -221,7 +223,13 @@ def build_localized_rom(cli, beam, parameters) -> StationaryModel:
     from basix.ufl import element
     from dolfinx import fem, default_scalar_type
 
-    from pymor.basic import VectorFunctional, GenericParameterFunctional, ConstantOperator, LincombOperator, VectorOperator
+    from pymor.basic import (
+        VectorFunctional,
+        GenericParameterFunctional,
+        ConstantOperator,
+        LincombOperator,
+        VectorOperator,
+    )
     from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator
     from multi.dofmap import DofMap
     from multi.domain import RectangularSubdomain
@@ -281,7 +289,9 @@ def build_localized_rom(cli, beam, parameters) -> StationaryModel:
     assert cli.num_modes <= max_modes
 
     dofmap = DofMap(beam_problem.coarse_grid)
-    operator, rhs, _ = assemble_system(cli.num_modes, dofmap, A, b, bases, num_max_modes, parameters)
+    operator, rhs, _ = assemble_system(
+        cli.num_modes, dofmap, A, b, bases, num_max_modes, parameters
+    )
 
     assert not rhs.parametric
     rhs_vector = rhs.as_range_array()
@@ -289,13 +299,13 @@ def build_localized_rom(cli, beam, parameters) -> StationaryModel:
 
     mu_i_min = beam.mu_range[0]
     weights = np.ones(num_subdomains)
-    cost = GenericParameterFunctional(lambda mu: np.dot(weights, (mu["E"] - mu_i_min) ** 2), parameters)
+    cost = GenericParameterFunctional(
+        lambda mu: np.dot(weights, (mu["E"] - mu_i_min) ** 2), parameters
+    )
     One = ConstantOperator(compliance.range.ones(1), source=compliance.source)
-    objective = LincombOperator([compliance, One], [1., cost])
+    objective = LincombOperator([compliance, One], [1.0, cost])
 
-    rom = StationaryModel(
-            operator, rhs, output_functional=objective, name="locROM"
-            )
+    rom = StationaryModel(operator, rhs, output_functional=objective, name="locROM")
     return rom
 
 
@@ -304,7 +314,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(
         description="Minimize the compliance (QoI) using FOM and localized ROM.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "distr",
@@ -319,17 +329,17 @@ if __name__ == "__main__":
         choices=("hapod", "heuristic"),
     )
     parser.add_argument(
-            "num_modes",
-            type=int,
-            help="Number of fine scale modes to be used with local ROM."
-            )
+        "num_modes",
+        type=int,
+        help="Number of fine scale modes to be used with local ROM.",
+    )
     parser.add_argument(
-            "--method",
-            type=str,
-            choices=("L-BFGS-B", "SLSQP"),
-            help="The solver to use for the minimization problem.",
-            default="L-BFGS-B"
-            )
+        "--method",
+        type=str,
+        choices=("L-BFGS-B", "SLSQP"),
+        help="The solver to use for the minimization problem.",
+        default="L-BFGS-B",
+    )
     parser.add_argument("--show", action="store_true", help="Show QoI over iterations.")
     args = parser.parse_args(sys.argv[1:])
     main(args)

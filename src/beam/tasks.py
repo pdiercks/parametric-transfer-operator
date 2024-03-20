@@ -416,19 +416,50 @@ def task_heuristic_table_csv():
         }
 
 
+def task_minimization_data_csv():
+    """Beam example: Generate minimization data table in csv format"""
+    module = f"src.{beam.name}.generate_minimization_data_table"
+    deps = [beam.fom_minimization_data, beam.rom_minimization_data("normal", "heuristic")]
+    targets = [beam.minimization_data_table]
+    return {
+            "file_dep": deps,
+            "actions": ["python3 -m {}".format(module)],
+            "targets": targets,
+            "clean": True,
+            }
+
+
+def task_minimization_comparison_csv():
+    """Beam example: Generate minimization comparison table in csv format"""
+    module = f"src.{beam.name}.generate_minimization_comparison_table"
+    deps = [beam.fom_minimization_data, beam.rom_minimization_data("normal", "heuristic")]
+    targets = [beam.minimization_comparison_table]
+    return {
+            "file_dep": deps,
+            "actions": ["python3 -m {}".format(module)],
+            "targets": targets,
+            "clean": True,
+            }
+
+
 def task_compile_tables():
     """Beam example: Compile standalone tables"""
     sources = list((SRC / "tables").glob("*.tex"))
     for src in sources:
         data = []
         name = src.stem
-        train, config = name.split("_")
-        if train.startswith("hapod"):
+        # FIXME: better way to handle deps?
+        if name.startswith("hapod"):
+            _, config = name.split("_")
             data.append(beam.hapod_table(config))
-        if train.startswith("heuristic"):
+        elif name.startswith("heuristic"):
+            _, config = name.split("_")
             data.append(beam.heuristic_table(config))
+        elif name.startswith("minimization"):
+            data.append(beam.minimization_data_table)
+            data.append(beam.minimization_comparison_table)
         yield {
-            "name": f"{src.stem}",
+            "name": f"{name}",
             "file_dep": [src] + data,
             "actions": [f"latexmk -pdf -outdir={ROOT / 'tables'} {src}"],
             "targets": [ROOT / "tables" / (src.stem + ".pdf")],
