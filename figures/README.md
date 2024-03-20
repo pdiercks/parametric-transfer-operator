@@ -1,3 +1,2 @@
 # Figures
-
-- [ ] place sources (.tex, .py) for figures here
+Standalone figures (created from .tex or .py source) in PDF format.

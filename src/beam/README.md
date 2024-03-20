@@ -1,27 +1,29 @@
 # Getting started
 In this example a heterogeneous beam structure is optimized.
 The design variables are the Young's Moduli $E_q$, $q=1, \ldots, N$ for the $N$ subdomains.
-Each subdomain corresponds to a unit cell.
-The objective function is the compliance
+Each subdomain corresponds to a unit cell (square with a hole).
+The objective function $J$ is the compliance plus some cost functional
 
 $$
 \begin{equation}
-C(\boldsymbol{u}_{\mu}, \mu) = \boldsymbol{f}_{\mathrm{ext}}^T \boldsymbol{u}_{\mu} + \sum_{i=1}^N w_i(\mu_i-1)^2\,.
+J(\boldsymbol{u}_{\mu}, \mu) = \boldsymbol{f}_{\mathrm{ext}}^T \boldsymbol{u}_{\mu} + \sum_{i=1}^N w_i(\mu_i- \mathrm{min}(\mu_i))^2\,.
 \end{equation}
 $$
 
-The second term adds a cost functional with weights $w_1, \ldots, w_N$.
+The second term is the cost functional with weights $w_1, \ldots, w_N$.
 Currently, $w_i=1$ is chosen.
+The range of each parameter component $\mu_i$ is currently set to $[0.1, 10]$.
 
 ## Setup
 
-<img src="./img/beamsetup.png" alt="Beam setup" width="400"/>
+<img src="../../figures/beam/beam_sketch.pdf" alt="Beam setup" width="400"/>
 
 ## Full fine scale mesh
 
-<img src="./img/beam_subdomains.png" alt="Beam with subdomain IDs" width="400"/>
+<img src="../../figures/beam/global_domain.png" alt="Beam with subdomain IDs" width="400"/>
 
 ## Displacement solution
+Exemplary displacement solution. Outdated.
 
 <img src="./img/beam_displacement.png" alt="Deflection of the beam" width="400"/>
 

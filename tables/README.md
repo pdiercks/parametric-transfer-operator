@@ -1,3 +1,2 @@
 # Tables
-
-- [ ] add sources (.tex) for tables here
+Standalone tables in PDF format.
