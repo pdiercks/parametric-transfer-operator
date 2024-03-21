@@ -52,3 +52,7 @@ I could use the same approach as in the fenicsx constitutive paper.
 
 ### Output
 - .npz file for each configuration
+
+## Conclusion 21.03.24
+At the moment it does not seem to be worth investing the time to refactor the code.
+Mainly because a change in the parametrization is intrusive and I cannot judge how the requirements will change wrt the current parametrization of the material parameters.
