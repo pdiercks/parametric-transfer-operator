@@ -9,18 +9,19 @@ from multi.domain import RectangularDomain
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinearElasticityProblem
 
-from pymor.parameters.base import Mu
+from pymor.parameters.base import Mu, Parameters
 
 
 class AuxiliaryProblem:
     """Represents auxiliary problem to compute transformation displacement."""
 
-    def __init__(self, problem: LinearElasticityProblem, facet_tags: dict[str, int]):
+    def __init__(self, problem: LinearElasticityProblem, facet_tags: dict[str, int], parameters: dict[str, int]):
         """Initializes the auxiliary problem.
 
         Args:
             problem: A linear elastic problem.
             facet_tags: Tags for facets marking the boundary and the interface.
+            parameters: Dictionary mapping parameter names to parameter dimensions.
 
         """
 
@@ -30,6 +31,7 @@ class AuxiliaryProblem:
         # Should the dict representation be added to Domain in general?
         self.problem = problem
         self.facet_tags = facet_tags
+        self.parameters = Parameters(parameters)
 
         self._init_boundary_dofs(facet_tags)
         self._discretize_lhs()
@@ -107,6 +109,8 @@ class AuxiliaryProblem:
             u: The solution function.
             mu: The parameter value.
         """
+        self.parameters.assert_compatible(mu)
+
         # update parametric mapping
         dofs_interface = self._dofs_interface
         g = self._d
@@ -120,12 +124,13 @@ class AuxiliaryProblem:
         solver.solve(p.b, u.vector)
 
 
-def discretize_auxiliary_problem(mshfile: str, degree: int, gdim: int = 2):
+def discretize_auxiliary_problem(mshfile: str, degree: int, param: dict[str, int], gdim: int = 2):
     """Discretizes the auxiliary problem to compute transformation displacement.
 
     Args:
         mshfile: The parent domain.
         degree: Polynomial degree of geometry interpolation.
+        param: Dictionary mapping parameter names to parameter dimensions.
         gdim: Geometrical dimension of the mesh.
 
     """
@@ -142,13 +147,12 @@ def discretize_auxiliary_problem(mshfile: str, degree: int, gdim: int = 2):
     problem = LinearElasticityProblem(omega, V, phases=mat)
 
     ftags = {"bottom": 11, "left": 12, "right": 13, "top": 14, "interface": 15}
-    aux = AuxiliaryProblem(problem, ftags)
+    aux = AuxiliaryProblem(problem, ftags, param)
     return aux
 
 
 def main():
     from dolfinx.io.utils import XDMFFile
-    from pymor.parameters.base import Parameters
 
     # transformation displacement is used to construct
     # phyiscal domains/meshes
@@ -158,17 +162,17 @@ def main():
 
     # discretize auxiliary problem for reference (parent) domain
     mshfile = "./reference_unit_cell.msh"
-    auxp = discretize_auxiliary_problem(mshfile, degree)
+    param = {"R": 1}
+    auxp = discretize_auxiliary_problem(mshfile, degree, param)
 
     # output function
     d = fem.Function(auxp.problem.V)
     xdmf = XDMFFile(d.function_space.mesh.comm, "./transformation.xdmf", "w")
     xdmf.write_mesh(d.function_space.mesh)
 
-    parameters = Parameters({"R": 1})
     mu_values = []
-    mu_values.append(parameters.parse([0.1]))
-    mu_values.append(parameters.parse([0.3]))
+    mu_values.append(auxp.parameters.parse([0.1]))
+    mu_values.append(auxp.parameters.parse([0.3]))
 
     for time, mu in enumerate(mu_values):
         auxp.solve(d, mu)
