@@ -9,75 +9,115 @@ from multi.domain import RectangularDomain
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinearElasticityProblem
 
+from pymor.parameters.base import Mu
+
 
 class AuxiliaryProblem:
-    def __init__(self, problem):
+    """Represents auxiliary problem to compute transformation displacement."""
+
+    def __init__(self, problem: LinearElasticityProblem, facet_tags: dict[str, int]):
+        """Initializes the auxiliary problem.
+
+        Args:
+            problem: A linear elastic problem.
+            facet_tags: Tags for facets marking the boundary and the interface.
+
+        """
+
+        # FIXME
+        # I now have problem.omega.facet_tags (type meshtags)
+        # and self.facet_tags (type dict)
+        # Should the dict representation be added to Domain in general?
         self.problem = problem
-        self._init_boundary_dofs()
+        self.facet_tags = facet_tags
+
+        self._init_boundary_dofs(facet_tags)
         self._discretize_lhs()
-        # ### Points on the interface
-        # create connectivity of facets to vertices
-        omega = problem.domain
+        # function used to define Dirichlet data on the interface
+        self._d = fem.Function(problem.V)  # d = X^μ - X^p
+
+    def compute_interface_coord(self, mu: Mu) -> np.ndarray:
+        """Returns transformed coordinates for each point on the parent interface.
+
+        Note: needs to be implemented by user for desired transformation map Φ(μ)
+        Return value should have shape (num_points, num_components).flatten()
+        """
+
+        omega = self.problem.domain
         tdim = omega.tdim
         fdim = tdim - 1
 
         omega.grid.topology.create_connectivity(fdim, 0)
         facet_to_vertex = omega.grid.topology.connectivity(fdim, 0)
+        facets_interface = omega.facet_tags.find(self.facet_tags["interface"])
         vertices_interface = []
-        # FIXME do not hardcode tag value?
-        for facet in omega.facet_tags.find(15):
+        for facet in facets_interface:
             verts = facet_to_vertex.links(facet)
             vertices_interface.append(verts)
         vertices_interface = np.unique(vertices_interface)
-        self.x_interface = mesh.compute_midpoints(omega.grid, 0, vertices_interface)
-        self.x_center = omega.xmin + (omega.xmax - omega.xmin) / 2
-        x_circle = (self.x_interface - self.x_center)
-        self.theta = np.arctan2(x_circle[:, 1], x_circle[:, 0])
-        self._mapping = fem.Function(problem.V)
+        # coord of interface points on parent domain
+        self._x_p = mesh.compute_midpoints(omega.grid, 0, vertices_interface)
+        self._x_center = omega.xmin + (omega.xmax - omega.xmin) / 2
 
-    def _init_boundary_dofs(self):
+        x_circle = self._x_p - self._x_center
+        self._theta = np.arctan2(x_circle[:, 1], x_circle[:, 0])
+
+        radius = mu.to_numpy().item()
+        x_new = np.zeros_like(self._x_p)
+        x_new[:, 0] = radius * np.cos(self._theta)
+        x_new[:, 1] = radius * np.sin(self._theta)
+        x_new += self._x_center
+        d_values = x_new - self._x_p
+        return d_values[:, :2].flatten()
+
+    def _init_boundary_dofs(self, facet_tags: dict[str, int]):
+        assert "interface" in facet_tags.keys()
+
         omega = self.problem.domain
         tdim = omega.tdim
         fdim = tdim - 1
         V = self.problem.V
-        _dofs_bottom = fem.locate_dofs_topological(V, fdim, omega.facet_tags.find(11))
-        _dofs_left = fem.locate_dofs_topological(V, fdim, omega.facet_tags.find(12))
-        _dofs_right = fem.locate_dofs_topological(V, fdim, omega.facet_tags.find(13))
-        _dofs_top = fem.locate_dofs_topological(V, fdim, omega.facet_tags.find(14))
-        _dofs_interface = fem.locate_dofs_topological(V, fdim, omega.facet_tags.find(15))
-        self._dofs_all = np.unique(np.hstack((_dofs_bottom, _dofs_left, _dofs_right, _dofs_top, _dofs_interface)))
+        alldofs = []
+        dof_indices = {}
+        for boundary, tag in facet_tags.items():
+            dofs = fem.locate_dofs_topological(V, fdim, omega.facet_tags.find(tag))
+            dof_indices[boundary] = dofs
+            alldofs.append(dofs)
+        self._boundary_dofs = np.unique(np.hstack(alldofs))
 
         gdim = omega.gdim
-        dummy_bc = fem.dirichletbc(np.array([0, ] * gdim, dtype=float), _dofs_interface, V)
-        self.dofs_interface = dummy_bc._cpp_object.dof_indices()[0]
+        dofs_interface = dof_indices["interface"]
+        dummy_bc = fem.dirichletbc(np.array([0] * gdim, dtype=float), dofs_interface, V)
+        self._dofs_interface = dummy_bc._cpp_object.dof_indices()[0]
 
     def _discretize_lhs(self):
-        petsc_options = None # defaults to mumps
+        petsc_options = None  # defaults to mumps
         p = self.problem
         p.setup_solver(petsc_options=petsc_options)
-        u_zero = fem.Constant(p.domain.grid, (default_scalar_type(0.0), ) * p.domain.gdim)
-        bc_zero = fem.dirichletbc(u_zero, self._dofs_all, p.V)
+        u_zero = fem.Constant(
+            p.domain.grid, (default_scalar_type(0.0),) * p.domain.gdim
+        )
+        bc_zero = fem.dirichletbc(u_zero, self._boundary_dofs, p.V)
         p.assemble_matrix(bcs=[bc_zero])
 
-    def solve(self, mu, u):
-        radius = mu.to_numpy().item()
-        x_new = np.zeros_like(self.x_interface)
-        x_new[:, 0] = radius * np.cos(self.theta)
-        x_new[:, 1] = radius * np.sin(self.theta)
-        x_new += self.x_center
-        d_value = x_new - self.x_interface
+    def solve(self, u: fem.Function, mu: Mu) -> None:
+        """Solves auxiliary problem.
 
+        Args:
+            u: The solution function.
+            mu: The parameter value.
+        """
         # update parametric mapping
-        dofs_interface = self.dofs_interface
-        g = self._mapping
-        g.x.array[dofs_interface] = d_value[:, :2].flatten()
+        dofs_interface = self._dofs_interface
+        g = self._d
+        g.x.array[dofs_interface] = self.compute_interface_coord(mu)
         g.x.scatter_forward()
-        bc_interface = fem.dirichletbc(g, self._dofs_all)
+        bc_interface = fem.dirichletbc(g, self._boundary_dofs)
 
-        rhs = self.problem.b # PETSc.Vec
-        self.problem.assemble_vector(bcs=[bc_interface])
-        solver = self.problem.solver
-        solver.solve(rhs, u.vector)
+        p = self.problem
+        p.assemble_vector(bcs=[bc_interface])
+        solver = p.solver
+        solver.solve(p.b, u.vector)
 
 
 def discretize_auxiliary_problem(mshfile: str, degree: int):
@@ -94,7 +134,8 @@ def discretize_auxiliary_problem(mshfile: str, degree: int):
     V = fem.functionspace(domain, ve)
     problem = LinearElasticityProblem(omega, V, phases=mat)
 
-    aux = AuxiliaryProblem(problem)
+    ftags = {"bottom": 11, "left": 12, "right": 13, "top": 14, "interface": 15}
+    aux = AuxiliaryProblem(problem, ftags)
     return aux
 
 
@@ -124,7 +165,7 @@ def main():
     mu_values.append(parameters.parse([0.3]))
 
     for time, mu in enumerate(mu_values):
-        auxp.solve(mu, d)
+        auxp.solve(d, mu)
         xdmf.write_function(d.copy(), t=float(time))
     xdmf.close()
 
