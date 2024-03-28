@@ -56,18 +56,18 @@ class AuxiliaryProblem:
             vertices_interface.append(verts)
         vertices_interface = np.unique(vertices_interface)
         # coord of interface points on parent domain
-        self._x_p = mesh.compute_midpoints(omega.grid, 0, vertices_interface)
-        self._x_center = omega.xmin + (omega.xmax - omega.xmin) / 2
+        x_p = mesh.compute_midpoints(omega.grid, 0, vertices_interface)
+        x_center = omega.xmin + (omega.xmax - omega.xmin) / 2
 
-        x_circle = self._x_p - self._x_center
-        self._theta = np.arctan2(x_circle[:, 1], x_circle[:, 0])
+        x_circle = x_p - x_center
+        theta = np.arctan2(x_circle[:, 1], x_circle[:, 0])
 
         radius = mu.to_numpy().item()
-        x_new = np.zeros_like(self._x_p)
-        x_new[:, 0] = radius * np.cos(self._theta)
-        x_new[:, 1] = radius * np.sin(self._theta)
-        x_new += self._x_center
-        d_values = x_new - self._x_p
+        x_new = np.zeros_like(x_p)
+        x_new[:, 0] = radius * np.cos(theta)
+        x_new[:, 1] = radius * np.sin(theta)
+        x_new += x_center
+        d_values = x_new - x_p
         return d_values[:, :2].flatten()
 
     def _init_boundary_dofs(self, facet_tags: dict[str, int]):
