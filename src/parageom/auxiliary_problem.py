@@ -120,15 +120,22 @@ class AuxiliaryProblem:
         solver.solve(p.b, u.vector)
 
 
-def discretize_auxiliary_problem(mshfile: str, degree: int):
+def discretize_auxiliary_problem(mshfile: str, degree: int, gdim: int = 2):
+    """Discretizes the auxiliary problem to compute transformation displacement.
+
+    Args:
+        mshfile: The parent domain.
+        degree: Polynomial degree of geometry interpolation.
+        gdim: Geometrical dimension of the mesh.
+
+    """
     comm = MPI.COMM_SELF
-    domain, ct, ft = gmshio.read_from_msh(mshfile, comm, gdim=2)
+    domain, ct, ft = gmshio.read_from_msh(mshfile, comm, gdim=gdim)
     omega = RectangularDomain(domain, cell_tags=ct, facet_tags=ft)
 
     # linear elasticity problem
     emod = fem.Constant(omega.grid, default_scalar_type(1.0))
     nu = fem.Constant(omega.grid, default_scalar_type(0.25))
-    gdim = omega.grid.geometry.dim
     mat = LinearElasticMaterial(gdim, E=emod, NU=nu)
     ve = element("P", domain.basix_cell(), degree, shape=(gdim,))
     V = fem.functionspace(domain, ve)
@@ -142,7 +149,6 @@ def discretize_auxiliary_problem(mshfile: str, degree: int):
 def main():
     from dolfinx.io.utils import XDMFFile
     from pymor.parameters.base import Parameters
-    # define training set
 
     # transformation displacement is used to construct
     # phyiscal domains/meshes
@@ -150,7 +156,7 @@ def main():
     # used for the geometry interpolation afterwards
     degree = 1
 
-    # discretize auxiliary problem for μ
+    # discretize auxiliary problem for reference (parent) domain
     mshfile = "./reference_unit_cell.msh"
     auxp = discretize_auxiliary_problem(mshfile, degree)
 
