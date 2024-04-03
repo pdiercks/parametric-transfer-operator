@@ -35,3 +35,40 @@ Each instance of the workflow will be stored locally under `./work` with a
 subdirectory for each example. The output of the `doit` workflow is `paper/paper.pdf`.
 Each figure and table included in the paper is stored separately in `figures` and `tables`.
 The `notes` dir is used to write down ideas and important equations (project sheet).
+
+## Compute environment
+For the simulations an apptainer container is used.
+Thus, apptainer needs to be installed on the system.
+
+```sh
+mamba install --channel conda-forge apptainer
+```
+
+### Steps to build the container
+
+First create container in sandbox format.
+```sh
+apptainer build --sandbox muto-env/ ./muto-env.def
+```
+Download source code for additional dependencies `multicode` and `pymor`.
+```sh
+git clone git@github.com:pdiercks/pymor.git PYMORSRC && cd PYMORSRC && git checkout feniscx-pd
+git clone git@github.com:pdiercks/multicode.git MULTISRC && cd MULTISRC && git checkout v0.8.0
+```
+Note, that at the moment the multicode repo at github is private. Replace with the bam server url.
+Also, PYMORSRC and MULTISRC should be placed under `$HOME`. Otherwise, the location of the source files needs to be explicitly bind mounted into the container.
+Next, enter the container and install dependencies in addition to fenicsx.
+```sh
+apptainer shell --writable muto-env/
+```
+Inside the container run:
+```sh
+python3 -m pip install h5py meshio sympy doit pyDOE3 coverage
+python3 -m pip install --no-cache-dir pyvista==0.43.3
+python3 -m pip install --editable PYMORSRC
+python3 -m pip install --editable MULTISRC
+```
+Optionally check editable install was successfull:
+```sh
+ls /usr/local/lib/python3.10/dist-packages/ | grep ".pth"
+```
