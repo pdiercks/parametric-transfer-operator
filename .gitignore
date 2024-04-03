@@ -12,3 +12,5 @@
 .doit.db.*
 **/__pycache__/
 work/
+
+muto-env/

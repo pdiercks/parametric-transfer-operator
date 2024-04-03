@@ -1,0 +1,12 @@
+Bootstrap: docker
+From: dolfinx/dolfinx:{{ TAG }}
+
+%arguments
+    TAG=nightly
+
+%post
+
+%help
+    This container contains the fenicsx compute environment plus the python packages
+    pymor and multicode built on top of fenicsx to facilitate multiscale simulations using
+    concepts from localized model order reduction.
