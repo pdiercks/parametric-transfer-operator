@@ -13,7 +13,7 @@ def task_parent_unit_cell():
     from .preprocessing import discretize_unit_cell
 
     def create_parent_unit_cell(targets):
-        mu_bar = example.parameters.parse([0.2])
+        mu_bar = example.parameters["subdomain"].parse([0.2])
         num_cells = example.num_intervals
         discretize_unit_cell(mu_bar, num_cells, targets[0])
 

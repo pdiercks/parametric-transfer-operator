@@ -49,18 +49,19 @@ class BeamData:
     fe_deg: int = 2
     poisson_ratio: float = 0.3
     youngs_modulus: float = 20e3
-    parameter_names: tuple[str, ...] = ("R",)
-    parameter_dims: tuple[int, ...] = (1,)
+    parameter_name: str = "R"
+    parameter_dims: tuple[int, int] = (1, 10)
     mu_range: tuple[float, float] = (0.1, 0.3)
 
     def __post_init__(self):
         self.grids_path.mkdir(exist_ok=True, parents=True)
         self.logs_path.mkdir(exist_ok=True, parents=True)
         self.figures_path.mkdir(exist_ok=True, parents=True)
-        param = {}
-        for name, ndim in zip(self.parameter_names, self.parameter_dims):
-            param[name] = ndim
-        self.parameters = Parameters(param)
+        pname = self.parameter_name
+        dims = self.parameter_dims
+        sub_param = eval('{ "%s" : %d }' % (pname, dims[0]))
+        global_param = eval('{ "%s" : %d }' % (pname, dims[1]))
+        self.parameters = {"subdomain": Parameters(sub_param), "global": Parameters(global_param)}
 
     @property
     def plotting_style(self) -> Path:
