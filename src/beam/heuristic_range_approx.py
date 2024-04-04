@@ -87,9 +87,9 @@ def solve_neumann_problem(
     u_in.interpolate(
         u_neumann,
         nmm_interpolation_data=fem.create_nonmatching_meshes_interpolation_data(
-            u_in.function_space.mesh._cpp_object,
+            u_in.function_space.mesh,
             u_in.function_space.element,
-            u_neumann.function_space.mesh._cpp_object,
+            u_neumann.function_space.mesh
         ),
     )
 

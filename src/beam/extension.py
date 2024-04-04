@@ -58,6 +58,7 @@ def main(args):
     problem.setup_coarse_space()
     problem.setup_edge_spaces()
     problem.create_map_from_V_to_L()
+    problem.create_edge_space_maps()
 
     boundary_entities = np.array([], dtype=np.intc)
     edges = set(["bottom", "left", "right", "top"])
@@ -109,11 +110,22 @@ def main(args):
             # args.cell does not own loc_edge
             # in this case modes from neighbouring configuration are extended
             # the mapping of DOFs between different edge spaces has to be considered
+            # map from `loc_edge` to `boundary`
             boundary = dof_layout.local_edge_index_map[local_ent]
-            map = make_mapping(
-                problem.edge_spaces["fine"][boundary],
-                problem.edge_spaces["fine"][loc_edge],
-            )
+            if loc_edge == "left":
+                map = problem.edge_space_maps["left_to_right"]
+                assert boundary == "right"
+            elif loc_edge == "right":
+                map = problem.edge_space_maps["right_to_left"]
+                assert boundary == "left"
+            elif loc_edge == "top":
+                map = problem.edge_space_maps["top_to_bottom"]
+                assert boundary == "bottom"
+            elif loc_edge == "bottom":
+                map = problem.edge_space_maps["bottom_to_top"]
+                assert boundary == "top"
+            else:
+                raise NotImplementedError
             modes = modes[:, map]
 
         mask[boundary] = np.s_[start:end]

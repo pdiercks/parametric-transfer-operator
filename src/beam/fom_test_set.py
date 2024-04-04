@@ -37,7 +37,7 @@ def main(args):
 
     # ### Translate unit cell domain
     cell_vertex = coarse_grid.get_entities(0, args.subdomain_id)[0]
-    dx = coarse_grid.get_entity_coordinates(0, cell_vertex)
+    dx = coarse_grid.get_entity_coordinates(0, np.array([cell_vertex], dtype=np.int32))
     omega.translate(dx)
 
     # ### Create Edge Spaces
@@ -46,7 +46,7 @@ def main(args):
 
     # ### Unit cell problem
     ufl_element = fom.solution_space.V.ufl_element()
-    fe = element(ufl_element.family_name, omega.grid.basix_cell(), ufl_element.degree(), shape=ufl_element.value_shape())
+    fe = element(ufl_element.family_name, omega.grid.basix_cell(), ufl_element.degree, shape=ufl_element.reference_value_shape)
     V = fem.functionspace(omega.grid, fe)
     phases = LinearElasticMaterial(2, 20e3, 0.3) # material will not be important here
     problem = LinElaSubProblem(omega, V, phases=phases)
@@ -64,9 +64,9 @@ def main(args):
         f_fom.vector.axpy(1., uvec.real_part.impl)
 
         f.interpolate(f_fom, nmm_interpolation_data=fem.create_nonmatching_meshes_interpolation_data(
-            f.function_space.mesh._cpp_object,
+            f.function_space.mesh,
             f.function_space.element,
-            f_fom.function_space.mesh._cpp_object))
+            f_fom.function_space.mesh))
 
         U = source.make_array([f.vector.copy()])
         test_set.append(U)

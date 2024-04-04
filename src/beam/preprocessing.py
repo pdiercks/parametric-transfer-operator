@@ -26,16 +26,16 @@ def mark_subdomains(fine_grid: str, coarse_domain: mesh.Mesh) -> None:
     # cell tags should start at 1 instead of 0
     w.vector.array[:] = W.dofmap.list.flatten() + 1
 
-    fe = element("DG", domain.basix_cell(), dg_el.degree(), shape=dg_el.value_shape())
+    fe = element(
+        "DG", domain.basix_cell(), dg_el.degree, shape=dg_el.reference_value_shape
+    )
     V = fem.functionspace(domain, fe)
     u = fem.Function(V)
 
     u.interpolate(
         w,
         nmm_interpolation_data=fem.create_nonmatching_meshes_interpolation_data(
-            u.function_space.mesh._cpp_object,
-            u.function_space.element,
-            w.function_space.mesh._cpp_object,
+            u.function_space.mesh, u.function_space.element, w.function_space.mesh
         ),
     )
 
@@ -107,6 +107,7 @@ def generate_meshes(example) -> None:
 
     # ### Multiscale Problem
     from .definitions import BeamProblem
+
     problem = BeamProblem(example.coarse_grid.as_posix(), example.fine_grid.as_posix())
 
     # ### Creation of grids for oversampling problems
@@ -116,11 +117,17 @@ def generate_meshes(example) -> None:
         os_domain, _, _, _ = mesh.create_submesh(coarse_domain, 2, cells)
         os_grid = StructuredQuadGrid(os_domain)
         os_grid.fine_grid_method = [example.unit_cell_grid.as_posix()]
-        os_grid.create_fine_grid(np.arange(len(cells)), example.fine_oversampling_grid(key).as_posix(), cell_type=fine_grid_cell, options=options)
+        os_grid.create_fine_grid(
+            np.arange(len(cells)),
+            example.fine_oversampling_grid(key).as_posix(),
+            cell_type=fine_grid_cell,
+            options=options,
+        )
         mark_subdomains(example.fine_oversampling_grid(key).as_posix(), os_domain)
 
 
 if __name__ == "__main__":
     from .definitions import BeamData
+
     beam = BeamData(name="beam")
     generate_meshes(beam)

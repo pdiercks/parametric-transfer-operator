@@ -13,7 +13,7 @@ lines.markersize : 3
 axes.spines.top: False
 axes.spines.right: False
 
-pgf.texsystem: lualatex
+# pgf.texsystem: lualatex
 pgf.rcfonts: False
 pgf.preamble: \usepackage{siunitx} \usepackage{physics} \usepackage[nice]{nicefrac} \usepackage{amsfonts} \usepackage{amsmath} \usepackage{bm}
 

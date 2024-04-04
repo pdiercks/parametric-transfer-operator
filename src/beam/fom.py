@@ -69,7 +69,7 @@ def discretize_fom(ex):
         cell_tags = fh.read_meshtags(domain, "subdomains")
 
     # finite element space
-    gdim = domain.ufl_cell().geometric_dimension()
+    gdim = domain.geometry.dim
     ve = element("P", domain.basix_cell(), ex.fe_deg, shape=(gdim,))
     V = fem.functionspace(domain, ve)
     u = ufl.TrialFunction(V)

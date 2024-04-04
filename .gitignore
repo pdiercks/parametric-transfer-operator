@@ -12,3 +12,6 @@
 .doit.db.*
 **/__pycache__/
 work/
+
+muto-env/
+pyrightconfig.json
