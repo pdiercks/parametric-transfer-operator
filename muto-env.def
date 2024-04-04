@@ -9,6 +9,10 @@ From: dolfinx/dolfinx:{{ TAG }}
     export PATH=~/texlive/bin/x86_64-linux:$PATH
 
 %post
+    apt-get -qq update && \
+    apt-get -y install libgl1-mesa-glx xvfb && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
     python3 -m pip install h5py meshio sympy doit pyDOE3 coverage
     python3 -m pip install --no-cache-dir pyvista=0.43.3
     python3 -m pip install git+https://github.com/pdiercks/pymor.git@fenicsx-pd
