@@ -52,10 +52,6 @@ First create container in sandbox format.
 ```sh
 apptainer build --sandbox muto-env/ docker://dolfinx/dolfinx:nightly
 ```
-Set environment variable (perl):
-```sh
-export LC_ALL=C
-```
 Download source code for additional dependencies `multicode` and `pymor`.
 ```sh
 git clone git@github.com:pdiercks/pymor.git PYMORSRC && cd PYMORSRC && git checkout feniscx-pd
@@ -65,10 +61,14 @@ Note, that at the moment the multicode repo at github is private. Replace with t
 Also, PYMORSRC and MULTISRC should be placed under `$HOME`. Otherwise, the location of the source files needs to be explicitly bind mounted into the container.
 Next, enter the container and install dependencies in addition to fenicsx.
 ```sh
-apptainer shell --writable muto-env/
+apptainer shell --fakeroot --writable muto-env/
 ```
 Inside the container run:
 ```sh
+apt-get -qq update && \
+apt-get -y install imagemagick libgl1-mesa-glx xvfb && \
+apt-get clean && \
+rm -rf /var/lib/apt/lists/*
 python3 -m pip install h5py meshio sympy doit pyDOE3 coverage
 python3 -m pip install --no-cache-dir pyvista==0.43.3
 python3 -m pip install --editable PYMORSRC
@@ -78,9 +78,11 @@ Optionally check editable install was successfull:
 ```sh
 ls /usr/local/lib/python3.10/dist-packages/ | grep ".pth"
 ```
-Modify PATH to be able to use `$HOME/texlive` install:
+Set environment variables, in particular
+modify PATH to be able to use `$HOME/texlive` install:
 ```sh
 export PATH=~/texlive/bin/x86_64-linux:$PATH
+export LC_ALL=C
 ```
 
 #### Production
@@ -89,6 +91,7 @@ Something like
 ```sh
 apptainer build --build-arg TAG=stable production.sif muto-env.def
 ```
+Note, that usage of `muto-env.def` is not tested.
 Note, that the last command in the `%post` section does not work, because
 the multicode repository is currently private on github.
 Note, that `--build-arg TAG=stable` will pull the latest stable release
@@ -97,5 +100,6 @@ of the dolfinx docker image.
 ##### ToDo
 
 - [ ] make multicode a public repository
+- [ ] extend muto-env.def for production; install texlive
 - [ ] add section `test` to muto-env.def
 - [ ] add section `runscript` to muto-env.def?
