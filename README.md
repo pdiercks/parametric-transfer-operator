@@ -52,6 +52,10 @@ First create container in sandbox format.
 ```sh
 apptainer build --sandbox muto-env/ docker://dolfinx/dolfinx:nightly
 ```
+Set environment variable (perl):
+```sh
+export LC_ALL=C
+```
 Download source code for additional dependencies `multicode` and `pymor`.
 ```sh
 git clone git@github.com:pdiercks/pymor.git PYMORSRC && cd PYMORSRC && git checkout feniscx-pd
@@ -73,6 +77,10 @@ python3 -m pip install --editable MULTISRC
 Optionally check editable install was successfull:
 ```sh
 ls /usr/local/lib/python3.10/dist-packages/ | grep ".pth"
+```
+Modify PATH to be able to use `$HOME/texlive` install:
+```sh
+export PATH=~/texlive/bin/x86_64-linux:$PATH
 ```
 
 #### Production

@@ -4,6 +4,10 @@ From: dolfinx/dolfinx:{{ TAG }}
 %arguments
     TAG=nightly
 
+%environment
+    export LC_ALL=C
+    export PATH=~/texlive/bin/x86_64-linux:$PATH
+
 %post
     python3 -m pip install h5py meshio sympy doit pyDOE3 coverage
     python3 -m pip install --no-cache-dir pyvista=0.43.3
