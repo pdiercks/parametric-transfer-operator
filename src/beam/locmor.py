@@ -196,7 +196,7 @@ def discretize_oversampling_problem(example: BeamData, mu: Mu, configuration: st
     range_product = FenicsxMatrixOperator(pmat, subproblem.V, subproblem.V)
 
     # ### Rigid body modes
-    ns_vecs = build_nullspace(subproblem.V, gdim=omega_in.grid.ufl_cell().geometric_dimension())
+    ns_vecs = build_nullspace(subproblem.V, gdim=omega_in.grid.geometry.dim)
     range_space = FenicsxVectorSpace(subproblem.V)
     rigid_body_modes = []
     for j in kernel_set:
