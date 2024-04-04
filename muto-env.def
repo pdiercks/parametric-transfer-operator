@@ -10,7 +10,7 @@ From: dolfinx/dolfinx:{{ TAG }}
 
 %post
     apt-get -qq update && \
-    apt-get -y install libgl1-mesa-glx xvfb && \
+    apt-get -y install imagemagick libgl1-mesa-glx xvfb && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
     python3 -m pip install h5py meshio sympy doit pyDOE3 coverage
