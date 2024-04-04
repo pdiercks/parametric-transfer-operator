@@ -46,9 +46,11 @@ mamba install --channel conda-forge apptainer
 
 ### Steps to build the container
 
+#### Development
+
 First create container in sandbox format.
 ```sh
-apptainer build --sandbox muto-env/ ./muto-env.def
+apptainer build --sandbox muto-env/ docker://dolfinx/dolfinx:nightly
 ```
 Download source code for additional dependencies `multicode` and `pymor`.
 ```sh
@@ -72,3 +74,20 @@ Optionally check editable install was successfull:
 ```sh
 ls /usr/local/lib/python3.10/dist-packages/ | grep ".pth"
 ```
+
+#### Production
+
+Something like
+```sh
+apptainer build --build-arg TAG=stable production.sif muto-env.def
+```
+Note, that the last command in the `%post` section does not work, because
+the multicode repository is currently private on github.
+Note, that `--build-arg TAG=stable` will pull the latest stable release
+of the dolfinx docker image.
+
+##### ToDo
+
+- [ ] make multicode a public repository
+- [ ] add section `test` to muto-env.def
+- [ ] add section `runscript` to muto-env.def?

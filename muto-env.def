@@ -5,6 +5,10 @@ From: dolfinx/dolfinx:{{ TAG }}
     TAG=nightly
 
 %post
+    python3 -m pip install h5py meshio sympy doit pyDOE3 coverage
+    python3 -m pip install --no-cache-dir pyvista=0.43.3
+    python3 -m pip install git+https://github.com/pdiercks/pymor.git@fenicsx-pd
+    python3 -m pip install git+ssh://git@github.com/pdiercks/multicode.git@v0.8.0
 
 %help
     This container contains the fenicsx compute environment plus the python packages
