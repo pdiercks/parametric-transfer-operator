@@ -1,13 +1,14 @@
-from typing import Optional, Callable, Union
-from dataclasses import dataclass, field
+# from typing import Optional, Callable, Union
+from dataclasses import dataclass
+# from dataclasses import field
 from pathlib import Path
 import numpy as np
-from multi.boundary import point_at, plane_at
-from multi.problems import MultiscaleProblemDefinition
-from dolfinx import default_scalar_type
+# from multi.boundary import point_at, plane_at
+# from multi.problems import MultiscaleProblemDefinition
+# from dolfinx import default_scalar_type
+from pymor.parameters.base import Parameters
 
 ROOT = Path(__file__).parents[2]
-FIGURES = ROOT / "figures" / "parageom"
 WORK = ROOT / "work"
 SRC = Path(__file__).parent
 
@@ -24,12 +25,15 @@ class BeamData:
         height: The height of the beam.
         nx: Number of coarse grid cells (subdomains) in x.
         ny: Number of coarse grid cells (subdomains) in y.
-        resolution: `resolution ** 2` cells in each subdomain.
+        num_intervals: Number of (interval) cells per edge.
         geom_deg: Degree for geometry interpolation.
         fe_deg: FE degree.
         poisson_ratio: The poisson ratio of the material.
         youngs_modulus: The Young's modulus (reference value) of the material.
+        parameter_names: The names of all parameters.
+        parameter_dims: The number of components of each parameter.
         mu_range: The value range of each parameter component.
+        parameters: Dict mapping parameter name to parameter dimension.
 
     """
 
@@ -40,17 +44,23 @@ class BeamData:
     height: float = 1.0
     nx: int = 10
     ny: int = 1
-    resolution: int = 10
+    num_intervals: int = 12
     geom_deg: int = 1
     fe_deg: int = 2
     poisson_ratio: float = 0.3
     youngs_modulus: float = 20e3
-    mu_range: tuple[float, float] = (0.1, 10.0)
+    parameter_names: tuple[str, ...] = ("R",)
+    parameter_dims: tuple[int, ...] = (1,)
+    mu_range: tuple[float, float] = (0.1, 0.3)
 
     def __post_init__(self):
-        """create dirs"""
         self.grids_path.mkdir(exist_ok=True, parents=True)
         self.logs_path.mkdir(exist_ok=True, parents=True)
+        self.figures_path.mkdir(exist_ok=True, parents=True)
+        param = {}
+        for name, ndim in zip(self.parameter_names, self.parameter_dims):
+            param[name] = ndim
+        self.parameters = Parameters(param)
 
     @property
     def plotting_style(self) -> Path:
@@ -61,6 +71,10 @@ class BeamData:
     def rf(self) -> Path:
         """run folder"""
         return WORK / f"{self.name}"
+
+    @property
+    def figures_path(self) -> Path:
+        return ROOT / "figures" / f"{self.name}"
 
     @property
     def grids_path(self) -> Path:
@@ -79,100 +93,8 @@ class BeamData:
         return self.grids_path / "coarse_grid.msh"
 
     @property
-    def fine_grid(self) -> Path:
-        """Global fine grid"""
-        return self.grids_path / "fine_grid.xdmf"
-
-    @property
-    def fig_fine_grid(self) -> Path:
-        return FIGURES / "global_domain.png"
-
-    @property
-    def unit_cell_grid(self) -> Path:
-        return self.grids_path / "unit_cell.msh"
-
-    @property
-    def fig_unit_cell(self) -> Path:
-        return FIGURES / "unit_cell.png"
-
-    def fine_oversampling_grid(self, configuration: str) -> Path:
-        assert configuration in ("inner", "left", "right")
-        return self.grids_path / f"fine_oversampling_grid_{configuration}.xdmf"
-
-    @property
-    def fom_displacement(self) -> Path:
-        return self.rf / "fom_displacement.bp"
-
-    @property
-    def reduced_model(self) -> Path:
-        """the global POD-ROM"""
-        return self.rf / "reduced_model.out"
-
-    @property
-    def singular_values(self) -> Path:
-        """singular values for the global POD-ROM"""
-        return self.rf / "singular_values.npy"
-
-    def log_edge_range_approximation(self, distr: str, conf: str, name: str) -> Path:
-        return self.logs_path / f"edge_range_approximation_{distr}_{conf}_{name}.log"
-
-    def log_projerr(self, distr: str, conf: str, name: str) -> Path:
-        return self.logs_path / f"projerr_{distr}_{conf}_{name}.log"
-
-    def log_extension(self, distr: str, name: str, cell: int) -> Path:
-        return self.logs_path / f"extension_{distr}_{name}_{cell}.log"
-
-    def log_run_locrom(self, distr: str, name: str) -> Path:
-        return self.logs_path / f"run_locrom_{distr}_{name}.log"
-
-    def loc_singular_values_npz(self, distr: str, conf: str) -> Path:
-        """singular values of POD compression for range approximation of parametric T"""
-        return self.rf / f"loc_singular_values_{distr}_{conf}.npz"
-
-    def hapod_rrf_bases_length(self, distr: str, conf: str) -> Path:
-        """length of each edge basis after rrf algo in hapod training"""
-        return self.rf / f"hapod_rrf_bases_length_{distr}_{conf}.npz"
-
-    def hapod_table(self, conf: str) -> Path:
-        return self.rf / f"hapod_table_{conf}.csv"
-
-    def pod_data(self, distr: str, conf: str) -> Path:
-        return self.rf / f"pod_data_{distr}_{conf}.json"
-
-    def heuristic_data(self, distr: str, conf: str) -> Path:
-        return self.rf / f"heuristic_data_{distr}_{conf}.json"
-
-    def heuristic_table(self, conf: str) -> Path:
-        return self.rf / f"heuristic_table_{conf}.csv"
-
-    def fine_scale_edge_modes_npz(self, distr: str, conf: str, name: str) -> Path:
-        """edge-restricted fine scale part of pod modes"""
-        return self.rf / f"fine_scale_edge_modes_{distr}_{conf}_{name}.npz"
-
-    def fine_scale_modes_bp(self, distr: str, name: str, cell: int) -> Path:
-        """fine scale basis functions after extension"""
-        return self.rf / f"fine_scale_modes_{distr}_{name}_{cell}.bp"
-
-    def fom_test_set(self, conf: str) -> Path:
-        """test set generated from FOM solutions"""
-        return self.rf / f"test_set_{conf}.npz"
-
-    def proj_error(self, distr: str, conf: str, name: str) -> Path:
-        """projection error for fom test set wrt pod basis"""
-        return self.rf / f"proj_error_{distr}_{conf}_{name}.npz"
-
-    def fig_proj_error(self, conf: str, name: str) -> Path:
-        """figure of projection error plot"""
-        return FIGURES / f"fig_proj_error_{conf}_{name}.pdf"
-
-    def fig_loc_svals(self, config: str) -> Path:
-        """figure of singular values of POD compression after rrf"""
-        return FIGURES / f"fig_loc_svals_{config}.pdf"
-
-    @property
-    def fig_loc_rom_error(self) -> Path:
-        """figure of loc rom error"""
-        return FIGURES / f"fig_loc_rom_error.pdf"
+    def parent_unit_cell(self) -> Path:
+        return self.grids_path / "parent_unit_cell.msh"
 
     def config_to_cell(self, config: str) -> int:
         """Maps config to global cell index."""
@@ -214,11 +136,11 @@ class BeamData:
 
     @property
     def fig_fom_opt(self) -> Path:
-        return FIGURES / "fig_fom_opt.pdf"
+        return self.figures_path / "fig_fom_opt.pdf"
 
     @property
     def fig_rom_opt(self) -> Path:
-        return FIGURES / "fig_rom_opt.pdf"
+        return self.figures_path / "fig_rom_opt.pdf"
 
     @property
     def realizations(self) -> Path:

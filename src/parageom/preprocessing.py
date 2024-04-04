@@ -1,8 +1,9 @@
-def discretize_unit_cell(mu, output: str) -> None:
+def discretize_unit_cell(mu, num_cells: int, output: str) -> None:
     """Discretizes square domain with circular void.
 
     Args:
         mu: parameter value, i.e. radius of the void.
+        num_cells: Number of cells per edge of the unit cell.
         output: Write .msh file.
 
     """
@@ -20,7 +21,7 @@ def discretize_unit_cell(mu, output: str) -> None:
         ymin,
         ymax,
         radius=radius,
-        num_cells=12,
+        num_cells=num_cells,
         recombine=True,
         cell_tags={"matrix": 1},
         facet_tags={"bottom": 11, "left": 12, "right": 13, "top": 14, "void": 15},
@@ -34,7 +35,8 @@ def main():
     parameters = Parameters({"R": 1})
     mu_bar = parameters.parse([0.2])  # TODO use center of mu_range
     reference_unit_cell = "./reference_unit_cell.msh"
-    discretize_unit_cell(mu_bar, reference_unit_cell)
+    num_cells = 12
+    discretize_unit_cell(mu_bar, num_cells, reference_unit_cell)
 
 
 if __name__ == "__main__":
