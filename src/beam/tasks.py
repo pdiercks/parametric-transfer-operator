@@ -474,9 +474,13 @@ def task_paper():
     deps.append(beam.fig_loc_rom_error)
     deps.append(beam.fig_fine_grid)
     deps.append(beam.fig_unit_cell)
+    deps.append(beam.minimization_data_table)
+    deps.append(beam.minimization_comparison_table)
     deps.append(ROOT / "figures/beam/beam_sketch.pdf")
     for config in CONFIGS:
         deps.append(beam.fig_loc_svals(config))
+        deps.append(beam.hapod_table(config))
+        deps.append(beam.heuristic_table(config))
         for name in NAMES:
             deps.append(beam.fig_proj_error(config, name))
     return {
@@ -484,13 +488,4 @@ def task_paper():
         "actions": [f"latexmk -pdf -outdir={ROOT / 'paper'} {source}"],
         "targets": [source.with_suffix(".pdf")],
         "clean": ["latexmk -C %s" % source],
-    }
-
-
-def task_show_paper():
-    """Beam example: View Paper"""
-    return {
-        "file_dep": [ROOT / "paper/paper.pdf"],
-        "actions": ["zathura %(dependencies)s"],
-        "uptodate": [False],
     }
