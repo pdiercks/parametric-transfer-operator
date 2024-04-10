@@ -36,8 +36,7 @@ def task_training_sets():
     def create_training_set(config, seed, targets):
         parameter_space = ParameterSpace(example.parameters[config], example.mu_range)
         name = list(example.parameters[config].keys())[0]
-        param_dim = example.parameters[config]["R"]
-        num_samples = 20 * param_dim
+        num_samples = example.ntrain(config)
         train = sample_lhs(
             parameter_space,
             name=name,
@@ -63,3 +62,35 @@ def task_training_sets():
             "targets": [example.training_set(config)],
             "clean": True,
         }
+
+
+def task_coarse_grid():
+    """ParaGeom: Create structured coarse grids"""
+    module = "src.parageom.preprocessing"
+
+    for config in list(CONFIGS) + ["global"]:
+        yield {
+                "name": config,
+                "file_dep": [],
+                "actions": ["python3 -m {} {} {} --output %(targets)s".format(module, config, "coarse")],
+                "targets": [example.coarse_grid(config)],
+                "clean": True,
+                }
+
+
+def task_oversampling_grids():
+    """ParaGeom: Create physical mesh for each μ"""
+    module = "src.parageom.preprocessing"
+
+    for config in CONFIGS:
+        ntrain = example.ntrain(config)
+        targets = []
+        for k in range(ntrain):
+            targets.append(example.oversampling_domain(config, k))
+        yield {
+                "name": config,
+                "file_dep": [example.training_set(config), example.coarse_grid(config)],
+                "actions": ["python3 -m {} {} {}".format(module, config, "oversampling")],
+                "targets": targets,
+                "clean": True,
+                }

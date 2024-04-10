@@ -70,7 +70,7 @@ class BeamData:
         # naming convention: oversampling_{index}.msh
         # store the training set, such that via {index} the
         # parameter value can be determined
-        for config in self.configurations:
+        for config in list(self.configurations) + ["global"]:
             p = self.grids_path / config
             p.mkdir(exist_ok=True, parents=True)
 
@@ -103,18 +103,28 @@ class BeamData:
     def bases_path(self, distr: str, name: str) -> Path:
         return self.rf / f"bases/{distr}/{name}"
 
-    @property
-    def coarse_grid(self) -> Path:
+    def coarse_grid(self, config: str) -> Path:
         """Global coarse grid"""
-        return self.grids_path / "coarse_grid.msh"
+        assert config in list(self.configurations) + ["global"]
+        return self.grids_path / config / "coarse_grid.msh"
 
     @property
     def parent_unit_cell(self) -> Path:
         return self.grids_path / "parent_unit_cell.msh"
 
+    def oversampling_domain(self, config: str, k: int) -> Path:
+        """Oversampling domain for config and index k of parameter value"""
+        return self.grids_path / config / f"oversampling_domain_{k}.xdmf"
+
     def config_to_cell(self, config: str) -> int:
         """Maps config to global cell index."""
         map = {"inner": 4, "left": 0, "right": 9}
+        return map[config]
+
+    def ntrain(self, config: str) -> int:
+        """Define size of training set"""
+        # FIXME ntrain
+        map = {"left": 2, "inner": 2, "right": 2}
         return map[config]
 
     def cell_to_config(self, cell: int) -> str:

@@ -152,6 +152,7 @@ def discretize_auxiliary_problem(mshfile: str, degree: int, param: dict[str, int
 
 
 def main():
+    from .tasks import example
     from dolfinx.io.utils import XDMFFile
 
     # transformation displacement is used to construct
@@ -161,7 +162,7 @@ def main():
     degree = 1
 
     # discretize auxiliary problem for reference (parent) domain
-    mshfile = "./reference_unit_cell.msh"
+    mshfile = example.parent_unit_cell.as_posix()
     param = {"R": 1}
     auxp = discretize_auxiliary_problem(mshfile, degree, param)
 
