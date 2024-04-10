@@ -1,6 +1,6 @@
 # from typing import Optional, Callable, Union
 from dataclasses import dataclass
-# from dataclasses import field
+from dataclasses import field
 from pathlib import Path
 import numpy as np
 # from multi.boundary import point_at, plane_at
@@ -30,10 +30,10 @@ class BeamData:
         fe_deg: FE degree.
         poisson_ratio: The poisson ratio of the material.
         youngs_modulus: The Young's modulus (reference value) of the material.
-        parameter_names: The names of all parameters.
-        parameter_dims: The number of components of each parameter.
         mu_range: The value range of each parameter component.
-        parameters: Dict mapping parameter name to parameter dimension.
+        parameters: Dict of dict mapping parameter name to parameter dimension for each configuration etc.
+        configurations: The configurations, i.e. oversampling problems.
+        distributions: The distributions used in the randomized range finder.
 
     """
 
@@ -49,19 +49,30 @@ class BeamData:
     fe_deg: int = 2
     poisson_ratio: float = 0.3
     youngs_modulus: float = 20e3
-    parameter_name: str = "R"
-    parameter_dims: tuple[int, int] = (1, 10)
+    parameters: dict = field(default_factory=lambda: {
+        "subdomain": Parameters({"R": 1}),
+        "global": Parameters({"R": 10}),
+        "left": Parameters({"R": 2}),
+        "right": Parameters({"R": 2}),
+        "inner": Parameters({"R": 3}),
+        })
     mu_range: tuple[float, float] = (0.1, 0.3)
+    configurations: tuple[str, str, str] = ("left", "inner", "right")
+    distributions: tuple[str, ...] = ("normal", )
 
     def __post_init__(self):
         self.grids_path.mkdir(exist_ok=True, parents=True)
         self.logs_path.mkdir(exist_ok=True, parents=True)
         self.figures_path.mkdir(exist_ok=True, parents=True)
-        pname = self.parameter_name
-        dims = self.parameter_dims
-        sub_param = eval('{ "%s" : %d }' % (pname, dims[0]))
-        global_param = eval('{ "%s" : %d }' % (pname, dims[1]))
-        self.parameters = {"subdomain": Parameters(sub_param), "global": Parameters(global_param)}
+
+        # have a separate folder for each configuration to store
+        # the physical oversampling meshes
+        # naming convention: oversampling_{index}.msh
+        # store the training set, such that via {index} the
+        # parameter value can be determined
+        for config in self.configurations:
+            p = self.grids_path / config
+            p.mkdir(exist_ok=True, parents=True)
 
     @property
     def plotting_style(self) -> Path:
@@ -80,6 +91,10 @@ class BeamData:
     @property
     def grids_path(self) -> Path:
         return self.rf / "grids"
+
+    def training_set(self, config: str) -> Path:
+        """Write training set as numpy array"""
+        return self.grids_path / config / "training_set.out"
 
     @property
     def logs_path(self) -> Path:
