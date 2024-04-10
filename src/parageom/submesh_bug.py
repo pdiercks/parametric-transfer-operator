@@ -12,8 +12,13 @@ q_deg = 1
 qele = basix.ufl.quadrature_element(domain.topology.cell_name(), value_shape=(), degree=q_deg)
 Q = fem.functionspace(domain, qele)
 
+def middle_cell(x):
+    return np.logical_and(
+            x[0] > 0.3, x[0] < 0.7
+            )
 
-subcells = np.array([1], dtype=np.int32)
+subcells = mesh.locate_entities(domain, domain.topology.dim, middle_cell)
+assert subcells.size == 1
 submesh, cell_map, _, _ = mesh.create_submesh(domain, domain.topology.dim, subcells)
 Qsub = fem.functionspace(submesh, qele)
 
