@@ -168,8 +168,6 @@ def test_interval():
     q = fem.Function(Q)
     q.interpolate(expr)
     reference = q.x.array[:].copy()[interp_dofs]
-    # TODO test other cases
-    # e.g. where magic points in the same cell are selected ...
 
     qsr = build_restriction(Q, interp_dofs)
 
