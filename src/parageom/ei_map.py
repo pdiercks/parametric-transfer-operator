@@ -121,9 +121,20 @@ def interpolate_transformation_operator(example, test: bool = True, output: Unio
         print("output not implemented")
         # TODO output
         # interp_dofs
-        # collaterial_basis
+        # collaterial_basis?
         # ei_data['errors']
         # ei_data['triangularity_errors']
+
+        # interp_dofs --> needed for (restricted) evaluation of the operator
+        # interpolation_matrix --> needed to solve for the coefficients
+        # the collateral basis is not needed directly, instead I could store the reduced operators of the LHS (where the collateral basis enters)
+
+        # TODO
+        # add script/task that given the basis for the displacement (B)
+        # computes the operators of the LincombOperator for the LHS, e.g. op_i = B.T A_i B
+        # with A_i = int_Ω Grad(v) • C • Grad(w) • γ_i dx
+        # with γ_i, i=1, ..., M being the collateral basis functions
+        # see notes/weak_form_subdomain_problem.pdf
 
 
 if __name__ == "__main__":
