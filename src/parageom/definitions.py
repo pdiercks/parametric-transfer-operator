@@ -124,7 +124,7 @@ class BeamData:
     def ntrain(self, config: str) -> int:
         """Define size of training set"""
         # FIXME ntrain
-        map = {"left": 2, "inner": 2, "right": 2}
+        map = {"left": 10, "inner": 10, "right": 10}
         return map[config]
 
     def cell_to_config(self, cell: int) -> str:
