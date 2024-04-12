@@ -65,8 +65,8 @@ def discretize_oversampling_domains(config: str):
     from mpi4py import MPI
     from dolfinx import fem
     from dolfinx.io import gmshio
+    from dolfinx.io.utils import XDMFFile
 
-    import meshio
     import numpy as np
 
     from pymor.core.pickle import load
@@ -97,19 +97,26 @@ def discretize_oversampling_domains(config: str):
             aux.solve(d, local_mu)
             d.x.scatter_forward()
 
-            with tempfile.NamedTemporaryFile(suffix=".msh", delete=False) as tf:
-                subdomains.append(tf.name)
+            # translation is done internally by StructuredQuadGrid.create_fine_grid
+            # therefore only need to apply transformation displacement
 
-                # translation is done internally by StructuredQuadGrid.create_fine_grid
-                reference_mesh = meshio.read(reference_cell)
-                disp = np.pad(d.x.array.reshape(reference_mesh.points.shape[0], -1),
-                              pad_width=[(0, 0), (0, 1)])
-                # FIXME
-                # addition does not work, because d and geometry.x do not follow
-                # the same dof layout??
-                breakpoint()
-                reference_mesh.points += disp
-                meshio.write(tf.name, reference_mesh, file_format="gmsh")
+            # read parent unit cell via gmshio
+            # (cannot use meshio because of dof layout, cell ordering)
+            parent_subdomain = gmshio.read_from_msh(reference_cell, MPI.COMM_WORLD, gdim=2)[0]
+            x_subdomain = parent_subdomain.geometry.x
+            disp = np.pad(d.x.array.reshape(x_subdomain.shape[0], -1),
+                          pad_width=[(0, 0), (0, 1)])
+            x_subdomain += disp
+
+            # write physical subdomain mesh to XDMF
+            tmp_xdmf = tempfile.NamedTemporaryFile(suffix=".xdmf", delete=False)
+            xdmf = XDMFFile(parent_subdomain.comm, tmp_xdmf.name, "w")
+            xdmf.write_mesh(parent_subdomain)
+            xdmf.close()
+
+            subdomains.append(tmp_xdmf.name)
+
+
 
         oversampling_msh = example.oversampling_domain(config, k).as_posix()
         coarse_grid.fine_grid_method = subdomains
