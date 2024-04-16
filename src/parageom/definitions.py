@@ -45,7 +45,7 @@ class BeamData:
     nx: int = 10
     ny: int = 1
     num_intervals: int = 12
-    geom_deg: int = 1
+    geom_deg: int = 2
     fe_deg: int = 2
     poisson_ratio: float = 0.3
     youngs_modulus: float = 20e3
