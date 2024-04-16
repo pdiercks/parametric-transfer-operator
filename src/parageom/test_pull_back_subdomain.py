@@ -97,7 +97,7 @@ def main():
     # FIXME
     # limited to degree 1
     # ValueError in line 117 in auxiliary_problem.py if degree == 2
-    degree = 1
+    degree = example.geom_deg
     aux = discretize_auxiliary_problem(
         parent_subdomain_msh, degree, example.parameters["subdomain"]
     )
@@ -130,7 +130,8 @@ def main():
     # compare
     err = u.x.array - u_ref.x.array
     print("error in euclidean norm: ", np.linalg.norm(err))
-    # np.linalg.norm(err) ~ 5%
+    # np.linalg.norm(err) ~ 5% if degree=1
+    # np.linalg.norm(err) ~ 9% if degree=2
     # Not sure if this is expected or some mistake.
     # ASAIK the pull back should be exact.
 
