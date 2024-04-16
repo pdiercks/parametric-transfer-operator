@@ -1,7 +1,7 @@
 import numpy as np
 
 from mpi4py import MPI
-from dolfinx import mesh, fem, default_scalar_type
+from dolfinx import fem, default_scalar_type
 from dolfinx.io import gmshio
 from basix.ufl import element
 
@@ -37,6 +37,7 @@ class AuxiliaryProblem:
         self._discretize_lhs()
         # function used to define Dirichlet data on the interface
         self._d = fem.Function(problem.V)  # d = X^μ - X^p
+        self._xdofs = self.problem.V.tabulate_dof_coordinates()
 
     def compute_interface_coord(self, mu: Mu) -> np.ndarray:
         """Returns transformed coordinates for each point on the parent interface.
@@ -45,21 +46,12 @@ class AuxiliaryProblem:
         Return value should have shape (num_points, num_components).flatten()
         """
 
-        omega = self.problem.domain
-        tdim = omega.tdim
-        fdim = tdim - 1
 
-        omega.grid.topology.create_connectivity(fdim, 0)
-        facet_to_vertex = omega.grid.topology.connectivity(fdim, 0)
-        facets_interface = omega.facet_tags.find(self.facet_tags["interface"])
-        vertices_interface = []
-        for facet in facets_interface:
-            verts = facet_to_vertex.links(facet)
-            vertices_interface.append(verts)
-        vertices_interface = np.unique(vertices_interface)
-        # coord of interface points on parent domain
-        x_p = mesh.compute_midpoints(omega.grid, 0, vertices_interface)
+        omega = self.problem.domain
         x_center = omega.xmin + (omega.xmax - omega.xmin) / 2
+
+        dofs = self._dofs_interface
+        x_p = self._xdofs[dofs]
 
         x_circle = x_p - x_center
         theta = np.arctan2(x_circle[:, 1], x_circle[:, 0])
@@ -89,8 +81,9 @@ class AuxiliaryProblem:
 
         gdim = omega.gdim
         dofs_interface = dof_indices["interface"]
+        self._dofs_interface = dofs_interface
         dummy_bc = fem.dirichletbc(np.array([0] * gdim, dtype=float), dofs_interface, V)
-        self._dofs_interface = dummy_bc._cpp_object.dof_indices()[0]
+        self._dofs_interface_blocked = dummy_bc._cpp_object.dof_indices()[0]
 
     def _discretize_lhs(self):
         petsc_options = None  # defaults to mumps
@@ -112,7 +105,7 @@ class AuxiliaryProblem:
         self.parameters.assert_compatible(mu)
 
         # update parametric mapping
-        dofs_interface = self._dofs_interface
+        dofs_interface = self._dofs_interface_blocked
         g = self._d
         g.x.array[dofs_interface] = self.compute_interface_coord(mu)
         g.x.scatter_forward()
