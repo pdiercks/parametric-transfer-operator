@@ -1,7 +1,9 @@
+import typing
+
 UNIT_LENGTH = 1.
 
 
-def discretize_unit_cell(mu, num_cells: int, output: str) -> None:
+def discretize_unit_cell(mu, num_cells: int, output: str, gmsh_options: typing.Optional[dict] = None) -> None:
     """Discretizes square domain with circular void.
 
     Args:
@@ -29,6 +31,7 @@ def discretize_unit_cell(mu, num_cells: int, output: str) -> None:
         cell_tags={"matrix": 1},
         facet_tags={"bottom": 11, "left": 12, "right": 13, "top": 14, "void": 15},
         out_file=output,
+        options=gmsh_options,
     )
 
 
