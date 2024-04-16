@@ -16,7 +16,8 @@ def task_parent_unit_cell():
     def create_parent_unit_cell(targets):
         mu_bar = example.parameters["subdomain"].parse([0.2])
         num_cells = example.num_intervals
-        discretize_unit_cell(mu_bar, num_cells, targets[0])
+        options = {"Mesh.ElementOrder": example.geom_deg}
+        discretize_unit_cell(mu_bar, num_cells, targets[0], options)
 
     return {
         "file_dep": [SRC / "preprocessing.py"],
