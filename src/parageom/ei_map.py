@@ -21,9 +21,13 @@ def interpolate_transformation_operator(example, test: bool = True, output: Unio
     aux = discretize_auxiliary_problem(example.parent_unit_cell.as_posix(), example.geom_deg, param)
 
     # ### Define training set (Parameters({"R": 1}))
+    # in the single subdomain case the parameter space is
+    # just the interval [mu_range[0], mu_range[1]] = [0.1, 0.3]
     mu_range = example.mu_range
     parameter_space = ParameterSpace(param, mu_range)
-    training_set = parameter_space.sample_randomly(100)
+    ntrain = 101
+    training_set = parameter_space.sample_uniformly(ntrain)
+    # step_size = (mu_range[1] - mu_range[0]) / (ntrain - 1) # 0.002
 
     # transformation displacement
     d = fem.Function(aux.problem.V, name="d")
@@ -91,6 +95,7 @@ def interpolate_transformation_operator(example, test: bool = True, output: Unio
         interpolation_matrix = collateral_basis.dofs(interp_dofs).T
         validation_set = parameter_space.sample_randomly(20)
         errors = []
+        coeff_vecs = []
         for mu in validation_set:
             # fom
             aux.solve(d, mu)
@@ -104,12 +109,19 @@ def interpolate_transformation_operator(example, test: bool = True, output: Unio
             AU = op_fun.x.array[interp_dofs]
             coeff = solve_triangular(interpolation_matrix, AU, lower=True, unit_diagonal=True).T
             op_ei = collateral_basis.lincomb(coeff)
+
+            coeff_vecs.append(coeff)
             
             # error
             err = op_fun.x.array - op_ei.to_numpy().flatten()
             errors.append(np.linalg.norm(err))
 
         print(f"Max. error {np.amax(errors)} over validation set of size {len(validation_set)}.")
+
+    breakpoint()
+
+    # TODO: use training set to learn a surrogate
+    # for the derivative of the coefficients wrt to mu?
 
     # TODO: restricted evaluation
     # use fem.Expression.eval instead of op_fun.interpolate
