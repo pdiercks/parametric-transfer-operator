@@ -1,37 +1,30 @@
+
 import numpy as np
 
 from mpi4py import MPI
 from dolfinx import fem, default_scalar_type
 from dolfinx.io import gmshio, XDMFFile
+import ufl
 
 from multi.boundary import plane_at
 from multi.preprocessing import create_meshtags
 from multi.domain import RectangularDomain
 from multi.materials import LinearElasticMaterial
-from multi.problems import LinearElasticityProblem
+from multi.problems import LinearElasticityProblem, LinearProblem
 from multi.product import InnerProduct
 
 from pymor.bindings.fenicsx import FenicsxMatrixOperator, FenicsxVectorSpace
 from multi.projection import relative_error, absolute_error
 
-TY = -1000.
-# material parameters for the test problem
-# E and NU for auxiliary problem are defined in function `discretize_auxiliary_problem`
-EMOD = 20e3
+TY = -5.0e-2
+EMOD = 1.0
 POISSON = 0.3
 
 
-def compute_reference_solution(mshfile, degree, d):
+def compute_reference_solution(mshfile, degree):
     domain = gmshio.read_from_msh(
         mshfile, MPI.COMM_WORLD, gdim=2
     )[0]
-
-    x_subdomain = domain.geometry.x
-    disp = np.pad(
-        d.x.array.reshape(x_subdomain.shape[0], -1),  # type: ignore
-        pad_width=[(0, 0), (0, 1)],
-    )
-    x_subdomain += disp
 
     top_locator = plane_at(1.0, "y")
     bottom_locator = plane_at(0.0, "y")
@@ -54,8 +47,7 @@ def compute_reference_solution(mshfile, degree, d):
     return u
 
 
-def discretize_fom(domain, trafo_disp):
-    from .fom import ParaGeomLinEla
+def compute_other(domain, V):
     top_locator = plane_at(1.0, "y")
     bottom_locator = plane_at(0.0, "y")
     tdim = domain.topology.dim
@@ -67,76 +59,67 @@ def discretize_fom(domain, trafo_disp):
     traction = fem.Constant(
         domain, (default_scalar_type(0.0), default_scalar_type(TY))
     )
-    V = trafo_disp.function_space
 
-    problem = ParaGeomLinEla(omega, V, E=EMOD, NU=POISSON, d=trafo_disp)
+    class MyModel(LinearProblem):
+        def __init__(self, domain, V, E, NU):
+            super().__init__(domain, V)
+            self.mat = LinearElasticMaterial(gdim=2, E=E, NU=NU)
+
+        @property
+        def form_lhs(self):
+            i, j, k, l = ufl.indices(4)
+            gdim = self.domain.gdim
+            Id = ufl.Identity(gdim)
+
+            lame_1 = self.mat.lambda_1
+            lame_2 = self.mat.lambda_2
+
+            tetrad_ijkl = lame_1 * Id[i, j] * Id[k, l] + lame_2 * (
+                    Id[i, k] * Id[j, l] + Id[i, l] * Id[j, k] # type: ignore
+            )
+            grad_u = self.trial[k].dx(l) # type: ignore
+            grad_v = self.test[i].dx(j)  # type: ignore
+            return grad_v * tetrad_ijkl * grad_u * ufl.dx
+
+        @property
+        def form_rhs(self):
+            v = self.test
+            rhs = ufl.inner(zero, v) * ufl.dx
+
+            if self._bc_handler.has_neumann:
+                rhs += self._bc_handler.neumann_bcs
+
+            return rhs
+
+    problem = MyModel(omega, V, E=EMOD, NU=POISSON)
     problem.add_dirichlet_bc(value=zero, boundary=bottom_locator, method="geometrical")
     problem.add_neumann_bc(top_marker, traction)
     problem.setup_solver()
-    return problem
+    u = problem.solve()
+    return u
 
 
 def main():
     from .tasks import example
-    from .auxiliary_problem import discretize_auxiliary_problem
 
     # Generate physical subdomain
     parent_subdomain_msh = example.parent_unit_cell.as_posix()
     degree = example.geom_deg
-
-    aux = discretize_auxiliary_problem(
-        parent_subdomain_msh, degree, example.parameters["subdomain"]
-    )
-    mu = aux.parameters.parse([0.29001])
-    d = fem.Function(aux.problem.V)
-    aux.solve(d, mu)  # type: ignore
-    u_phys = compute_reference_solution(parent_subdomain_msh, degree, d)
-
-    fom = discretize_fom(aux.problem.domain.grid, d)
-    u = fom.solve()
-
-    # compare on reference domain
-    V = aux.problem.V
-    u_ref = fem.Function(V)
-    interpolation_data = fem.create_nonmatching_meshes_interpolation_data(
-        V.mesh,
-        V.element,
-        u_phys.function_space.mesh,
-        padding=1e-12,
-    )
-    u_ref.interpolate(u_phys, nmm_interpolation_data=interpolation_data) # type: ignore
-
-    # u rom on parent domain
-    # u physical interpolated onto parent domain
-    with XDMFFile(aux.problem.domain.grid.comm, "urom.xdmf", "w") as xdmf:
-        xdmf.write_mesh(u.function_space.mesh)
-        xdmf.write_function(u, t=0.0)
-        # xdmf.write_function(u_ref, t=0.0)
-
-    # u on physical mesh
-    with XDMFFile(u_phys.function_space.mesh.comm, "uphys.xdmf", "w") as xdmf:
-        xdmf.write_mesh(u_phys.function_space.mesh) # type: ignore
-        xdmf.write_function(u_phys, t=0.0) # type: ignore
+    uref = compute_reference_solution(parent_subdomain_msh, degree)
+    V = uref.function_space
+    u = compute_other(V.mesh, V)
 
     inner_product = InnerProduct(V, "mass")
     prod_mat = inner_product.assemble_matrix()
     product = FenicsxMatrixOperator(prod_mat, V, V)
     source = FenicsxVectorSpace(V)
-    urom = source.make_array([u.vector]) # type: ignore
-    uphys = source.make_array([u_phys.vector]) # type: ignore
 
-    abs_err = absolute_error(uphys, urom, product)
-    rel_err = relative_error(uphys, urom, product)
+    REF = source.make_array([uref.vector]) # type: ignore
+    U = source.make_array([u.vector]) # type: ignore
+    abs_err = absolute_error(REF, U, product)
+    rel_err = relative_error(REF, U, product)
     print(f"{abs_err=}")
     print(f"{rel_err=}")
-
-    # ### Option A: EI of the bilinear operator
-    # U = fom.solve(mu)
-    # evaluations.append(op.apply(U, mu)) # internal force
-    # cbasis, ipoints, data = ei_greedy(evaluations)
-    # ei_op = ...
-    # TODO: restricted evaluation for fom.operator may be more involved
-    # project ei_op
 
 
 if __name__ == "__main__":

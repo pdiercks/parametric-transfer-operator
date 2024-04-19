@@ -44,7 +44,7 @@ class BeamData:
     height: float = 1.0
     nx: int = 10
     ny: int = 1
-    num_intervals: int = 12
+    num_intervals: int = 20
     geom_deg: int = 2
     fe_deg: int = 2
     poisson_ratio: float = 0.3
