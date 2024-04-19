@@ -54,10 +54,13 @@ def compute_reference_solution(mshfile, degree, d):
     return u
 
 
-def discretize_fom(domain, trafo_disp):
-    from .fom import ParaGeomLinEla
+def discretize_fom(auxiliary_problem, trafo_disp):
+    from .fom import ParaGeomLinEla, ParaGeomOperator
+    from pymor.basic import VectorOperator, StationaryModel
+
     top_locator = plane_at(1.0, "y")
     bottom_locator = plane_at(0.0, "y")
+    domain = auxiliary_problem.problem.domain.grid
     tdim = domain.topology.dim
     fdim = tdim - 1
     top_marker = int(194)
@@ -73,7 +76,25 @@ def discretize_fom(domain, trafo_disp):
     problem.add_dirichlet_bc(value=zero, boundary=bottom_locator, method="geometrical")
     problem.add_neumann_bc(top_marker, traction)
     problem.setup_solver()
-    return problem
+    # problem.assemble_matrix(bcs=problem.get_dirichlet_bcs())
+    problem.assemble_vector(bcs=problem.get_dirichlet_bcs())
+
+    # ### wrap as pymor model
+    def param_setter(mu):
+        trafo_disp.x.array[:] = 0.
+        auxiliary_problem.solve(trafo_disp, mu)
+
+    params = {"R": [1]}
+    # not sure how params would map to fem.Constant
+    # self.parameters.assert_compatible(mu) needs to eval to True
+    operator = ParaGeomOperator(problem.form_lhs, params, param_setter, bcs=problem.get_dirichlet_bcs(), name="ParaGeom_a")
+    # NOTE
+    # without b.copy(), fom.rhs.as_range_array() does not return correct data
+    # problem goes out of scope and problem.b is deleted
+    rhs = VectorOperator(operator.range.make_array([problem.b.copy()]))
+    fom = StationaryModel(operator, rhs, name="FOM")
+
+    return fom
 
 
 def main():
@@ -92,8 +113,10 @@ def main():
     aux.solve(d, mu)  # type: ignore
     u_phys = compute_reference_solution(parent_subdomain_msh, degree, d)
 
-    fom = discretize_fom(aux.problem.domain.grid, d)
-    u = fom.solve()
+    fom = discretize_fom(aux, d)
+    U = fom.solve(mu)
+    u = fem.Function(aux.problem.V)
+    u.x.array[:] = U.to_numpy().flatten()
 
     # compare on reference domain
     V = aux.problem.V

@@ -1,8 +1,8 @@
 import numpy as np
 
 from mpi4py import MPI
-from dolfinx import fem, default_scalar_type
-from dolfinx.io import gmshio, XDMFFile
+from dolfinx import fem
+from dolfinx.io import gmshio
 import ufl
 
 
