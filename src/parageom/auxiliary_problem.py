@@ -46,7 +46,6 @@ class AuxiliaryProblem:
         Return value should have shape (num_points, num_components).flatten()
         """
 
-
         omega = self.problem.domain
         x_center = omega.xmin + (omega.xmax - omega.xmin) / 2
 
