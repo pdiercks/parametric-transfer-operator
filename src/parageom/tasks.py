@@ -14,7 +14,7 @@ def task_parent_unit_cell():
     from .preprocessing import discretize_unit_cell
 
     def create_parent_unit_cell(targets):
-        mu_bar = example.parameters["subdomain"].parse([0.2])
+        mu_bar = example.parameters["subdomain"].parse([example.mu_bar])
         num_cells = example.num_intervals
         options = {"Mesh.ElementOrder": example.geom_deg}
         discretize_unit_cell(mu_bar, num_cells, targets[0], options)
@@ -77,6 +77,18 @@ def task_coarse_grid():
                 "targets": [example.coarse_grid(config)],
                 "clean": True,
                 }
+
+
+def task_global_parent_domain():
+    """ParaGeom: Create global parent domain mesh"""
+    module = "src.parageom.preprocessing"
+    config = "global"
+    return {
+            "file_dep": [example.coarse_grid(config)],
+            "actions": ["python3 -m {} {} {} --output %(targets)s".format(module, config, "parent")],
+            "targets": [example.global_parent_domain],
+            "clean": True,
+            }
 
 
 def task_oversampling_grids():
