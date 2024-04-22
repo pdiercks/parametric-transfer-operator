@@ -91,6 +91,8 @@ class ParaGeomLinEla(LinearProblem):
         return rhs
 
 
+# TODO type hints and docstring
+# TODO params and param_setter, support fem.Constant?
 class ParaGeomOperator(Operator):
     """Wraps the FEniCSx bilinear form for a geometrically parametrized linear elastic problem as an |Operator|.
 
