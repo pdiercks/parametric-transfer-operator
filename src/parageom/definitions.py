@@ -31,6 +31,7 @@ class BeamData:
         poisson_ratio: The poisson ratio of the material.
         youngs_modulus: The Young's modulus (reference value) of the material.
         mu_range: The value range of each parameter component.
+        mu_bar: Reference parameter value (Radius of parent domain).
         parameters: Dict of dict mapping parameter name to parameter dimension for each configuration etc.
         configurations: The configurations, i.e. oversampling problems.
         distributions: The distributions used in the randomized range finder.
@@ -57,6 +58,7 @@ class BeamData:
         "inner": Parameters({"R": 3}),
         })
     mu_range: tuple[float, float] = (0.1, 0.3)
+    mu_bar: float = 0.2
     configurations: tuple[str, str, str] = ("left", "inner", "right")
     distributions: tuple[str, ...] = ("normal", )
 
@@ -109,12 +111,27 @@ class BeamData:
         return self.grids_path / config / "coarse_grid.msh"
 
     @property
+    def global_parent_domain(self) -> Path:
+        return self.grids_path / "global" / "parent_domain.msh"
+
+    @property
     def parent_unit_cell(self) -> Path:
         return self.grids_path / "parent_unit_cell.msh"
 
+    @property
+    def cell_type(self) -> str:
+        """The cell type of the parent unit cell mesh."""
+        match self.geom_deg:
+            case 1:
+                return "quad"
+            case 2:
+                return "quad9"
+            case _:
+                return "quad"
+
     def oversampling_domain(self, config: str, k: int) -> Path:
         """Oversampling domain for config and index k of parameter value"""
-        return self.grids_path / config / f"oversampling_domain_{k}.xdmf"
+        return self.grids_path / config / f"oversampling_domain_{k:03}.xdmf"
 
     def config_to_cell(self, config: str) -> int:
         """Maps config to global cell index."""
