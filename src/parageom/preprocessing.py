@@ -152,8 +152,9 @@ def create_physical_domain(config: str):
     training_set = training_data["training_set"]
 
     reference_cell = example.parent_unit_cell.as_posix()
+    ftags = {"bottom": 11, "left": 12, "right": 13, "top": 14, "interface": 15}
     aux = discretize_auxiliary_problem(
-        reference_cell, example.geom_deg, example.parameters["subdomain"]
+        reference_cell, example.geom_deg, ftags, example.parameters["subdomain"]
     )
     d = fem.Function(aux.problem.V, name="transformation displacement")
 
