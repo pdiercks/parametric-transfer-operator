@@ -1,0 +1,9 @@
+[project]
+name = "muto"
+readme = "README.md"
+
+[tool.doit]
+backend = "dbm"
+
+[tool.doit.commands.list]
+sort = "definition"
