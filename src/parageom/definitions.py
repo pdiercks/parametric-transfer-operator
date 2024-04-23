@@ -67,12 +67,30 @@ class BeamData:
     configurations: tuple[str, str, str] = ("left", "inner", "right")
     distributions: tuple[str, ...] = ("normal",)
     range_product: str = "h1"
+    rrf_ttol: float = 5e-2
+    rrf_ftol: float = 1e-15
+    rrf_num_testvecs: int = 20
+    pod_rtol: float = 1e-5
     run_mode: str = "DEBUG"
 
     def __post_init__(self):
+        # TODO
+        # create folder structure based on number of realizations
+        
+        # Actually, it suffices that there is only 1 training set that
+        # defines ntrain physical meshes.
+        # Now, the approx. of T happens with a randomized method, and therefore
+        # here several realizations are necessary.
+        # realization -> different seeds for sampling, but same mesh for each T(μ)
+
+        # training set (not dependent on realization) --> physical meshes
+        # realization --> nreal hapod folders with bases etc.
+
         self.grids_path.mkdir(exist_ok=True, parents=True)
         self.logs_path.mkdir(exist_ok=True, parents=True)
         self.figures_path.mkdir(exist_ok=True, parents=True)
+        # TODO use f"hapod_{nreal}" ?
+        (self.rf / "hapod").mkdir(exist_ok=True, parents=True)
 
         # have a separate folder for each configuration to store
         # the physical oversampling meshes
@@ -112,16 +130,17 @@ class BeamData:
     def grids_path(self) -> Path:
         return self.rf / "grids"
 
-    def training_set(self, config: str) -> Path:
-        """Write training set as numpy array"""
-        return self.grids_path / config / "training_set.out"
-
     @property
     def logs_path(self) -> Path:
         return self.rf / "logs"
 
     def bases_path(self, distr: str, name: str) -> Path:
         return self.rf / f"bases/{distr}/{name}"
+
+    # FIXME dependent on realization
+    def training_set(self, config: str) -> Path:
+        """Write training set as numpy array"""
+        return self.grids_path / config / "training_set.out"
 
     def coarse_grid(self, config: str) -> Path:
         """Global coarse grid"""
@@ -231,7 +250,22 @@ class BeamData:
         np.save(outpath, realizations)
 
     def log_hapod(self, distribution: str, configuration: str) -> Path:
-        return self.logs_path / f"hapod_{distribution}_{configuration}.log"
+        return self.logs_path / "hapod" / f"{distribution}_{configuration}.log"
+
+    def pod_data(self, distr: str, conf: str) -> Path:
+        return self.rf / "hapod" / f"pod_data_{distr}_{conf}.json"
+
+    def hapod_rrf_bases_length(self, distr: str, conf: str) -> Path:
+        """length of each edge basis after rrf algo in hapod training"""
+        return self.rf / "hapod" / f"rrf_bases_length_{distr}_{conf}.npz"
+
+    def fine_scale_edge_modes_npz(self, distr: str, conf: str, name: str) -> Path:
+        """edge-restricted fine scale part of pod modes"""
+        return self.rf / "hapod" / f"fine_scale_edge_modes_{distr}_{conf}_{name}.npz"
+
+    def loc_singular_values_npz(self, distr: str, conf: str) -> Path:
+        """singular values of POD compression for range approximation of parametric T"""
+        return self.rf / "hapod" / f"loc_singular_values_{distr}_{conf}.npz"
 
 
 class BeamProblem(MultiscaleProblemDefinition):

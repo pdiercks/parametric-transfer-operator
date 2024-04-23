@@ -50,8 +50,8 @@ def task_training_sets():
         with open(targets[0], "wb") as fh:
             dump({"training_set": train, "seed": seed}, fh)
 
-    # use realization to generate seed
-    # FIXME at the moment there is only one realization
+    # FIXME training set should not depend on realization !!!
+    raise ValueError("training set should not depend on realization")
     realizations = np.load(example.realizations)
     random_seeds = np.random.SeedSequence(realizations[0]).generate_state(len(CONFIGS))
 
@@ -108,3 +108,32 @@ def task_oversampling_grids():
                 "targets": targets,
                 "clean": True,
                 }
+
+
+def task_hapod():
+    """ParaGeom: Construct edge basis via HAPOD"""
+    module = "src.parageom.hapod"
+    nworkers = 4  # number of workers in pool
+    deps = [SRC / "hapod.py"]
+    distr = "normal"
+    for nreal in range(example.num_real):
+        for config in CONFIGS:
+            for k in range(example.ntrain(config)):
+                deps.append(example.oversampling_domain(config, k))
+            yield {
+                "name": config+":"+str(nreal),
+                "file_dep": deps,
+                "actions": [
+                    "python3 -m {} {} {} {} --max_workers {}".format(
+                        module, distr, config, nreal, nworkers
+                    )
+                ],
+                "targets": [
+                    example.log_hapod(distr, config),
+                    example.fine_scale_edge_modes_npz(distr, config, "hapod"),
+                    example.loc_singular_values_npz(distr, config),
+                    example.hapod_rrf_bases_length(distr, config),
+                    example.pod_data(distr, config),
+                ],
+                "clean": True,
+            }
