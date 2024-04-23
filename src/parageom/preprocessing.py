@@ -135,7 +135,7 @@ def create_physical_domain(config: str):
     import tempfile
 
     from mpi4py import MPI
-    from dolfinx import fem
+    from dolfinx import fem, mesh
     from dolfinx.io import gmshio
     from dolfinx.io.utils import XDMFFile
 
@@ -162,10 +162,12 @@ def create_physical_domain(config: str):
     coarse_domain = gmshio.read_from_msh(coarse_grid_msh, MPI.COMM_WORLD, gdim=2)[0]
     coarse_grid = StructuredQuadGrid(coarse_domain)
 
+    target_subdomain_index = example.config_to_target_cell(config)
+
     for k, mu in enumerate(training_set):
         subdomains = []  # list of msh files
 
-        for mu_i in mu.to_numpy():
+        for local_cell, mu_i in enumerate(mu.to_numpy()):
             # read reference mesh
             local_mu = aux.parameters.parse([mu_i])
             d.x.array[:] = 0.0
@@ -191,12 +193,25 @@ def create_physical_domain(config: str):
             xdmf = XDMFFile(parent_subdomain.comm, tmp_xdmf.name, "w")
             xdmf.write_mesh(parent_subdomain)
             xdmf.close()
+            subdomains.append(tmp_xdmf.name)
 
             # FIXME
             # Writing facet tags has issues.
             # The XDMFFile will not be readable by meshio. (XDMF Reader only supports one grid)
 
-            subdomains.append(tmp_xdmf.name)
+            if local_cell == target_subdomain_index:
+                # Translate to correct position
+                vertices = coarse_grid.get_entities(0, local_cell)
+                dx = mesh.compute_midpoints(coarse_grid.grid, 0, vertices)
+                dx = np.around(dx, decimals=3)
+                xmin = np.amin(dx, axis=0, keepdims=True)
+                x_subdomain += xmin[:, :x_subdomain.shape[1]]
+                # Write physical mesh for target subdomain
+                filename = example.target_subdomain(config, k).as_posix()
+                xdmf = XDMFFile(parent_subdomain.comm, filename, "w")
+                xdmf.write_mesh(parent_subdomain)
+                xdmf.close()
+
 
         oversampling_msh = example.oversampling_domain(config, k).as_posix()
         coarse_grid.fine_grid_method = subdomains

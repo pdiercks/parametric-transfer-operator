@@ -92,7 +92,7 @@ def task_global_parent_domain():
 
 
 def task_oversampling_grids():
-    """ParaGeom: Create physical mesh for each μ"""
+    """ParaGeom: Create physical meshes (Ω, Ω_in) for each μ"""
     module = "src.parageom.preprocessing"
 
     for config in CONFIGS:
@@ -100,6 +100,7 @@ def task_oversampling_grids():
         targets = []
         for k in range(ntrain):
             targets.append(example.oversampling_domain(config, k))
+            targets.append(example.target_subdomain(config, k))
         yield {
                 "name": config,
                 "file_dep": [example.training_set(config), example.coarse_grid(config)],
