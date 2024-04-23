@@ -84,7 +84,7 @@ def discretize_fom(auxiliary_problem, trafo_disp):
         trafo_disp.x.array[:] = 0.
         auxiliary_problem.solve(trafo_disp, mu)
 
-    params = {"R": [1]}
+    params = {"R": 1}
     # not sure how params would map to fem.Constant
     # self.parameters.assert_compatible(mu) needs to eval to True
     operator = ParaGeomOperator(problem.form_lhs, params, param_setter, bcs=problem.get_dirichlet_bcs(), name="ParaGeom_a")
@@ -105,8 +105,9 @@ def main():
     parent_subdomain_msh = example.parent_unit_cell.as_posix()
     degree = example.geom_deg
 
+    ftags = {"bottom": 11, "left": 12, "right": 13, "top": 14, "interface": 15}
     aux = discretize_auxiliary_problem(
-        parent_subdomain_msh, degree, example.parameters["subdomain"]
+        parent_subdomain_msh, degree, ftags, example.parameters["subdomain"]
     )
     mu = aux.parameters.parse([0.29001])
     d = fem.Function(aux.problem.V)
