@@ -101,8 +101,7 @@ class ParaGeomOperator(Operator):
     form
         The `Form` object which is assembled to a matrix.
     params
-        Dict mapping parameters to coefficients in the `Form`.
-        These coefficients can be of type `dolfinx.fem.Constant` or `dolfinx.fem.Function`.
+        Dict mapping parameter names to dimensions.
     param_setter
         Method to update coefficients according to new value of mu.
         (Solution of the auxiliary problem for new value of mu).
@@ -137,7 +136,7 @@ class ParaGeomOperator(Operator):
         self.range = FenicsxVectorSpace(range_space)
         source_space = form.arguments()[1].ufl_function_space()
         self.source = FenicsxVectorSpace(source_space)
-        self.parameters_own = {k: len(v) for k, v in params.items()}
+        self.parameters_own = {k: v for k, v in params.items()}
         self.bcs = bcs or list()
 
         self.compiled_form = fem.form(
