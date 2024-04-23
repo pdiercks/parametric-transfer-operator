@@ -2,10 +2,15 @@ from typing import Optional, Callable, Union
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
+
 import numpy as np
+
+from mpi4py import MPI
+from dolfinx import default_scalar_type
+
 from multi.boundary import point_at, plane_at
 from multi.problems import MultiscaleProblemDefinition
-from dolfinx import default_scalar_type
+
 from pymor.parameters.base import Parameters
 
 ROOT = Path(__file__).parents[2]
@@ -33,6 +38,7 @@ class BeamData:
         parameters: Dict of dict mapping parameter name to parameter dimension for each configuration etc.
         configurations: The configurations, i.e. oversampling problems.
         distributions: The distributions used in the randomized range finder.
+        range_product: The inner product to use (rrf, projection error).
         run_mode: DEBUG or PRODUCTION mode. Affects mesh sizes, training set, realizations.
 
     """
@@ -47,17 +53,20 @@ class BeamData:
     fe_deg: int = 2
     poisson_ratio: float = 0.3
     youngs_modulus: float = 20e3
-    parameters: dict = field(default_factory=lambda: {
-        "subdomain": Parameters({"R": 1}),
-        "global": Parameters({"R": 10}),
-        "left": Parameters({"R": 2}),
-        "right": Parameters({"R": 2}),
-        "inner": Parameters({"R": 3}),
-        })
+    parameters: dict = field(
+        default_factory=lambda: {
+            "subdomain": Parameters({"R": 1}),
+            "global": Parameters({"R": 10}),
+            "left": Parameters({"R": 2}),
+            "right": Parameters({"R": 2}),
+            "inner": Parameters({"R": 3}),
+        }
+    )
     mu_range: tuple[float, float] = (0.1, 0.3)
     mu_bar: float = 0.2
     configurations: tuple[str, str, str] = ("left", "inner", "right")
-    distributions: tuple[str, ...] = ("normal", )
+    distributions: tuple[str, ...] = ("normal",)
+    range_product: str = "h1"
     run_mode: str = "DEBUG"
 
     def __post_init__(self):
@@ -226,10 +235,11 @@ class BeamData:
 
 
 class BeamProblem(MultiscaleProblemDefinition):
-    def __init__(self, coarse_grid: str, fine_grid: str):
+    def __init__(self, coarse_grid: Path, fine_grid: Path):
         super().__init__(coarse_grid, fine_grid)
-        self.setup_coarse_grid(2)
-        self.setup_fine_grid()
+        gdim = 2
+        self.setup_coarse_grid(MPI.COMM_WORLD, gdim)
+        self.setup_fine_grid(MPI.COMM_WORLD)
         self.build_edge_basis_config(self.cell_sets)
 
     def config_to_cell(self, config: str) -> int:
