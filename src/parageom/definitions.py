@@ -1,11 +1,16 @@
-# from typing import Optional, Callable, Union
+from typing import Optional, Callable, Union
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
+
 import numpy as np
-# from multi.boundary import point_at, plane_at
-# from multi.problems import MultiscaleProblemDefinition
-# from dolfinx import default_scalar_type
+
+from mpi4py import MPI
+from dolfinx import default_scalar_type
+
+from multi.boundary import point_at, plane_at
+from multi.problems import MultiscaleProblemDefinition
+
 from pymor.parameters.base import Parameters
 
 ROOT = Path(__file__).parents[2]
@@ -19,56 +24,71 @@ class BeamData:
 
     Args:
         name: The name of the example.
-        num_real: The number of realizations of this example.
         gdim: The geometric dimension of the problem.
         length: The length of the beam.
         height: The height of the beam.
         nx: Number of coarse grid cells (subdomains) in x.
         ny: Number of coarse grid cells (subdomains) in y.
-        num_intervals: Number of (interval) cells per edge.
         geom_deg: Degree for geometry interpolation.
         fe_deg: FE degree.
         poisson_ratio: The poisson ratio of the material.
         youngs_modulus: The Young's modulus (reference value) of the material.
         mu_range: The value range of each parameter component.
         mu_bar: Reference parameter value (Radius of parent domain).
+        training_set_seed: Seed to generate seeds for each configuration.
         parameters: Dict of dict mapping parameter name to parameter dimension for each configuration etc.
         configurations: The configurations, i.e. oversampling problems.
         distributions: The distributions used in the randomized range finder.
+        methods: Methods used for basis construction.
+        range_product: The inner product to use (rrf, projection error).
+        rrf_ttol: Target tolerance range finder.
+        rrf_ftol: Failure tolerance range finder.
+        rrf_num_testvecs: Number of testvectors range finder.
+        pod_rtol: Relative tolerance for POD.
+        run_mode: DEBUG or PRODUCTION mode. Affects mesh sizes, training set, realizations.
 
     """
 
     name: str = "parageom"
-    num_real: int = 1
     gdim: int = 2
     length: float = 10.0
     height: float = 1.0
     nx: int = 10
     ny: int = 1
-    num_intervals: int = 20
     geom_deg: int = 2
     fe_deg: int = 2
     poisson_ratio: float = 0.3
     youngs_modulus: float = 20e3
-    parameters: dict = field(default_factory=lambda: {
-        "subdomain": Parameters({"R": 1}),
-        "global": Parameters({"R": 10}),
-        "left": Parameters({"R": 2}),
-        "right": Parameters({"R": 2}),
-        "inner": Parameters({"R": 3}),
-        })
+    parameters: dict = field(
+        default_factory=lambda: {
+            "subdomain": Parameters({"R": 1}),
+            "global": Parameters({"R": 10}),
+            "left": Parameters({"R": 2}),
+            "right": Parameters({"R": 2}),
+            "inner": Parameters({"R": 3}),
+        }
+    )
     mu_range: tuple[float, float] = (0.1, 0.3)
     mu_bar: float = 0.2
+    training_set_seed: int = 767667058
     configurations: tuple[str, str, str] = ("left", "inner", "right")
-    distributions: tuple[str, ...] = ("normal", )
+    distributions: tuple[str, ...] = ("normal",)
+    methods: tuple[str, ...] = ("hapod",)
+    range_product: str = "h1"
+    rrf_ttol: float = 5e-2
+    rrf_ftol: float = 1e-15
+    rrf_num_testvecs: int = 20
+    pod_rtol: float = 1e-5
+    run_mode: str = "DEBUG"
 
     def __post_init__(self):
+        """Creates directory structure"""
+
         self.grids_path.mkdir(exist_ok=True, parents=True)
-        self.logs_path.mkdir(exist_ok=True, parents=True)
         self.figures_path.mkdir(exist_ok=True, parents=True)
 
-        # have a separate folder for each configuration to store
-        # the physical oversampling meshes
+        # Have a separate folder for each configuration to store
+        # the physical oversampling meshes.
         # naming convention: oversampling_{index}.msh
         # store the training set, such that via {index} the
         # parameter value can be determined
@@ -76,10 +96,38 @@ class BeamData:
             p = self.grids_path / config
             p.mkdir(exist_ok=True, parents=True)
 
+        # NOTE realizations
+        # We need to compute several realizations since we are using a randomized method.
+        # To be able to compare the different ROMs (sets of basis functions), the training
+        # set should be the same for all realizations. Therefore, the same physical meshes
+        # are used for each realization.
+
+        if self.run_mode == "DEBUG":
+            self.num_real = 1
+            self.num_intervals = 12
+        elif self.run_mode == "PRODUCTION":
+            self.num_real = 20
+            self.num_intervals = 20
+        else:
+            raise NotImplementedError
+
+        for nr in range(self.num_real):
+            self.real_folder(nr).mkdir(exist_ok=True, parents=True)
+            for name in self.methods:
+                # self.method_folder(nr, name).mkdir(exist_ok=True, parents=True)
+                self.logs_path(nr, name).mkdir(exist_ok=True, parents=True)
+                self.bases_path(nr, name).mkdir(exist_ok=True, parents=True)
+            (self.method_folder(nr, "hapod") / "snapshots").mkdir(exist_ok=True, parents=True)
+
+
     @property
     def plotting_style(self) -> Path:
         """eccomas proceedings mplstyle"""
         return ROOT / "src/proceedings.mplstyle"
+
+    @property
+    def figures_path(self) -> Path:
+        return ROOT / "figures" / f"{self.name}"
 
     @property
     def rf(self) -> Path:
@@ -87,23 +135,32 @@ class BeamData:
         return WORK / f"{self.name}"
 
     @property
-    def figures_path(self) -> Path:
-        return ROOT / "figures" / f"{self.name}"
-
-    @property
     def grids_path(self) -> Path:
         return self.rf / "grids"
+
+    def real_folder(self, nr: int) -> Path:
+        """realization folder"""
+        return self.rf / f"realization_{nr:02}"
+
+    def method_folder(self, nr: int, name: str) -> Path:
+        """training strategy / method folder"""
+        return self.real_folder(nr) / name
+
+    def logs_path(self, nr: int, name: str) -> Path:
+        return self.method_folder(nr, name) / "logs"
+
+    def bases_path(self, nr: int, name: str, distr: str = "normal") -> Path:
+        """
+        Args:
+            nr: realization index.
+            name: name of the training strategy / method.
+            distr: distribution.
+        """
+        return self.method_folder(nr, name) / f"bases/{distr}"
 
     def training_set(self, config: str) -> Path:
         """Write training set as numpy array"""
         return self.grids_path / config / "training_set.out"
-
-    @property
-    def logs_path(self) -> Path:
-        return self.rf / "logs"
-
-    def bases_path(self, distr: str, name: str) -> Path:
-        return self.rf / f"bases/{distr}/{name}"
 
     def coarse_grid(self, config: str) -> Path:
         """Global coarse grid"""
@@ -130,19 +187,33 @@ class BeamData:
                 return "quad"
 
     def oversampling_domain(self, config: str, k: int) -> Path:
-        """Oversampling domain for config and index k of parameter value"""
+        """Oversampling domain for config and index k of training set element"""
         return self.grids_path / config / f"oversampling_domain_{k:03}.xdmf"
+
+    def target_subdomain(self, config: str, k: int) -> Path:
+        """Target subdomain for config and index k of training set element"""
+        return self.grids_path / config / f"target_subdomain_{k:03}.xdmf"
 
     def config_to_cell(self, config: str) -> int:
         """Maps config to global cell index."""
         map = {"inner": 4, "left": 0, "right": 9}
         return map[config]
 
+    def config_to_target_cell(self, config: str) -> int:
+        """Maps config to cell index of target subdomain."""
+        map = {"inner": 1, "left": 0, "right": 1}
+        return map[config]
+
     def ntrain(self, config: str) -> int:
         """Define size of training set"""
-        # FIXME ntrain
-        map = {"left": 10, "inner": 10, "right": 10}
-        return map[config]
+        if self.run_mode == "DEBUG":
+            map = {"left": 10, "inner": 10, "right": 10}
+            return map[config]
+        elif self.run_mode == "PRODUCTION":
+            map = {"left": 40, "inner": 60, "right": 40}
+            return map[config]
+        else:
+            raise NotImplementedError
 
     def cell_to_config(self, cell: int) -> str:
         """Maps global cell index to config."""
@@ -151,39 +222,39 @@ class BeamData:
         config = map.get(cell, "inner")
         return config
 
-    def local_basis_npz(self, distr: str, name: str, cell: int) -> Path:
+    def local_basis_npz(self, nr: int, name: str, distr: str, cell: int) -> Path:
         """final basis for loc rom assembly"""
-        dir = self.bases_path(distr, name)
-        return dir / f"basis_{cell:03}.npz"
+        dir = self.bases_path(nr, name, distr)
+        return dir / f"basis_{cell:02}.npz"
 
-    def loc_rom_error(self, distr: str, name: str) -> Path:
-        """loc ROM error relative to FOM"""
-        return self.rf / f"loc_rom_error_{distr}_{name}.csv"
+    # def loc_rom_error(self, distr: str, name: str) -> Path:
+    #     """loc ROM error relative to FOM"""
+    #     return self.rf / f"loc_rom_error_{distr}_{name}.csv"
 
-    @property
-    def fom_minimization_data(self) -> Path:
-        """FOM minimization data"""
-        return self.rf / "fom_minimization_data.out"
-
-    def rom_minimization_data(self, distr: str, name: str) -> Path:
-        """ROM minimization data"""
-        return self.rf / f"rom_minimization_data_{distr}_{name}.out"
-
-    @property
-    def minimization_data_table(self) -> Path:
-        return self.rf / "minimization_data.csv"
-
-    @property
-    def minimization_comparison_table(self) -> Path:
-        return self.rf / "minimization_comparison.csv"
-
-    @property
-    def fig_fom_opt(self) -> Path:
-        return self.figures_path / "fig_fom_opt.pdf"
-
-    @property
-    def fig_rom_opt(self) -> Path:
-        return self.figures_path / "fig_rom_opt.pdf"
+    # @property
+    # def fom_minimization_data(self) -> Path:
+    #     """FOM minimization data"""
+    #     return self.rf / "fom_minimization_data.out"
+    #
+    # def rom_minimization_data(self, distr: str, name: str) -> Path:
+    #     """ROM minimization data"""
+    #     return self.rf / f"rom_minimization_data_{distr}_{name}.out"
+    #
+    # @property
+    # def minimization_data_table(self) -> Path:
+    #     return self.rf / "minimization_data.csv"
+    #
+    # @property
+    # def minimization_comparison_table(self) -> Path:
+    #     return self.rf / "minimization_comparison.csv"
+    #
+    # @property
+    # def fig_fom_opt(self) -> Path:
+    #     return self.figures_path / "fig_fom_opt.pdf"
+    #
+    # @property
+    # def fig_rom_opt(self) -> Path:
+    #     return self.figures_path / "fig_rom_opt.pdf"
 
     @property
     def realizations(self) -> Path:
@@ -198,126 +269,159 @@ class BeamData:
         realizations = seed.generate_state(self.num_real)
         np.save(outpath, realizations)
 
+    def log_edge_basis(self, nr: int, method: str, distr: str, config: str) -> Path:
+        return self.logs_path(nr, method) / f"edge_basis_{distr}_{config}.log"
 
-# class BeamProblem(MultiscaleProblemDefinition):
-#     def __init__(self, coarse_grid: str, fine_grid: str):
-#         super().__init__(coarse_grid, fine_grid)
-#         self.setup_coarse_grid(2)
-#         self.setup_fine_grid()
-#         self.build_edge_basis_config(self.cell_sets)
-#
-#     def config_to_cell(self, config: str) -> int:
-#         """Maps config to global cell index."""
-#         map = {"inner": 4, "left": 0, "right": 9}
-#         return map[config]
-#
-#     @property
-#     def cell_sets(self):
-#         """Returns cell sets for definition of edge basis configuration"""
-#         # the order is important
-#         # this way e.g. cell 1 will load modes for the left edge
-#         # from basis generated for cell 1 (config inner)
-#         cell_sets = {
-#             "inner": set([1, 2, 3, 4, 5, 6, 7, 8]),
-#             "left": set([0]),
-#             "right": set([9]),
-#         }
-#         return cell_sets
-#
-#     @property
-#     def cell_sets_oversampling(self):
-#         """Returns cell sets that define oversampling domains"""
-#         # see preprocessing.py
-#         cells = {
-#             "inner": set([3, 4, 5]),
-#             "left": set([0, 1]),
-#             "right": set([8, 9]),
-#         }
-#         return cells
-#
-#     @property
-#     def boundaries(self):
-#         x = self.coarse_grid.grid.geometry.x
-#         xmin = np.amin(x, axis=0)
-#         xmax = np.amax(x, axis=0)
-#         return {
-#             "origin": (int(101), point_at([xmin[0], xmin[1], xmin[2]])),
-#             "bottom_right": (int(102), point_at([xmax[0], xmin[1], xmin[2]])),
-#         }
-#
-#     def get_xmin_omega_in(self, cell_index: Optional[int] = None) -> np.ndarray:
-#         """Returns coordinate xmin of target subdomain"""
-#         if cell_index is not None:
-#             assert cell_index in (0, 4, 9)
-#         if cell_index == 0:
-#             xmin = np.array([[0.0, 0.0, 0.0]])
-#         elif cell_index == 4:
-#             xmin = np.array([[4.0, 0.0, 0.0]])
-#         elif cell_index == 9:
-#             xmin = np.array([[9.0, 0.0, 0.0]])
-#         else:
-#             raise NotImplementedError
-#         return xmin
-#
-#     def get_dirichlet(self, cell_index: Optional[int] = None) -> Union[dict, None]:
-#         _, origin = self.boundaries["origin"]
-#         _, bottom_right = self.boundaries["bottom_right"]
-#         if cell_index is not None:
-#             assert cell_index in (0, 4, 9)
-#         if cell_index == 0:
-#             u_origin = np.array([0.0, 0.0], dtype=default_scalar_type)
-#             dirichlet = {"value": u_origin, "boundary": origin, "method": "geometrical"}
-#         elif cell_index == 4:
-#             dirichlet = None
-#         elif cell_index == 9:
-#             u_bottom_right = default_scalar_type(0.0)
-#             dirichlet = {
-#                 "value": u_bottom_right,
-#                 "boundary": bottom_right,
-#                 "sub": 1,
-#                 "entity_dim": 0,
-#                 "method": "geometrical",
-#             }
-#         else:
-#             raise NotImplementedError
-#         return dirichlet
-#
-#     def get_neumann(self, cell_index: Optional[int] = None):
-#         # is the same for all oversampling problems
-#         return None
-#
-#     def get_kernel_set(self, cell_index: int) -> tuple[int, ...]:
-#         """return indices of rigid body modes to be used"""
-#         if cell_index is not None:
-#             assert cell_index in (0, 4, 9)
-#         if cell_index == 0:
-#             # left, only rotation is free
-#             return (2,)
-#         elif cell_index == 4:
-#             # inner, use all rigid body modes
-#             return (0, 1, 2)
-#         elif cell_index == 9:
-#             # right, only trans y is constrained
-#             return (0, 2)
-#
-#     def get_gamma_out(self, cell_index: Optional[int] = None) -> Callable:
-#         if cell_index is not None:
-#             assert cell_index in (0, 4, 9)
-#         if cell_index == 0:
-#             gamma_out = plane_at(2.0, "x")
-#         elif cell_index == 4:
-#             left = plane_at(3.0, "x")
-#             right = plane_at(6.0, "x")
-#             gamma_out = lambda x: np.logical_or(left(x), right(x))
-#         elif cell_index == 9:
-#             gamma_out = plane_at(8.0, "x")
-#         else:
-#             raise NotImplementedError
-#         return gamma_out
+    def log_extension(self, nr: int, method: str, distr: str, cell: int) -> Path:
+        """logfile for extension"""
+        return self.logs_path(nr, method) / f"extension_{distr}_{cell:02}.log"
+
+    def hapod_pod_data(self, nr: int, distr: str, conf: str) -> Path:
+        """POD data (HAPOD)"""
+        return self.method_folder(nr, "hapod") / f"pod_data_{distr}_{conf}.json"
+
+    def rrf_bases_length(self, nr: int, method: str, distr: str, conf: str) -> Path:
+        """length of each edge basis after rrf algo in training strategy"""
+        return self.method_folder(nr, method) / f"rrf_bases_length_{distr}_{conf}.npz"
+
+    def fine_scale_edge_modes_npz(self, nr: int, method: str, distr: str, conf: str) -> Path:
+        """final fine scale edge bases"""
+        return self.bases_path(nr, method, distr) / f"fine_scale_edge_modes_{conf}.npz"
+
+    def fine_scale_modes_bp(self, nr: int, method: str, distr: str, cell: int) -> Path:
+        """fine scale modes after extension"""
+        return self.bases_path(nr, method, distr) / f"fine_scale_functions_{cell:02}.bp"
+
+    def hapod_singular_values_npz(self, nr: int, distr: str, conf: str) -> Path:
+        """singular values of POD"""
+        return self.method_folder(nr, "hapod") / f"singular_values_{distr}_{conf}.npz"
+
+    def hapod_snapshots(self, nr: int, distr: str, config: str, sample_index: int) -> Path:
+        """displacement snapshots to be used for EI"""
+        dir = self.method_folder(nr, "hapod") / "snapshots"
+        return dir / f"snapshots_u_{distr}_{config}_{sample_index:03}.xdmf"
+
+
+class BeamProblem(MultiscaleProblemDefinition):
+    def __init__(self, coarse_grid: Path, fine_grid: Path):
+        super().__init__(coarse_grid, fine_grid)
+        gdim = 2
+        self.setup_coarse_grid(MPI.COMM_WORLD, gdim)
+        self.setup_fine_grid(MPI.COMM_WORLD, gdim)
+        self.build_edge_basis_config(self.cell_sets)
+
+    def config_to_cell(self, config: str) -> int:
+        """Maps config to global cell index."""
+        map = {"inner": 4, "left": 0, "right": 9}
+        return map[config]
+
+    @property
+    def cell_sets(self):
+        """Returns cell sets for definition of edge basis configuration"""
+        # the order is important
+        # this way e.g. cell 1 will load modes for the left edge
+        # from basis generated for cell 1 (config inner)
+        cell_sets = {
+            "inner": set([1, 2, 3, 4, 5, 6, 7, 8]),
+            "left": set([0]),
+            "right": set([9]),
+        }
+        return cell_sets
+
+    @property
+    def cell_sets_oversampling(self):
+        """Returns cell sets that define oversampling domains"""
+        # see preprocessing.py
+        cells = {
+            "inner": set([3, 4, 5]),
+            "left": set([0, 1]),
+            "right": set([8, 9]),
+        }
+        return cells
+
+    @property
+    def boundaries(self):
+        x = self.coarse_grid.grid.geometry.x
+        xmin = np.amin(x, axis=0)
+        xmax = np.amax(x, axis=0)
+        return {
+            "origin": (int(101), point_at([xmin[0], xmin[1], xmin[2]])),
+            "bottom_right": (int(102), point_at([xmax[0], xmin[1], xmin[2]])),
+        }
+
+    def get_xmin_omega_in(self, cell_index: Optional[int] = None) -> np.ndarray:
+        """Returns coordinate xmin of target subdomain"""
+        if cell_index is not None:
+            assert cell_index in (0, 4, 9)
+        if cell_index == 0:
+            xmin = np.array([[0.0, 0.0, 0.0]])
+        elif cell_index == 4:
+            xmin = np.array([[4.0, 0.0, 0.0]])
+        elif cell_index == 9:
+            xmin = np.array([[9.0, 0.0, 0.0]])
+        else:
+            raise NotImplementedError
+        return xmin
+
+    def get_dirichlet(self, cell_index: Optional[int] = None) -> Union[dict, None]:
+        _, origin = self.boundaries["origin"]
+        _, bottom_right = self.boundaries["bottom_right"]
+        if cell_index is not None:
+            assert cell_index in (0, 4, 9)
+        if cell_index == 0:
+            u_origin = np.array([0.0, 0.0], dtype=default_scalar_type)
+            dirichlet = {"value": u_origin, "boundary": origin, "method": "geometrical"}
+        elif cell_index == 4:
+            dirichlet = None
+        elif cell_index == 9:
+            u_bottom_right = default_scalar_type(0.0)
+            dirichlet = {
+                "value": u_bottom_right,
+                "boundary": bottom_right,
+                "sub": 1,
+                "entity_dim": 0,
+                "method": "geometrical",
+            }
+        else:
+            raise NotImplementedError
+        return dirichlet
+
+    def get_neumann(self, cell_index: Optional[int] = None):
+        # is the same for all oversampling problems
+        return None
+
+    def get_kernel_set(self, cell_index: int) -> tuple[int, ...]:
+        """return indices of rigid body modes to be used"""
+        if cell_index is not None:
+            assert cell_index in (0, 4, 9)
+        if cell_index == 0:
+            # left, only rotation is free
+            return (2,)
+        elif cell_index == 4:
+            # inner, use all rigid body modes
+            return (0, 1, 2)
+        elif cell_index == 9:
+            # right, only trans y is constrained
+            return (0, 2)
+
+    def get_gamma_out(self, cell_index: Optional[int] = None) -> Callable:
+        if cell_index is not None:
+            assert cell_index in (0, 4, 9)
+        if cell_index == 0:
+            gamma_out = plane_at(2.0, "x")
+        elif cell_index == 4:
+            left = plane_at(3.0, "x")
+            right = plane_at(6.0, "x")
+            gamma_out = lambda x: np.logical_or(left(x), right(x))
+        elif cell_index == 9:
+            gamma_out = plane_at(8.0, "x")
+        else:
+            raise NotImplementedError
+        return gamma_out
 
 
 if __name__ == "__main__":
     data = BeamData(name="beam")
-    realizations = np.load(data.realizations)
-    print(realizations)
+    # realizations = np.load(data.realizations)
+    # print(realizations)
     # problem = BeamProblem(data.coarse_grid.as_posix(), data.fine_grid.as_posix())
