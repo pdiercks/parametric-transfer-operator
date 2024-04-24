@@ -1,6 +1,7 @@
 """tasks for the beam example with parametrized geometry"""
 
 import os
+import shutil
 from pathlib import Path
 from doit.tools import run_once
 from .definitions import BeamData, ROOT
@@ -9,6 +10,31 @@ os.environ["PYMOR_COLORS_DISABLE"] = "1"
 example = BeamData(name="parageom")
 SRC = ROOT / "src" / f"{example.name}"
 CONFIGS = example.configurations
+
+
+def rm_rf(task, dryrun):
+    """Removes any target.
+
+    If the target is a file it is removed as usual.
+    If the target is a dir, it is removed even if non-empty
+    in contrast to the default implementation of `doit.task.clean_targets`.
+    """
+    for target in sorted(task.targets, reverse=True):
+        if os.path.isfile(target):
+            print("%s - removing file '%s'" % (task.name, target))
+            if not dryrun:
+                os.remove(target)
+        elif os.path.isdir(target):
+            if os.listdir(target):
+                msg = "%s - removing dir (although not empty) '%s'"
+                print(msg % (task.name, target))
+                if not dryrun:
+                    shutil.rmtree(target)
+            else:
+                msg = "%s - removing dir '%s'"
+                print(msg % (task.name, target))
+                if not dryrun:
+                    os.rmdir(target)
 
 
 def with_h5(xdmf: Path) -> list[Path]:
@@ -119,7 +145,7 @@ def task_hapod():
     """ParaGeom: Construct edge basis via HAPOD"""
     module = "src.parageom.hapod"
     nworkers = 4  # number of workers in pool
-    distr = "normal"
+    distr = example.distributions[0]
     for nreal in range(example.num_real):
         for config in CONFIGS:
             deps = [SRC / "hapod.py"]
@@ -145,3 +171,27 @@ def task_hapod():
                 "targets": targets,
                 "clean": True,
             }
+
+
+def task_extension():
+    """ParaGeom: Extend fine scale modes and write final basis"""
+    module = "src.parageom.extension"
+    num_cells = example.nx * example.ny
+    distr = example.distributions[0]
+    for nreal in range(example.num_real):
+        for method in example.methods:
+            for cell_index in range(num_cells):
+                config = example.cell_to_config(cell_index)
+                yield {
+                    "name": f"{method}_{cell_index}",
+                    "file_dep": [example.fine_scale_edge_modes_npz(nreal, method, distr, config)],
+                    "actions": [
+                        "python3 -m {} {} {} {} {}".format(module, nreal, method, distr, cell_index)
+                    ],
+                    "targets": [
+                        example.local_basis_npz(nreal, method, distr, cell_index),
+                        example.fine_scale_modes_bp(nreal, method, distr, cell_index),
+                        example.log_extension(nreal, method, distr, cell_index),
+                    ],
+                    "clean": [rm_rf],
+                }

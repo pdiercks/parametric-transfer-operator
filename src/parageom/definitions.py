@@ -225,7 +225,7 @@ class BeamData:
     def local_basis_npz(self, nr: int, name: str, distr: str, cell: int) -> Path:
         """final basis for loc rom assembly"""
         dir = self.bases_path(nr, name, distr)
-        return dir / f"basis_{cell:03}.npz"
+        return dir / f"basis_{cell:02}.npz"
 
     # def loc_rom_error(self, distr: str, name: str) -> Path:
     #     """loc ROM error relative to FOM"""
@@ -272,6 +272,10 @@ class BeamData:
     def log_edge_basis(self, nr: int, method: str, distr: str, config: str) -> Path:
         return self.logs_path(nr, method) / f"edge_basis_{distr}_{config}.log"
 
+    def log_extension(self, nr: int, method: str, distr: str, cell: int) -> Path:
+        """logfile for extension"""
+        return self.logs_path(nr, method) / f"extension_{distr}_{cell:02}.log"
+
     def hapod_pod_data(self, nr: int, distr: str, conf: str) -> Path:
         """POD data (HAPOD)"""
         return self.method_folder(nr, "hapod") / f"pod_data_{distr}_{conf}.json"
@@ -282,7 +286,11 @@ class BeamData:
 
     def fine_scale_edge_modes_npz(self, nr: int, method: str, distr: str, conf: str) -> Path:
         """final fine scale edge bases"""
-        return self.method_folder(nr, method) / f"fine_scale_edge_modes_{distr}_{conf}.npz"
+        return self.bases_path(nr, method, distr) / f"fine_scale_edge_modes_{conf}.npz"
+
+    def fine_scale_modes_bp(self, nr: int, method: str, distr: str, cell: int) -> Path:
+        """fine scale modes after extension"""
+        return self.bases_path(nr, method, distr) / f"fine_scale_functions_{cell:02}.bp"
 
     def hapod_singular_values_npz(self, nr: int, distr: str, conf: str) -> Path:
         """singular values of POD"""
