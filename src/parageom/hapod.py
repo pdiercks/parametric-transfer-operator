@@ -381,6 +381,13 @@ def approximate_range(args, example, index, logfilename):
 
     fullsnapshots.append(U_orth)
 
+    # ---- ensemble mean subtraction ----
+    num_snapshots = len(fullsnapshots)
+    snaps = fullsnapshots.copy()
+    snaps.scal(1. / num_snapshots)
+    ensemble_mean = sum(snaps)
+    fullsnapshots.axpy(-1., ensemble_mean)
+
     viz = FenicsxVisualizer(fullsnapshots.space)
     viz.visualize(fullsnapshots, filename=example.hapod_snapshots(args.nreal, distribution, configuration, index).as_posix())
 
@@ -500,6 +507,13 @@ def main(args):
     pod_data = {}
 
     for edge, snapshot_data in snapshots.items():
+        # ---- ensemble mean subtraction ----
+        num_snapshots = len(snapshot_data)
+        snaps = snapshot_data.copy()
+        snaps.scal(1. / num_snapshots)
+        ensemble_mean = sum(snaps)
+        snapshot_data.axpy(-1., ensemble_mean)
+        # ---- ensemble mean subtraction ----
         modes, svals = pod(
             snapshot_data,
             product=range_products[edge],

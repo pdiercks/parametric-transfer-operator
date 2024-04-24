@@ -149,6 +149,9 @@ def task_hapod():
     for nreal in range(example.num_real):
         for config in CONFIGS:
             deps = [SRC / "hapod.py"]
+            # global grids needed for BeamProblem initialization
+            deps.append(example.coarse_grid("global"))
+            deps.append(example.global_parent_domain)
             targets = []
             for k in range(example.ntrain(config)):
                 deps.append(example.oversampling_domain(config, k))
