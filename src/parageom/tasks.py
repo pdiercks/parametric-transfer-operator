@@ -1,12 +1,19 @@
 """tasks for the beam example with parametrized geometry"""
 
 import os
+from pathlib import Path
+from doit.tools import run_once
 from .definitions import BeamData, ROOT
 
 os.environ["PYMOR_COLORS_DISABLE"] = "1"
 example = BeamData(name="parageom")
 SRC = ROOT / "src" / f"{example.name}"
 CONFIGS = example.configurations
+
+
+def with_h5(xdmf: Path) -> list[Path]:
+    files = [xdmf, xdmf.with_suffix(".h5")]
+    return files
 
 
 def task_parent_unit_cell():
@@ -45,23 +52,20 @@ def task_training_sets():
             criterion="center",
             random_state=seed,
         )
-        # for left and right I will get the same meshes actually
-        # but this should not be a problem
         with open(targets[0], "wb") as fh:
             dump({"training_set": train, "seed": seed}, fh)
 
-    # FIXME training set should not depend on realization !!!
-    raise ValueError("training set should not depend on realization")
-    realizations = np.load(example.realizations)
-    random_seeds = np.random.SeedSequence(realizations[0]).generate_state(len(CONFIGS))
+    seed = example.training_set_seed
+    random_seeds = np.random.SeedSequence(seed).generate_state(len(CONFIGS))
 
     for config, seed in zip(CONFIGS, random_seeds):
         yield {
             "name": config,
-            "file_dep": [example.parent_unit_cell],
+            "file_dep": [],
             "actions": [(create_training_set, [config, seed])],
             "targets": [example.training_set(config)],
             "clean": True,
+            "uptodate": [run_once],
         }
 
 
@@ -76,6 +80,7 @@ def task_coarse_grid():
                 "actions": ["python3 -m {} {} {} --output %(targets)s".format(module, config, "coarse")],
                 "targets": [example.coarse_grid(config)],
                 "clean": True,
+                "uptodate": [run_once],
                 }
 
 
@@ -99,8 +104,8 @@ def task_oversampling_grids():
         ntrain = example.ntrain(config)
         targets = []
         for k in range(ntrain):
-            targets.append(example.oversampling_domain(config, k))
-            targets.append(example.target_subdomain(config, k))
+            targets.extend(with_h5(example.oversampling_domain(config, k)))
+            targets.extend(with_h5(example.target_subdomain(config, k)))
         yield {
                 "name": config,
                 "file_dep": [example.training_set(config), example.coarse_grid(config)],
@@ -129,11 +134,11 @@ def task_hapod():
                     )
                 ],
                 "targets": [
-                    example.log_hapod(distr, config),
-                    example.fine_scale_edge_modes_npz(distr, config, "hapod"),
-                    example.loc_singular_values_npz(distr, config),
-                    example.hapod_rrf_bases_length(distr, config),
-                    example.pod_data(distr, config),
+                    example.log_edge_basis(nreal, "hapod", distr, config),
+                    example.rrf_bases_length(nreal, "hapod", distr, config),
+                    example.fine_scale_edge_modes_npz(nreal, "hapod", distr, config),
+                    example.hapod_singular_values_npz(nreal, distr, config),
+                    example.hapod_pod_data(nreal, distr, config),
                 ],
                 "clean": True,
             }
