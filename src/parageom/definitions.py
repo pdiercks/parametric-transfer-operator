@@ -117,6 +117,8 @@ class BeamData:
                 # self.method_folder(nr, name).mkdir(exist_ok=True, parents=True)
                 self.logs_path(nr, name).mkdir(exist_ok=True, parents=True)
                 self.bases_path(nr, name).mkdir(exist_ok=True, parents=True)
+            (self.method_folder(nr, "hapod") / "snapshots").mkdir(exist_ok=True, parents=True)
+
 
     @property
     def plotting_style(self) -> Path:
@@ -286,13 +288,18 @@ class BeamData:
         """singular values of POD"""
         return self.method_folder(nr, "hapod") / f"singular_values_{distr}_{conf}.npz"
 
+    def hapod_snapshots(self, nr: int, distr: str, config: str, sample_index: int) -> Path:
+        """displacement snapshots to be used for EI"""
+        dir = self.method_folder(nr, "hapod") / "snapshots"
+        return dir / f"snapshots_u_{distr}_{config}_{sample_index:03}.xdmf"
+
 
 class BeamProblem(MultiscaleProblemDefinition):
     def __init__(self, coarse_grid: Path, fine_grid: Path):
         super().__init__(coarse_grid, fine_grid)
         gdim = 2
         self.setup_coarse_grid(MPI.COMM_WORLD, gdim)
-        self.setup_fine_grid(MPI.COMM_WORLD)
+        self.setup_fine_grid(MPI.COMM_WORLD, gdim)
         self.build_edge_basis_config(self.cell_sets)
 
     def config_to_cell(self, config: str) -> int:

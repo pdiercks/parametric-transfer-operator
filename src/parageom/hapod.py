@@ -8,7 +8,6 @@ from collections import defaultdict
 
 # import concurrent.futures
 import numpy as np
-from scipy.linalg import eigh
 from scipy.sparse import csr_array
 from scipy.sparse.linalg import LinearOperator, eigsh
 from scipy.special import erfinv
@@ -16,21 +15,18 @@ from time import perf_counter
 
 from dolfinx import mesh, fem, default_scalar_type
 
-from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator
+from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator, FenicsxVisualizer
 from pymor.algorithms.pod import pod
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
 from pymor.operators.interface import Operator
 from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.operators.constructions import NumpyConversionOperator
-from pymor.parameters.base import Parameters, ParameterSpace
 from pymor.tools.random import new_rng
 from pymor.reductors.basic import extend_basis
 from pymor.tools.table import format_table
 
-from multi.misc import x_dofs_vectorspace
 from multi.problems import TransferProblem
-from multi.sampling import correlation_matrix, create_random_values
 from multi.projection import orthogonal_part, fine_scale_part
 from multi.dofmap import QuadrilateralDofLayout
 from multi.product import InnerProduct
@@ -268,24 +264,23 @@ def adaptive_edge_rrf_normal(
     return pod_bases, range_products, num_solves, snapshots
 
 
-def approximate_range(example, configuration, distribution, index):
+def approximate_range(args, example, index, logfilename):
     """Approximates range of the transfer operator.
 
     Args:
+        args: Program args.
         example: Example data class.
-        configuration: the oversampling problem configuration.
-        distribution: distribution used for random samples.
         index: Index of training sample.
+        logfilename: Logfile.
 
     """
     from .definitions import BeamProblem
     from .locmor import discretize_oversampling_problem
 
-    logger = getLogger(
-        "range_approximation",
-        level="INFO",
-        filename=example.log_hapod(distribution, configuration).as_posix(),
-    )
+    distribution = args.distribution
+    configuration = args.configuration
+
+    logger = getLogger("range_approximation", level="INFO", filename=logfilename)
     pid = os.getpid()
     logger.info(
         f"{pid=},\tApproximating range of T for {index=} using {distribution=}.\n"
@@ -299,7 +294,9 @@ def approximate_range(example, configuration, distribution, index):
         raise NotImplementedError
 
     # Multiscale problem definition
-    beam_problem = BeamProblem(example.coarse_grid("global"), example.global_parent_domain)
+    beam_problem = BeamProblem(
+        example.coarse_grid("global"), example.global_parent_domain
+    )
     cell_index = beam_problem.config_to_cell(configuration)
     gamma_out = beam_problem.get_gamma_out(cell_index)
     dirichlet = beam_problem.get_dirichlet(cell_index)
@@ -384,8 +381,8 @@ def approximate_range(example, configuration, distribution, index):
 
     fullsnapshots.append(U_orth)
 
-    # TODO write full snapshots to file
-    # to be used in training stage for EI
+    viz = FenicsxVisualizer(fullsnapshots.space)
+    viz.visualize(fullsnapshots, filename=example.hapod_snapshots(args.nreal, distribution, configuration, index).as_posix())
 
     # fine scale part of neumann snapshot
     u_fine = fem.Function(transfer_problem.subproblem.V)
@@ -437,14 +434,12 @@ def approximate_range(example, configuration, distribution, index):
 def main(args):
     from .tasks import example
 
-    set_defaults(
-        {
-            "pymor.core.logger.getLogger.filename": example.log_hapod(
-                args.distribution, args.configuration
-            ).as_posix(),
-        }
-    )
-    logger = getLogger(Path(__file__).stem, level="INFO")
+    method = Path(__file__).stem  # hapod
+    logfilename = example.log_edge_basis(
+        args.nreal, method, args.distribution, args.configuration
+    ).as_posix()
+    set_defaults({"pymor.core.logger.getLogger.filename": logfilename})
+    logger = getLogger(method, level="INFO")
 
     # The training set was already defined in order to generate physical meshes.
     # Here, the actual parameter values are not needed, but for each mesh I have
@@ -477,7 +472,7 @@ def main(args):
     ss = seed_seqs_rrf[index]
     with new_rng(ss):
         bases, range_products = approximate_range(
-            example, args.configuration, args.distribution, index
+            args, example, index, logfilename
         )
 
     snapshots = {}
@@ -490,7 +485,7 @@ def main(args):
         ss = seed_seqs_rrf[index]
         with new_rng(ss):
             bases, _ = approximate_range(
-                example, args.configuration, args.distribution, index
+                args, example, index, logfilename
             )
         for edge, rb in bases.items():
             snapshots[edge].append(rb)
@@ -521,19 +516,25 @@ def main(args):
     # write output: fine scale edge modes, singular values, rrf bases length
     np.savez(
         example.fine_scale_edge_modes_npz(
-            args.distribution, args.configuration, "hapod"
+            args.nreal, method, args.distribution, args.configuration
         ),
         **pod_modes,
     )
     np.savez(
-        example.loc_singular_values_npz(args.distribution, args.configuration),
+        example.hapod_singular_values_npz(
+            args.nreal, args.distribution, args.configuration
+        ),
         **pod_svals,
     )
     np.savez(
-        example.hapod_rrf_bases_length(args.distribution, args.configuration),
+        example.rrf_bases_length(
+            args.nreal, method, args.distribution, args.configuration
+        ),
         **rrf_bases_length,
     )
-    with example.pod_data(args.distribution, args.configuration).open("w") as fh:
+    with example.hapod_pod_data(args.nreal, args.distribution, args.configuration).open(
+        "w"
+    ) as fh:
         fh.write(json.dumps(pod_data))
 
 
@@ -554,11 +555,7 @@ if __name__ == "__main__":
         help="The type of oversampling problem.",
         choices=("inner", "left", "right"),
     )
-    parser.add_argument(
-        "nreal",
-        type=int,
-        help="The n-th realization of the problem."
-    )
+    parser.add_argument("nreal", type=int, help="The n-th realization of the problem.")
     parser.add_argument(
         "--max_workers", type=int, default=4, help="The max number of workers."
     )

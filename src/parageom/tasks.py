@@ -108,7 +108,7 @@ def task_oversampling_grids():
             targets.extend(with_h5(example.target_subdomain(config, k)))
         yield {
                 "name": config,
-                "file_dep": [example.training_set(config), example.coarse_grid(config)],
+                "file_dep": [example.parent_unit_cell, example.training_set(config), example.coarse_grid(config)],
                 "actions": ["python3 -m {} {} {}".format(module, config, "oversampling")],
                 "targets": targets,
                 "clean": True,
@@ -119,12 +119,21 @@ def task_hapod():
     """ParaGeom: Construct edge basis via HAPOD"""
     module = "src.parageom.hapod"
     nworkers = 4  # number of workers in pool
-    deps = [SRC / "hapod.py"]
     distr = "normal"
     for nreal in range(example.num_real):
         for config in CONFIGS:
+            deps = [SRC / "hapod.py"]
+            targets = []
             for k in range(example.ntrain(config)):
                 deps.append(example.oversampling_domain(config, k))
+                targets.extend(with_h5(
+                        example.hapod_snapshots(nreal, distr, config, k)
+                        ))
+            targets.append(example.log_edge_basis(nreal, "hapod", distr, config))
+            targets.append(example.rrf_bases_length(nreal, "hapod", distr, config))
+            targets.append(example.fine_scale_edge_modes_npz(nreal, "hapod", distr, config))
+            targets.append(example.hapod_singular_values_npz(nreal, distr, config))
+            targets.append(example.hapod_pod_data(nreal, distr, config))
             yield {
                 "name": config+":"+str(nreal),
                 "file_dep": deps,
@@ -133,12 +142,6 @@ def task_hapod():
                         module, distr, config, nreal, nworkers
                     )
                 ],
-                "targets": [
-                    example.log_edge_basis(nreal, "hapod", distr, config),
-                    example.rrf_bases_length(nreal, "hapod", distr, config),
-                    example.fine_scale_edge_modes_npz(nreal, "hapod", distr, config),
-                    example.hapod_singular_values_npz(nreal, distr, config),
-                    example.hapod_pod_data(nreal, distr, config),
-                ],
+                "targets": targets,
                 "clean": True,
             }
