@@ -1,5 +1,7 @@
+# import collections
 # TODO
 # consider using fem.assemble_vector & friends instead of explicitly importing petsc functions?
+import dolfinx as df
 from dolfinx.fem.petsc import (
     create_matrix,
     assemble_matrix,
@@ -13,6 +15,186 @@ from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator
 from pymor.operators.interface import Operator
 from pymor.operators.constructions import VectorOperator, VectorFunctional
 from pymor.vectorarrays.numpy import NumpyVectorSpace
+
+import ufl
+import numpy as np
+
+# is this useful?
+# can recover function spaces always from form
+# FormRestriction = collections.namedtuple("FormRestriction", [])
+
+# from ufl/finiteelement/form.py
+# this method not exist anymore for ufl version > 2023.1.1
+def replace_integral_domains(form, common_domain):
+    """Given a form and a domain, assign a common integration domain to
+    all integrals.
+    Does not modify the input form (``Form`` should always be
+    immutable).  This is to support ill formed forms with no domain
+    specified, sometimes occurring in pydolfin, e.g. assemble(1*dx,
+    mesh=mesh).
+    """
+    domains = form.ufl_domains()
+    if common_domain is not None:
+        gdim = common_domain.geometric_dimension()
+        tdim = common_domain.topological_dimension()
+        if not all(
+            (
+                gdim == domain.geometric_dimension()
+                and tdim == domain.topological_dimension()
+            )
+            for domain in domains
+        ):
+            raise ValueError(
+                "Common domain does not share dimensions with form domains."
+            )
+
+    reconstruct = False
+    integrals = []
+    for itg in form.integrals():
+        domain = itg.ufl_domain()
+        if domain != common_domain:
+            itg = itg.reconstruct(domain=common_domain)
+            reconstruct = True
+        integrals.append(itg)
+    if reconstruct:
+        form = ufl.Form(integrals)
+    return form
+
+
+def restrict_form(form, S, R, V_r_source, V_r_range, interpolation_data=None):
+    """Restrict `form` to submesh.
+
+    Args:
+        form: The UFL form to restrict.
+        S: Source space.
+        R: Range space.
+        V_r_source: Source space on submesh.
+        V_r_range: Range space on submesh.
+    """
+
+    if S != R:
+        assert all(arg.ufl_function_space() != S for arg in form.arguments())
+
+    args = tuple(
+        (
+            df.fem.function.ufl.argument.Argument(V_r_range, arg.number(), arg.part())
+            if arg.ufl_function_space() == R
+            else arg
+        )
+        for arg in form.arguments()
+    )
+
+    # FIXME
+    # restrict_form for FenicsOperator may require different method
+    # there, fem.Function other than unknow solution `u` are not allowed?
+
+    new_coeffs = {}
+    for function in form.coefficients():
+        # replace coefficients (fem.Function)
+        name = function.name
+        new_coeffs[function] = df.fem.Function(V_r_source, name=name)
+        new_coeffs[function].interpolate(function, nmm_interpolation_data=interpolation_data) 
+
+    # FIXME
+    # the original form contains some fem.Function that is parameter dependent
+    # it's up to the user to update via code in `param_setter`
+    # However, the form restriction is done only once and the connection
+    # between `function` and `new_coeffs[function]` is lost.
+
+    # How can `new_coeffs[function]` be updated to new mu?
+
+    # method `param_setter` must be defined before `FenicsxMatrixBasedOperator.restricted`
+    # is called.
+
+    # Workaround: call `restrict_form` each time the operator is evaluated
+    # if form contains coefficients
+
+    # OTHER APPROACH
+    # do not restrict form at all, but work with custom assembler that only
+    # loops over `affected_cells`.
+    # Implementation of custom assembler is quite involved (technical) though.
+
+    submesh = V_r_source.mesh
+    form_r = replace_integral_domains(
+            form(*args, coefficients=new_coeffs),
+            submesh.ufl_domain()
+            )
+
+    return form_r
+
+
+def blocked(dofs: np.typing.NDArray[np.int32], bs: int) -> np.typing.NDArray[np.int32]:
+    ndofs = dofs.size
+    blocked = np.zeros((ndofs, bs), dtype=dofs.dtype)
+    for i in range(bs):
+        blocked[:, i] = i
+    r = blocked + np.repeat(dofs[:, np.newaxis], bs, axis=1) * bs
+    return r.flatten()
+
+
+def unblock(dofs: np.typing.NDArray[np.int32], bs: int) -> np.typing.NDArray[np.int32]:
+    ndofs = dofs.size // bs
+    blocked = np.zeros((ndofs, bs), dtype=dofs.dtype)
+    for i in range(bs):
+        blocked[:, i] = i
+    r = (dofs.reshape(ndofs, bs) - blocked) // bs
+    return r[:, 0].flatten()
+
+
+def build_dof_map(V, cell_map, V_r, dofs) -> np.ndarray:
+    """Computes interpolation dofs of V_r.
+
+    Args:
+        V: The function space.
+        cell_map: Indices of parent cells.
+        V_r: The restricted space.
+        dofs: Interpolation DOFs of V.
+    """
+    assert V.dofmap.bs == V_r.dofmap.bs
+
+    subdomain = V_r.mesh
+    tdim = subdomain.topology.dim
+    num_cells = subdomain.topology.index_map(tdim).size_local
+
+    parents = []
+    children = []
+
+    for cell in range(num_cells):
+        parent_cell = cell_map[cell]
+        parent_dofs = blocked(V.dofmap.cell_dofs(parent_cell), V.dofmap.bs)
+        child_dofs = blocked(V_r.dofmap.cell_dofs(cell), V_r.dofmap.bs)
+
+        parents.append(parent_dofs)
+        children.append(child_dofs)
+    parents = np.unique(np.hstack(parents))
+    children = np.unique(np.hstack(children))
+    indx = np.nonzero(parents[:, np.newaxis] - dofs[np.newaxis, :]==0)[0]
+    return children[indx]
+
+
+def affected_cells(V, dofs):
+    """Returns affected cells.
+
+    Args:
+        V: The FE space.
+        dofs: Interpolation dofs for restricted evaluation.
+    """
+    domain = V.mesh
+    dofmap = V.dofmap
+
+
+    affected_cells = set()
+    num_cells = domain.topology.index_map(domain.topology.dim).size_local
+    for cell in range(num_cells):
+        cell_dofs = dofmap.cell_dofs(cell)
+        for dof in cell_dofs:
+            for b in range(dofmap.bs):
+                if dof * dofmap.bs + b in dofs:
+                    affected_cells.add(cell)
+                    continue
+
+    affected_cells = np.array(list(sorted(affected_cells)), dtype=np.int32)
+    return affected_cells
 
 
 class FenicsxMatrixBasedOperator(Operator):
@@ -77,7 +259,7 @@ class FenicsxMatrixBasedOperator(Operator):
                 parameters_own[k] = v
         self.parameters_own = parameters_own
         self.bcs = bcs or list()
-        self.compiled_form = fem.form(
+        self.compiled_form = df.fem.form(
             form, form_compiler_options=form_compiler_options, jit_options=jit_options
         )
         if len(form.arguments()) == 2:
@@ -94,6 +276,19 @@ class FenicsxMatrixBasedOperator(Operator):
                 constant.value = mu[name]
         else:
             self.param_setter(mu)
+
+        # FIXME: move the below to RestrictedFenicsxMatrixBasedOperator??
+        # This operator could get `op = FenicsxMatrixOperator(r_form)` and `original_form` as arg
+        # implement its assemble method
+        # and simply call _restrict_form everytime
+
+        # FIXME
+        # always restrict form after updating to new parameter value
+        # if the form contains coefficients.
+        # This is necessary, since the original coefficient is replaced
+        # by a new coefficient on the restricted mesh.
+        # if self.form.coefficients():
+        #     self._restrict_form()
 
     def _assemble_matrix(self):
         self.disc.zeroEntries()
@@ -150,9 +345,85 @@ class FenicsxMatrixBasedOperator(Operator):
             V, initial_guess=initial_guess, least_squares=least_squares
         )
 
+    def _restrict_form(self):
+        # FIXME
+        # this does not work for linear forms
+        form = self.form
+        source_space = self.source.V
+        range_space = self.range.V
+        sub_source = self.V_r_source
+        sub_range = self.V_r_range
+        interpolation_data = self.interpolation_data
 
-if __name__ == "__main__":
-    # test FenicsxMatrixBasedOperator
+        rform = restrict_form(form, source_space, range_space, sub_source, sub_range, interpolation_data=interpolation_data)
+        return rform
+
+    def restricted(self, dofs):
+        # FIXME
+        # this does not work for linear forms
+
+        # TODO: compute affected cells
+        S = self.source.V
+        R = self.range.V
+        domain = S.mesh
+        cells = affected_cells(S, dofs)
+
+        # TODO: compute source dofs based on affected cells
+        source_dofmap = S.dofmap
+        source_dofs = set()
+        for cell_index in cells:
+            local_dofs = blocked(source_dofmap.cell_dofs(cell_index), source_dofmap.bs)
+            source_dofs.update(local_dofs)
+        source_dofs = np.array(sorted(source_dofs), dtype=local_dofs.dtype)
+        # TODO: build submesh
+        tdim = domain.topology.dim
+        submesh, cell_map, _, _ = df.mesh.create_submesh(domain, tdim, cells)
+
+        breakpoint()
+        # prepare data structures for form restriction
+        # cannot create class members after init ...
+        V_r_source = df.fem.functionspace(submesh, S.ufl_element())
+        V_r_range = df.fem.functionspace(submesh, R.ufl_element())
+
+        interpolation_data = None
+        if self.form.coefficients():
+            interpolation_data = df.fem.create_nonmatching_meshes_interpolation_data(
+                    V_r_source.mesh,
+                    V_r_source.element,
+                    S.mesh)
+
+        # ### restrict form to submesh
+        restricted_form = restrict_form(self.form, S, R, V_r_source, V_r_range, interpolation_data=interpolation_data)
+        # TODO: support repeated form restriction for evaluation of RestrictedFenicsxMatrixBasedOperator
+        # It might be possible to do this only once, if we can find coefficients of form
+        # and restricted form, and update according `param_setter`
+
+        # TODO: restrict Dirichlet BCs
+        # ### compute dof mapping source
+        restricted_source_dofs = build_dof_map(S, cell_map, V_r_source, source_dofs)
+
+        # ### compute dof mapping range
+        restricted_range_dofs = build_dof_map(R, cell_map, V_r_range, dofs)
+
+        # sanity checks
+        assert source_dofs.size == V_r_source.dofmap.bs * V_r_source.dofmap.index_map.size_local
+        assert restricted_source_dofs.size == source_dofs.size
+        assert restricted_range_dofs.size == dofs.size
+
+
+def test_restriction():
+    from mpi4py import MPI
+    domain = df.mesh.create_unit_square(MPI.COMM_SELF, 4, 4)
+    V = df.fem.functionspace(domain, ("P", 1, (2,)))
+    u = ufl.TrialFunction(V)
+    v = ufl.TestFunction(V)
+    mass = ufl.inner(u, v) * ufl.dx
+    op = FenicsxMatrixBasedOperator(mass, {})
+    magic = np.array([0, 1, 47], dtype=np.int32)
+    op.restricted(magic)
+
+
+def test():
     import numpy as np
     from mpi4py import MPI
     import ufl
@@ -167,8 +438,6 @@ if __name__ == "__main__":
     # ### Test 1: Scalar Constant, bilinear form
     c_scalar = fem.Constant(domain, default_scalar_type(0.0))
     poisson = ufl.inner(ufl.grad(u), ufl.grad(v)) * c_scalar * ufl.dx
-    # poisson.coefficients() --> list[fem.Function, ...]
-    # poisson.constants() --> list[fem.Constant, ...]
 
     params = {"s": c_scalar} #, "v": c_vec}
     operator = FenicsxMatrixBasedOperator(poisson, params)
@@ -221,3 +490,11 @@ if __name__ == "__main__":
     op2 = op.assemble(mu2)
     mat2 = op2.as_range_array().to_numpy()
     assert np.linalg.norm(mat1 + mat2) < 1e-6
+
+    # TODO: test with bcs
+    # TODO: test restricted evaluation
+
+
+if __name__ == "__main__":
+    # test()
+    test_restriction()

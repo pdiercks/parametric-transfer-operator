@@ -45,7 +45,7 @@ def build_dof_map(V, cell_map, V_r, dofs) -> np.ndarray:
     return children[indx]
 
 
-if __name__ == "__main__":
+def test():
     from mpi4py import MPI
     from dolfinx import fem, mesh, default_scalar_type
     import ufl
@@ -82,3 +82,7 @@ if __name__ == "__main__":
     other = fem.assemble_vector(fem.form(form))
 
     assert np.allclose(vector.array[magic_dofs], other.array[map])
+
+
+if __name__ == "__main__":
+    test()
