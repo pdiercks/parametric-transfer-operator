@@ -144,7 +144,8 @@ def test(form_str):
     from .test_build_dofmap import build_dof_map
 
     num_cells = 20
-    domain = mesh.create_unit_interval(MPI.COMM_WORLD, num_cells)
+    # domain = mesh.create_unit_interval(MPI.COMM_WORLD, num_cells)
+    domain = mesh.create_unit_square(MPI.COMM_WORLD, 4, 4)
     V = fem.functionspace(domain, ("P", 1))
     u = ufl.TrialFunction(V)
     v = ufl.TestFunction(V)
@@ -189,33 +190,20 @@ def test(form_str):
     other = csr_array(R.getValuesCSR()[::-1]).todense()
 
     restricted_source_dofs = build_dof_map(V, cell_map, Vsub, source_dofs)
+    breakpoint()
     assert np.allclose(matrix[np.ix_(source_dofs, source_dofs)], other[np.ix_(restricted_source_dofs, restricted_source_dofs)])
     breakpoint()
 
-    # Workaround for Implementation of `param_setter` for restricted form in particular case
-    # of ParaGeom example.
+    # FIXME
+    # the tests passed for the unit interval, but fail for the unit square
+    # for the current configuration using
+    # source_dofs[1:]
+    # restricted_source_dofs[1:]
+    # the test passes
 
-    # def param_setter(self, mu):
-    #     auxiliary_problem.solve(mu) # update d
-    #
-    # class ParaGeomOperator(FenicsxMatrixBasedOperator):
-    #     def __init__(self, ...):
-    #         ...
-    #
-    #     def _set_mu(self, mu):
-    #         self.param_setter(mu)
-    #         self._restrict_form() # update restricted d
+    # make a MWE where you can count dofs, but the test does not pass
+    # might be a problem with `build_dof_map`
 
-    # Actually, the restricted operator would need to take care of this.
-    # So, the `RestrictedMatrixBasedOperator` should do this by default
-    # if coefficients are present in the restricted form.
-
-    # def restricted(self, dofs):
-    #     ...
-    #     lots of code
-    #     ...
-    #     op_r = FenicsxMatrixBasedOperator(restricted_form, params, param_setter)
-    #     return RestrictedFeniscxMatrixBasedOperator(op_r, ...)
 
 
 if __name__ == "__main__":
