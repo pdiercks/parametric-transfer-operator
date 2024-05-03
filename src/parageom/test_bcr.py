@@ -1,149 +1,225 @@
 """boundary condition restriction"""
 
-from typing import Union, NamedTuple, Any, Callable, Optional
-
 import numpy as np
-import numpy.typing as npt
 
 from mpi4py import MPI
 import dolfinx as df
-
-from multi.misc import x_dofs_vectorspace
-
-
-class BCGeom(NamedTuple):
-    value: Union[df.fem.Function, df.fem.Constant, npt.NDArray[Any]]
-    locator: Callable
-    V: df.fem.FunctionSpace
-
-
-class BCTopo(NamedTuple):
-    value: Union[df.fem.Function, df.fem.Constant, npt.NDArray[Any]]
-    entities: npt.NDArray[np.int32]
-    entity_dim: int
-    V: df.fem.FunctionSpace
-    sub: Optional[int] = None
+from .matrix_based_operator import (
+    _affected_cells,
+    _build_dof_map,
+    BCGeom,
+    BCTopo,
+    _create_dirichlet_bcs,
+    _restrict_bc_topo
+)
+from multi.boundary import point_at
 
 
-def _create_dirichlet_bcs(bcs: list[Union[BCGeom, BCTopo]]) -> list[df.fem.DirichletBC]:
-    """Creates list of `df.fem.DirichletBC`.
+def test(bc_specs, V):
+    bcs = _create_dirichlet_bcs(bc_specs)
+    ndofs = V.dofmap.bs * V.dofmap.index_map.size_local
 
-    Args:
-        bcs: The BC specification.
-    """
-    r = list()
-    for nt in bcs:
-        space = None
-        if isinstance(nt, BCGeom):
-            space = nt.V
-            dofs = df.fem.locate_dofs_geometrical(nt.V, nt.locator)
-        elif isinstance(nt, BCTopo):
-            space = nt.V.sub(nt.sub) if nt.sub is not None else nt.V
-            dofs = df.fem.locate_dofs_topological(nt.V, nt.entity_dim, nt.entities)
-        else:
-            raise TypeError
-        try:
-            bc = df.fem.dirichletbc(nt.value, dofs, space)
-        except TypeError:
-            bc = df.fem.dirichletbc(nt.value, dofs)
-        r.append(bc)
-    return r
+    # restricted code to get data structures required
+    # magic_dofs = set()
+    # nmagic = 6
+    # while len(magic_dofs) < nmagic:
+    #     magic_dofs.add(np.random.randint(0, ndofs))
+    # magic_dofs = np.array(list(sorted(magic_dofs)), dtype=np.int32)
+    magic_dofs = np.array([1, 7, 15, 20, 23, 44], dtype=np.int32)
+    cells = _affected_cells(V, magic_dofs)
 
-
-def test():
-    from .matrix_based_operator import affected_cells, build_dof_map
-
-    domain = df.mesh.create_unit_square(MPI.COMM_WORLD, 4, 4)
-    value_shape = (2, )
-    V = df.fem.functionspace(domain, ("P", 1, value_shape))
-
-    def bottom(x):
-        return np.isclose(x[1], 0.0)
-
-    # g = df.fem.Constant(domain, (df.default_scalar_type(9.), ) * value_shape[0])
-    g = df.fem.Constant(domain, df.default_scalar_type(9.))
+    source_dofmap = V.dofmap
+    source_dofs = set()
+    for cell_index in cells:
+        local_dofs = source_dofmap.cell_dofs(cell_index)
+        for ld in local_dofs:
+            for b in range(source_dofmap.bs):
+                source_dofs.add(ld * source_dofmap.bs + b)
+    source_dofs = np.array(sorted(source_dofs), dtype=magic_dofs.dtype)
 
     tdim = domain.topology.dim
+    submesh, _, parent_vertex_indices, _ = df.mesh.create_submesh(
+        domain, tdim, cells
+    )
     fdim = tdim - 1
-
-    # mybc = BCGeom(g, bottom, V)
-    bottom_facets = df.mesh.locate_entities_boundary(domain, fdim, bottom)
-    bottom_verts = df.mesh.locate_entities_boundary(domain, 0, bottom)
-    mybc = BCTopo(g, bottom_verts, fdim, V, sub=0)
-    bcs_V = _create_dirichlet_bcs([mybc])
-
-    magic_dofs = np.array([0, 1, 6, 13], dtype=np.int32)
-    cells = affected_cells(V, magic_dofs)
-
-    submesh, cell_map, vertex_map, _ = df.mesh.create_submesh(domain, tdim, cells)
-    V_r_source = df.fem.functionspace(submesh, V.ufl_element())
-
-    # the submesh contains all cells sharing magic dofs
-    # it may be that those cells contain facets of some boundary although the selected
-    # magic dofs are not associated with those facets
-    # Therefore, the restricted BC may have dofs on the original boundary.
-    # Thus, it does not suffice to check via the dof coordinates as below.
-    # A better check would be to assemble matrix, apply bc, restrict to magic dofs,
-    # compare final entries of interest.
-
-    # facets = np.zeros(mesh.num_facets(), dtype=np.uint)
-    # facets[bc.markers()] = 1
-    # facets_r = facets[parent_facet_indices]
-    # sub_domains = df.MeshFunction('size_t', submesh, mesh.topology().dim() - 1)
-    # sub_domains.array()[:] = facets_r
-    #
-    # bc_r = df.DirichletBC(V_r_source, bc.value(), sub_domains, 1, bc.method())
-
     submesh.topology.create_connectivity(tdim, fdim)
+    # make sure entity-to-cell connectivities are computed
+    submesh.topology.create_connectivity(fdim, tdim)
+    submesh.topology.create_connectivity(0, tdim)
+
+    # is there a way to only get the parents on the boundary??
+    # I don't need all of them
+
+    # only use the entities in the BCTopo spec to create a submesh !
+    # Would need to do this for every BC though,
+    # but this should not pose a problem
     c2f = submesh.topology.connectivity(tdim, fdim)
     sub_facets = set()
     for ci in range(submesh.topology.index_map(tdim).size_local):
         facets = c2f.links(ci)
         for fac in facets:
+            # TODO
+            # somehow determine if on_boundary? here?
+            breakpoint()
+            print("on boundary?")
             sub_facets.add(fac)
     sub_facets = np.array(list(sorted(sub_facets)), dtype=np.int32)
+    _, parent_facet_indices, _, _ = df.mesh.create_submesh(
+        submesh, fdim, sub_facets
+    )
 
-    facet_mesh, facet_map, _, _ = df.mesh.create_submesh(submesh, fdim, sub_facets)
+    # determine parent facets on submesh boundary
+    def everywhere(x):
+        return np.full(x[0].shape, True, dtype=bool)
 
-    num_verts = V.mesh.topology.index_map(0).size_local
-    vertices = np.zeros(num_verts, dtype=np.int32)
-    vertices[mybc.entities] = 99
-    verts_r = vertices[vertex_map]
-    vert_tags = np.nonzero(verts_r)[0]
+    # FIXME this is the whole boundary
+    # but only 'bottom' is needed according to nt.entities
+    # boundary_facets = df.mesh.locate_entities_boundary(submesh, fdim, everywhere)
+    # boundary_vertices = df.mesh.locate_entities_boundary(submesh, 0, everywhere)
 
-    # num_facets = V.mesh.topology.index_map(fdim).size_local
-    # facets = np.zeros(num_facets, dtype=np.int32)
-    # facets[mybc.entities] = 99
-    # facets_r = facets[facet_map]
-    # facet_tags = np.nonzero(facets_r)[0]
+    # I have all parent facet indices
+    # nt.entities has all parent facets on the Dirichlet boundary
+    # How can I determine which of nt.entities are also on the boundary of submesh?
+    breakpoint()
 
-    # rbc = BCTopo(g, facet_tags, fdim, V_r_source)
-    rbc = BCTopo(g, vert_tags, fdim, V_r_source.sub(0))
-    # r_dofs = df.fem.locate_dofs_topological(V_r_source, fdim, facet_tags)
-    # rbc = df.fem.dirichletbc(g, r_dofs, V_r_source)
+    # parent_boundary_entities = {fdim: np.intersect1d(parent_facet_indices, boundary_facets), 0: np.intersect1d(parent_vertex_indices, boundary_vertices)}
+    # parent_boundary_entities = {fdim: parent_facet_indices, 0: parent_vertex_indices}
 
-    bcs_V_r_range = _create_dirichlet_bcs([rbc])
+    V_r_source = df.fem.functionspace(submesh, V.ufl_element())
+    V_r_range = df.fem.functionspace(submesh, V.ufl_element())
+    interp_data = df.fem.create_nonmatching_meshes_interpolation_data(
+        V_r_source.mesh, V_r_source.element, V.mesh
+    )
 
-    xdofs = x_dofs_vectorspace(V)
-    other = x_dofs_vectorspace(V_r_source)
+    r_bcs = list()
+    for nt in bc_specs:
+        if isinstance(nt.value, df.fem.Function):
+            # interpolate function to submesh
+            g = df.fem.Function(V_r_source, name=nt.value.name)
+            g.interpolate(nt.value, nmm_interpolation_data=interp_data)
+        else:
+            # g is of type df.fem.Constant or np.ndarray
+            g = nt.value
 
-    dofs = bcs_V[0]._cpp_object.dof_indices()[0]
-    rdofs = bcs_V_r_range[0]._cpp_object.dof_indices()[0]
+        if isinstance(nt, BCGeom):
+            rbc = BCGeom(g, nt.locator, V_r_source)
+        elif isinstance(nt, BCTopo):
+            # num_parent_entities = V.mesh.topology.index_map(nt.entity_dim).size_local # ghosts?
+            # rbc = _restrict_bc_topo(
+            #     nt, g, V_r_source, num_parent_entities, parent_boundary_entities[nt.entity_dim]
+            # )
+            rbc = _restrict_bc_topo()
+            # nt.entities -> build submesh only with parent boundary
+            # but I also need to know the facet indicies in the submesh I build earlier
+            # cannot simply build a new suubmesh
+        else:
+            raise TypeError
+        r_bcs.append(rbc)
+
+
+    bcs_V_r_range = _create_dirichlet_bcs(r_bcs)
 
     # check which magic_dofs are also bc dofs
-    restricted_range_dofs = build_dof_map(V, cell_map, V_r_source, magic_dofs)
-    is_member = np.in1d(magic_dofs, dofs)
-    is_rmem = np.in1d(restricted_range_dofs, rdofs)
+    r_source_dofs = _build_dof_map(V, V_r_source, source_dofs, interp_data)
+    r_range_dofs = _build_dof_map(V, V_r_range, magic_dofs, interp_data)
 
-    err = xdofs[magic_dofs[is_member]] - other[restricted_range_dofs[is_rmem]]
-    assert np.sum(err) < 1e-9
+    assert r_range_dofs.size == magic_dofs.size
 
-    # testing
-    # build bc objects for V
-    # build bc objects for Vsub
-    # extract dof indices from bc objects
-    # compare coordinates of bc dofs via V.tabulate_dof_coordinates()
+    u = df.fem.Function(V)
+    u.x.array[:] = np.zeros(ndofs)
+    # u.x.array[:] = np.random.rand(ndofs)
+    df.fem.set_bc(u.x.array, bcs)
+    print(np.sum(u.x.array))
+
+    u_r = np.zeros(source_dofs.size)
+    df.fem.set_bc(u_r, bcs_V_r_range)
+    print(np.sum(u_r)) # this should be smaller than value above
+    # somehow I get to many bc dofs in the restriction
+    # number of bc dofs can only decrease
+
+
+    def get_dof_indices(bcs):
+        r = []
+        for bc in bcs:
+            ds = bc._cpp_object.dof_indices()[0]
+            r.append(ds)
+        return np.hstack(r)
+
+    bcdofs = get_dof_indices(bcs)
+    r_bcdofs = get_dof_indices(bcs_V_r_range)
+
+    num_magic_in_bcs = 0
+    for dof in magic_dofs:
+        if dof in bcdofs:
+            num_magic_in_bcs += 1
+
+    num_magic_in_rbcs = 0
+    for dof in r_range_dofs:
+        if dof in r_bcdofs:
+            num_magic_in_rbcs += 1
+
+    if not num_magic_in_bcs == num_magic_in_rbcs:
+        breakpoint()
+
+    ref = u.x.array[magic_dofs]
+    result = u_r[r_range_dofs]
+    err = ref - result
+    breakpoint()
+    assert np.sum(np.abs(err)) < 1e-12
+
+    # its very difficult to find a case
+    # where one can understand what exactly is going wrong
+    # that also exhibits the bug
+
+    # the simple trackable cases
+    # do pass this test
+
+    # hardcoded now the magic dofs
+    # maybe we can now use this setup to track
+    # down the bug
+
+    # check where the affected cells are
+    # check whether number of facets on bottom is correctly
+    # returned by the submesh ...
 
 
 if __name__ == "__main__":
-    test()
+    nx = ny = 4
+    domain = df.mesh.create_unit_square(MPI.COMM_WORLD, nx, ny)
+    value_shape = (2,)
+    degree = 1
+    V = df.fem.functionspace(domain, ("P", degree, value_shape))
+
+    def bottom(x):
+        return np.isclose(x[1], 0.0)
+
+    def right(x):
+        return np.isclose(x[0], 1.0)
+
+    def left(x):
+        return np.isclose(x[0], 0.0)
+
+    # geometrical bcs
+    u_bottom: df.fem.Function = df.fem.Function(V) # type: ignore
+    u_bottom.interpolate(lambda x: (np.sin(2 * np.pi * x[0]), x[1]))
+    u_right = df.fem.Constant(domain, (df.default_scalar_type(12.7), ) * value_shape[0])
+    bcs_geom = [
+            BCGeom(u_bottom, bottom, V), BCGeom(u_right, right, V)
+            ]
+    # test(bcs_geom, V)
+
+    # topological bcs
+    tdim = domain.topology.dim
+    fdim = tdim - 1
+    bottom_facets = df.mesh.locate_entities_boundary(domain, fdim, bottom)
+    left_facets = df.mesh.locate_entities_boundary(domain, fdim, left)
+    upper_right = point_at([1., 1.])
+    upper_right_vertex = df.mesh.locate_entities_boundary(domain, 0, upper_right)
+    u_top_x = np.array((123.), dtype=df.default_scalar_type)
+    bcs_topo = [
+        BCTopo(u_right, bottom_facets, fdim, V),
+        # BCTopo(df.default_scalar_type(78.), left_facets, fdim, V, sub=1),
+        # BCTopo(u_top_x, upper_right_vertex, 0, V, sub=0)
+    ]
+    print(f"{bottom_facets.size=}")
+    test(bcs_topo, V)

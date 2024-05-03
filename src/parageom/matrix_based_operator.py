@@ -47,10 +47,10 @@ def _create_dirichlet_bcs(bcs: list[Union[BCGeom, BCTopo]]) -> list[df.fem.Diric
         space = None
         if isinstance(nt, BCGeom):
             space = nt.V
-            dofs = df.fem.locate_dofs_geometrical(nt.V, nt.locator)
+            dofs = df.fem.locate_dofs_geometrical(space, nt.locator)
         elif isinstance(nt, BCTopo):
             space = nt.V.sub(nt.sub) if nt.sub is not None else nt.V
-            dofs = df.fem.locate_dofs_topological(nt.V, nt.entity_dim, nt.entities)
+            dofs = df.fem.locate_dofs_topological(space, nt.entity_dim, nt.entities)
         else:
             raise TypeError
         try:
@@ -63,7 +63,7 @@ def _create_dirichlet_bcs(bcs: list[Union[BCGeom, BCTopo]]) -> list[df.fem.Diric
 
 # from ufl/finiteelement/form.py
 # this method not exist anymore for ufl version > 2023.1.1
-def replace_integral_domains(form, common_domain):
+def _replace_integral_domains(form, common_domain):
     """Given a form and a domain, assign a common integration domain to
     all integrals.
     Does not modify the input form (``Form`` should always be
@@ -99,7 +99,7 @@ def replace_integral_domains(form, common_domain):
     return form
 
 
-def restrict_form(form, S, R, V_r_source, V_r_range, interpolation_data=None):
+def _restrict_form(form, S, R, V_r_source, V_r_range, interpolation_data=None):
     """Restrict `form` to submesh.
 
     Args:
@@ -131,7 +131,9 @@ def restrict_form(form, S, R, V_r_source, V_r_range, interpolation_data=None):
         # replace coefficients (fem.Function)
         name = function.name
         new_coeffs[function] = df.fem.Function(V_r_source, name=name)
-        new_coeffs[function].interpolate(function, nmm_interpolation_data=interpolation_data) 
+        new_coeffs[function].interpolate(
+            function, nmm_interpolation_data=interpolation_data
+        )
 
     # FIXME
     # the original form contains some fem.Function that is parameter dependent
@@ -153,64 +155,46 @@ def restrict_form(form, S, R, V_r_source, V_r_range, interpolation_data=None):
     # Implementation of custom assembler is quite involved (technical) though.
 
     submesh = V_r_source.mesh
-    form_r = replace_integral_domains(
-            form(*args, coefficients=new_coeffs),
-            submesh.ufl_domain()
-            )
+    form_r = _replace_integral_domains(
+        form(*args, coefficients=new_coeffs), submesh.ufl_domain()
+    )
 
     return form_r
 
 
-def blocked(dofs: npt.NDArray[np.int32], bs: int) -> npt.NDArray[np.int32]:
-    ndofs = dofs.size
-    blocked = np.zeros((ndofs, bs), dtype=dofs.dtype)
-    for i in range(bs):
-        blocked[:, i] = i
-    r = blocked + np.repeat(dofs[:, np.newaxis], bs, axis=1) * bs
-    return r.flatten()
-
-
-# def unblock(dofs: np.typing.NDArray[np.int32], bs: int) -> np.typing.NDArray[np.int32]:
-#     ndofs = dofs.size // bs
-#     blocked = np.zeros((ndofs, bs), dtype=dofs.dtype)
-#     for i in range(bs):
-#         blocked[:, i] = i
-#     r = (dofs.reshape(ndofs, bs) - blocked) // bs
-#     return r[:, 0].flatten()
-
-
-def build_dof_map(V, cell_map, V_r, dofs) -> np.ndarray:
-    """Computes interpolation dofs of V_r.
-
-    Args:
-        V: The function space.
-        cell_map: Indices of parent cells.
-        V_r: The restricted space.
-        dofs: Interpolation DOFs of V.
+def _build_dof_map(V, V_r, dofs, interp_data) -> npt.NDArray[np.int32]:
     """
-    assert V.dofmap.bs == V_r.dofmap.bs
+    Args:
+        V: Full space.
+        V_r: restricted space.
+        dofs: magic dofs.
+    """
+    u = df.fem.Function(V)
+    u_vec = u.vector
 
-    subdomain = V_r.mesh
-    tdim = subdomain.topology.dim
-    num_cells = subdomain.topology.index_map(tdim).size_local
+    u_r = df.fem.Function(V_r)
+    u_r_vec = u_r.vector
 
-    parents = []
-    children = []
+    restricted_dofs = []
+    for dof in dofs:
+        u_vec.zeroEntries()
+        u_vec.array[dof] = 1
+        u_r.interpolate(u, nmm_interpolation_data=interp_data)
+        u_r_array = u_r_vec.array
+        if not np.all(
+            np.logical_or(np.abs(u_r_array) < 1e-10, np.abs(u_r_array - 1.0) < 1e-10)
+        ):
+            raise NotImplementedError
+        r_dof = np.where(np.abs(u_r_array - 1.0) < 1e-10)[0]
+        if not len(r_dof) == 1:
+            raise NotImplementedError
+        restricted_dofs.append(r_dof[0])
+    restricted_dofs = np.array(restricted_dofs, dtype=np.int32)
+    assert len(set(restricted_dofs)) == len(set(dofs))
+    return restricted_dofs
 
-    for cell in range(num_cells):
-        parent_cell = cell_map[cell]
-        parent_dofs = blocked(V.dofmap.cell_dofs(parent_cell), V.dofmap.bs)
-        child_dofs = blocked(V_r.dofmap.cell_dofs(cell), V_r.dofmap.bs)
 
-        parents.append(parent_dofs)
-        children.append(child_dofs)
-    parents = np.unique(np.hstack(parents))
-    children = np.unique(np.hstack(children))
-    indx = np.nonzero(parents[:, np.newaxis] - dofs[np.newaxis, :]==0)[0]
-    return children[indx]
-
-
-def affected_cells(V, dofs):
+def _affected_cells(V, dofs):
     """Returns affected cells.
 
     Args:
@@ -219,7 +203,6 @@ def affected_cells(V, dofs):
     """
     domain = V.mesh
     dofmap = V.dofmap
-
 
     affected_cells = set()
     num_cells = domain.topology.index_map(domain.topology.dim).size_local
@@ -233,6 +216,24 @@ def affected_cells(V, dofs):
 
     affected_cells = np.array(list(sorted(affected_cells)), dtype=np.int32)
     return affected_cells
+
+
+def _restrict_bc_topo(nt: BCTopo, g, V_r, num_parents, parents):
+    """restrict BCTopo to space V_r.
+
+    Args:
+        nt: Topological BC specification.
+        g: The restricted value.
+        V_r: The restricted function space.
+        num_parents: Number of entities of dim `nt.entity_dim` of the full mesh.
+        parents: Parent entity indices corresponding to submesh entities.
+    """
+    dim = nt.entity_dim
+    entities = np.zeros(num_parents, dtype=np.int32)
+    entities[nt.entities] = 99
+    entities_r = entities[parents]
+    tags = np.nonzero(entities_r)[0]
+    return BCTopo(g, tags, dim, V_r, sub=nt.sub)
 
 
 class FenicsxMatrixBasedOperator(Operator):
@@ -372,30 +373,39 @@ class FenicsxMatrixBasedOperator(Operator):
         )
 
     def restricted(self, dofs):
-        # FIXME
-        # this does not work for linear forms
+
+        if len(self.form.arguments()) == 1:
+            raise NotImplementedError
 
         # TODO: compute affected cells
         S = self.source.V
         R = self.range.V
         domain = S.mesh
-        cells = affected_cells(S, dofs)
+        cells = _affected_cells(S, dofs)
 
         # TODO: compute source dofs based on affected cells
         source_dofmap = S.dofmap
         source_dofs = set()
         for cell_index in cells:
-            local_dofs = blocked(source_dofmap.cell_dofs(cell_index), source_dofmap.bs)
-            source_dofs.update(local_dofs)
+            local_dofs = source_dofmap.cell_dofs(cell_index)
+            for ld in local_dofs:
+                for b in range(source_dofmap.bs):
+                    source_dofs.add(ld * source_dofmap.bs + b)
         source_dofs = np.array(sorted(source_dofs), dtype=dofs.dtype)
 
         # TODO: build submesh
         tdim = domain.topology.dim
-        submesh, cell_map, parent_vertex_indices, _ = df.mesh.create_submesh(domain, tdim, cells)
+        submesh, _, parent_vertex_indices, _ = df.mesh.create_submesh(
+            domain, tdim, cells
+        )
 
         # TODO: build submesh of dim=fdim for restriction of BCTopo
         fdim = tdim - 1
+        # make sure entity-to-cell connectivities are computed
         submesh.topology.create_connectivity(tdim, fdim)
+        submesh.topology.create_connectivity(fdim, tdim)
+        submesh.topology.create_connectivity(0, tdim)
+
         c2f = submesh.topology.connectivity(tdim, fdim)
         sub_facets = set()
         for ci in range(submesh.topology.index_map(tdim).size_local):
@@ -403,22 +413,24 @@ class FenicsxMatrixBasedOperator(Operator):
             for fac in facets:
                 sub_facets.add(fac)
         sub_facets = np.array(list(sorted(sub_facets)), dtype=np.int32)
-        _, parent_facet_indices, _, _ = df.mesh.create_submesh(submesh, fdim, sub_facets)
+        _, parent_facet_indices, _, _ = df.mesh.create_submesh(
+            submesh, fdim, sub_facets
+        )
         # FIXME
-        parent_entities = {fdim: parent_facet_indices, fdim-1: parent_vertex_indices}
+        # tdim==3 & entity_dim==1 not implemented
+        parent_entities = {fdim: parent_facet_indices, 0: parent_vertex_indices}
 
         # prepare data structures for form restriction
-        # cannot create class members after init ...
         V_r_source = df.fem.functionspace(submesh, S.ufl_element())
         V_r_range = df.fem.functionspace(submesh, R.ufl_element())
-
-        interpolation_data = df.fem.create_nonmatching_meshes_interpolation_data(
-                V_r_source.mesh,
-                V_r_source.element,
-                S.mesh)
+        interp_data = df.fem.create_nonmatching_meshes_interpolation_data(
+            V_r_source.mesh, V_r_source.element, S.mesh
+        )
 
         # ### restrict form to submesh
-        restricted_form = restrict_form(self.form, S, R, V_r_source, V_r_range, interpolation_data=interpolation_data)
+        restricted_form = _restrict_form(
+            self.form, S, R, V_r_source, V_r_range, interpolation_data=interp_data
+        )
 
         # TODO: support repeated form restriction for evaluation of RestrictedFenicsxMatrixBasedOperator
         # It might be possible to do this only once, if we can find coefficients of form
@@ -429,32 +441,37 @@ class FenicsxMatrixBasedOperator(Operator):
         # loop over self._bcs and restrict each element of the list
         r_bcs = list()
         for nt in self._bcs:
-
             if isinstance(nt.value, df.fem.Function):
                 # interpolate function to submesh
-                g = df.fem.Function(V, name=nt.value.name)
-                g.interpolate(nt.value, nmm_interpolation_data=interpolation_data)
+                g = df.fem.Function(V_r_source, name=nt.value.name)
+                g.interpolate(nt.value, nmm_interpolation_data=interp_data)
             else:
+                # g is of type df.fem.Constant or np.ndarray
                 g = nt.value
 
             if isinstance(nt, BCGeom):
                 rbc = BCGeom(g, nt.locator, V_r_source)
             elif isinstance(nt, BCTopo):
-                # map entities to the restricted space / submesh
-                # what if V.sub(i) was passed as function space?
-                rbc = _restrict_bc_topo(nt, g, V_r_source, parent_entities[nt.entity_dim])
+                if nt.entity_dim == 1 and tdim == 3:
+                    raise NotImplementedError
+                rbc = _restrict_bc_topo(
+                    nt, g, V_r_source, parent_entities[nt.entity_dim]
+                )
             else:
                 raise TypeError
             r_bcs.append(rbc)
 
         # ### compute dof mapping source
-        restricted_source_dofs = build_dof_map(S, cell_map, V_r_source, source_dofs)
+        restricted_source_dofs = _build_dof_map(S, V_r_source, source_dofs, interp_data)
 
         # ### compute dof mapping range
-        restricted_range_dofs = build_dof_map(R, cell_map, V_r_range, dofs)
+        restricted_range_dofs = _build_dof_map(R, V_r_range, dofs, interp_data)
 
         # sanity checks
-        assert source_dofs.size == V_r_source.dofmap.bs * V_r_source.dofmap.index_map.size_local
+        assert (
+            source_dofs.size
+            == V_r_source.dofmap.bs * V_r_source.dofmap.index_map.size_local
+        )
         assert restricted_source_dofs.size == source_dofs.size
         assert restricted_range_dofs.size == dofs.size
 
@@ -470,16 +487,27 @@ class FenicsxMatrixBasedOperator(Operator):
                 for r_coeff in restricted_form.coefficients():
                     for coeff in self.form.coefficients():
                         if r_coeff.name == coeff.name:
-                            r_coeff.interpolate(coeff, nmm_interpolation_data=interpolation_data)
+                            r_coeff.interpolate(
+                                coeff, nmm_interpolation_data=interp_data
+                            )
         else:
             param_setter = None
 
-        op_r = FenicsxMatrixBasedOperator(restricted_form, self.params, param_setter=param_setter,
-                                          bcs=r_bcs, functional=self.functional, form_compiler_options=self.form_compiler_options,
-                                          jit_options=self.jit_options, solver_options=self.solver_options)
+        op_r = FenicsxMatrixBasedOperator(
+            restricted_form,
+            self.params,
+            param_setter=param_setter,
+            bcs=r_bcs,
+            functional=self.functional,
+            form_compiler_options=self.form_compiler_options,
+            jit_options=self.jit_options,
+            solver_options=self.solver_options,
+        )
 
-        return (RestrictedFenicsxMatrixBasedOperator(op_r, restricted_range_dofs),
-                    source_dofs[np.argsort(restricted_source_dofs)])
+        return (
+            RestrictedFenicsxMatrixBasedOperator(op_r, restricted_range_dofs),
+            source_dofs[np.argsort(restricted_source_dofs)],
+        )
 
 
 class RestrictedFenicsxMatrixBasedOperator(Operator):
@@ -499,18 +527,6 @@ class RestrictedFenicsxMatrixBasedOperator(Operator):
 
     def apply(self, U, mu=None):
         return self.assemble(mu).apply(U)
-
-
-
-def _restrict_bc_topo(nt: BCTopo, g, V, parents):
-    dim = nt.entity_dim
-
-    num_entities = V.mesh.topology.index_map(dim).size_local
-    entities = np.zeros(num_entities, dtype=np.int32)
-    entities[nt.entities] = 99
-    entities_r = entities[parents]
-    tags = np.nonzero(entities_r)[0]
-    return BCTopo(g, tags, dim, V)
 
 
 def test_restriction_mass_no_mu():
@@ -561,14 +577,14 @@ def test():
     c_scalar = fem.Constant(domain, default_scalar_type(0.0))
     poisson = ufl.inner(ufl.grad(u), ufl.grad(v)) * c_scalar * ufl.dx
 
-    params = {"s": c_scalar} #, "v": c_vec}
+    params = {"s": c_scalar}  # , "v": c_vec}
     operator = FenicsxMatrixBasedOperator(poisson, params)
 
-    mu1 = operator.parameters.parse([-99.])
+    mu1 = operator.parameters.parse([-99.0])
     op1 = operator.assemble(mu1)
     mat1 = csr_array(op1.matrix.getValuesCSR()[::-1])
 
-    mu2 = operator.parameters.parse([99.])
+    mu2 = operator.parameters.parse([99.0])
     op2 = operator.assemble(mu2)
     mat2 = csr_array(op2.matrix.getValuesCSR()[::-1])
     assert (mat1 + mat2).nnz == 0
@@ -580,17 +596,18 @@ def test():
     # poisson.constants() --> list[fem.Constant, ...]
 
     params = {"R": 1}
+
     def param_setter(mu):
         value = mu["R"]
         fun.interpolate(lambda x: x[0] * value)
 
     operator = FenicsxMatrixBasedOperator(poisson_2, params, param_setter=param_setter)
 
-    mu1 = operator.parameters.parse([-99.])
+    mu1 = operator.parameters.parse([-99.0])
     op1 = operator.assemble(mu1)
     mat1 = csr_array(op1.matrix.getValuesCSR()[::-1])
 
-    mu2 = operator.parameters.parse([99.])
+    mu2 = operator.parameters.parse([99.0])
     op2 = operator.assemble(mu2)
     mat2 = csr_array(op2.matrix.getValuesCSR()[::-1])
     assert (mat1 + mat2).nnz == 0
@@ -604,11 +621,11 @@ def test():
     form_1 = ufl.inner(ufl.grad(v), c_vec) * ufl.dx
     op = FenicsxMatrixBasedOperator(form_1, params)
 
-    mu1 = op.parameters.parse([-12., -12.])
+    mu1 = op.parameters.parse([-12.0, -12.0])
     op1 = op.assemble(mu1)
     mat1 = op1.as_range_array().to_numpy()
 
-    mu2 = op.parameters.parse([12., 12.])
+    mu2 = op.parameters.parse([12.0, 12.0])
     op2 = op.assemble(mu2)
     mat2 = op2.as_range_array().to_numpy()
     assert np.linalg.norm(mat1 + mat2) < 1e-6

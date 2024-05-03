@@ -4,46 +4,13 @@ import numpy as np
 from multi.misc import x_dofs_vectorspace
 
 
-def build_dof_map(V, cell_map, V_r, dofs) -> np.ndarray:
-    """Computes interpolation dofs of V_r.
-
-    Args:
-        V: The function space.
-        cell_map: Indices of parent cells.
-        V_r: The restricted space.
-        dofs: Interpolation DOFs of V.
-    """
-    assert V.dofmap.bs == V_r.dofmap.bs
-
-    subdomain = V_r.mesh
-    tdim = subdomain.topology.dim
-    num_cells = subdomain.topology.index_map(tdim).size_local
-
-    children = set()
-
-    for cell in range(num_cells):
-        parent_cell = cell_map[cell]
-        parent_dofs_local = V.dofmap.cell_dofs(parent_cell)
-        child_dofs_local = V_r.dofmap.cell_dofs(cell)
-
-        for b in range(V.dofmap.bs):
-            for pdof, cdof in zip(parent_dofs_local, child_dofs_local):
-                if pdof * V.dofmap.bs + b in dofs:
-                    children.add(cdof * V.dofmap.bs + b)
-    return np.array(list(children), dtype=dofs.dtype)
-
-
 def test(domain, value_shape):
-
-    # TODO
-    # other domain
-    # other value shape
-
+    from .matrix_based_operator import _build_dof_map
     V = fem.functionspace(domain, ("P", 1, value_shape))
 
     ndofs = V.dofmap.bs * V.dofmap.index_map.size_local
     magic_dofs = set()
-    nmagic = 12
+    nmagic = 2
     while len(magic_dofs) < nmagic:
         magic_dofs.add(np.random.randint(0, ndofs))
 
@@ -61,22 +28,33 @@ def test(domain, value_shape):
                     continue
     affected_cell_indices = np.array(list(sorted(affected_cell_indices)), dtype=np.int32)
     
-    source_dofmap = V.dofmap
-    source_dofs = set()
-    for cell_index in affected_cell_indices:
-        ldofs = source_dofmap.cell_dofs(cell_index)
-        for ld in ldofs:
-            for b in range(source_dofmap.bs):
-                source_dofs.add(ld * source_dofmap.bs + b)
-
-    source_dofs = np.array(sorted(source_dofs), dtype=np.int32)
 
     tdim = domain.topology.dim
-    submesh, cell_map, _, _ = mesh.create_submesh(domain, tdim, affected_cell_indices)
+    submesh, parent_cells, _, _ = mesh.create_submesh(domain, tdim, affected_cell_indices)
     Vsub = fem.functionspace(submesh, V.ufl_element())
 
-    r_source_dofs = build_dof_map(V, cell_map, Vsub, source_dofs)
-    assert source_dofs.size == r_source_dofs.size
+    # ### DOFs
+    assert Vsub.dofmap.bs == V.dofmap.bs
+    block_size = V.dofmap.bs
+
+    source_dofs = set()
+    # what about ghost cells?
+    # the below assumes source=range space
+    num_affected_cells = submesh.topology.index_map(tdim).size_local
+    for cell_index in range(num_affected_cells):
+        parent_dofs = V.dofmap.cell_dofs(parent_cells[cell_index])
+        for pdof in parent_dofs:
+            for b in range(block_size):
+                source_dofs.add(pdof * block_size + b)
+
+    source_dofs = np.array(list(sorted(source_dofs)), dtype=np.int32)
+
+    interp_data = fem.create_nonmatching_meshes_interpolation_data(
+                Vsub.mesh,
+                Vsub.element,
+                V.mesh)
+
+    r_source_dofs = _build_dof_map(V, Vsub, source_dofs, interp_data)
 
     # compare dof coordinates
     xdofs = x_dofs_vectorspace(V)[source_dofs[np.argsort(r_source_dofs)]]
@@ -84,10 +62,6 @@ def test(domain, value_shape):
 
 
     diff = np.abs(xdofs - other)
-    if domain.topology.dim == 2:
-        breakpoint()
-        # FIXME
-        # this does not work in 2D
     assert np.sum(diff) < 1e-9
 
 
@@ -103,3 +77,5 @@ if __name__ == "__main__":
     unit_square = mesh.create_unit_square(MPI.COMM_WORLD, num_triangles, num_triangles)
 
     test(unit_square, ())
+    test(unit_square, (2,))
+    test(unit_square, (3,))
