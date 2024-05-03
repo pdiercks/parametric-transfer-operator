@@ -36,6 +36,13 @@ class BCTopo(NamedTuple):
     sub: Optional[int] = None
 
 
+class SubmeshWrapper(NamedTuple):
+    mesh: df.mesh.Mesh
+    parent_entities: list[int]
+    vertex_map: list[int]
+    geom_map: list[int]
+
+
 def _create_dirichlet_bcs(bcs: list[Union[BCGeom, BCTopo]]) -> list[df.fem.DirichletBC]:
     """Creates list of `df.fem.DirichletBC`.
 
@@ -218,22 +225,34 @@ def _affected_cells(V, dofs):
     return affected_cells
 
 
-def _restrict_bc_topo(nt: BCTopo, g, V_r, num_parents, parents):
-    """restrict BCTopo to space V_r.
+def _restrict_bc_topo(mesh, submesh_wrapper, bc, g, V_r):
 
-    Args:
-        nt: Topological BC specification.
-        g: The restricted value.
-        V_r: The restricted function space.
-        num_parents: Number of entities of dim `nt.entity_dim` of the full mesh.
-        parents: Parent entity indices corresponding to submesh entities.
-    """
-    dim = nt.entity_dim
-    entities = np.zeros(num_parents, dtype=np.int32)
-    entities[nt.entities] = 99
-    entities_r = entities[parents]
-    tags = np.nonzero(entities_r)[0]
-    return BCTopo(g, tags, dim, V_r, sub=nt.sub)
+    def locate_dirichlet_entities(mesh: df.mesh.Mesh, submesh_wrapper: SubmeshWrapper, entity_dim: int, dirichlet: npt.NDArray[np.int32]):
+        submesh, parent_cells, _, _ = submesh_wrapper
+        tdim = submesh.topology.dim
+
+        mesh.topology.create_connectivity(tdim, entity_dim)
+        submesh.topology.create_connectivity(tdim, entity_dim)
+        parent_c2e = mesh.topology.connectivity(tdim, entity_dim)
+        cell2entity = submesh.topology.connectivity(tdim, entity_dim)
+
+        entities = []
+
+        for cell_index in range(submesh.topology.index_map(tdim).size_local):
+            parent_ents = parent_c2e.links(parent_cells[cell_index])
+            child_ents = cell2entity.links(cell_index)
+
+            for pent, cent in zip(parent_ents, child_ents):
+                if pent in dirichlet:
+                    entities.append(cent)
+
+        return np.array(entities, dtype=np.int32)
+
+
+    dim = bc.entity_dim
+    tags = locate_dirichlet_entities(mesh, submesh_wrapper, dim, bc.entities)
+    return BCTopo(g, tags, dim, V_r, sub=bc.sub)
+
 
 
 class FenicsxMatrixBasedOperator(Operator):
@@ -395,34 +414,13 @@ class FenicsxMatrixBasedOperator(Operator):
 
         # TODO: build submesh
         tdim = domain.topology.dim
-        submesh, _, parent_vertex_indices, _ = df.mesh.create_submesh(
+        submesh = SubmeshWrapper(*df.mesh.create_submesh(
             domain, tdim, cells
-        )
-
-        # TODO: build submesh of dim=fdim for restriction of BCTopo
-        fdim = tdim - 1
-        # make sure entity-to-cell connectivities are computed
-        submesh.topology.create_connectivity(tdim, fdim)
-        submesh.topology.create_connectivity(fdim, tdim)
-        submesh.topology.create_connectivity(0, tdim)
-
-        c2f = submesh.topology.connectivity(tdim, fdim)
-        sub_facets = set()
-        for ci in range(submesh.topology.index_map(tdim).size_local):
-            facets = c2f.links(ci)
-            for fac in facets:
-                sub_facets.add(fac)
-        sub_facets = np.array(list(sorted(sub_facets)), dtype=np.int32)
-        _, parent_facet_indices, _, _ = df.mesh.create_submesh(
-            submesh, fdim, sub_facets
-        )
-        # FIXME
-        # tdim==3 & entity_dim==1 not implemented
-        parent_entities = {fdim: parent_facet_indices, 0: parent_vertex_indices}
+        ))
 
         # prepare data structures for form restriction
-        V_r_source = df.fem.functionspace(submesh, S.ufl_element())
-        V_r_range = df.fem.functionspace(submesh, R.ufl_element())
+        V_r_source = df.fem.functionspace(submesh.mesh, S.ufl_element())
+        V_r_range = df.fem.functionspace(submesh.mesh, R.ufl_element())
         interp_data = df.fem.create_nonmatching_meshes_interpolation_data(
             V_r_source.mesh, V_r_source.element, S.mesh
         )
@@ -432,13 +430,7 @@ class FenicsxMatrixBasedOperator(Operator):
             self.form, S, R, V_r_source, V_r_range, interpolation_data=interp_data
         )
 
-        # TODO: support repeated form restriction for evaluation of RestrictedFenicsxMatrixBasedOperator
-        # It might be possible to do this only once, if we can find coefficients of form
-        # and restricted form, and update according to `param_setter`
-        # the RestrictedFenicsxMatrixBasedOperator should handle this
-
         # TODO: restrict Dirichlet BCs
-        # loop over self._bcs and restrict each element of the list
         r_bcs = list()
         for nt in self._bcs:
             if isinstance(nt.value, df.fem.Function):
@@ -454,9 +446,7 @@ class FenicsxMatrixBasedOperator(Operator):
             elif isinstance(nt, BCTopo):
                 if nt.entity_dim == 1 and tdim == 3:
                     raise NotImplementedError
-                rbc = _restrict_bc_topo(
-                    nt, g, V_r_source, parent_entities[nt.entity_dim]
-                )
+                rbc = _restrict_bc_topo(S.mesh, submesh, nt, g, V_r_source)
             else:
                 raise TypeError
             r_bcs.append(rbc)
