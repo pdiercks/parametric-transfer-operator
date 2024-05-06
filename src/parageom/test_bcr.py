@@ -49,44 +49,6 @@ def test(bc_specs, V):
     submesh.topology.create_connectivity(fdim, tdim)
     submesh.topology.create_connectivity(0, tdim)
 
-    # ### Determine Dirichlet entities on submesh
-    # FIXME: need to do this for entity_dim in BCTopo, not just fdim
-
-
-    # only use the entities in the BCTopo spec to create a submesh !
-    # Would need to do this for every BC though,
-    # but this should not pose a problem
-    # c2f = submesh.topology.connectivity(tdim, fdim)
-    # sub_facets = set()
-    # for ci in range(submesh.topology.index_map(tdim).size_local):
-    #     facets = c2f.links(ci)
-    #     for fac in facets:
-    #         # TODO
-    #         # somehow determine if on_boundary? here?
-    #         breakpoint()
-    #         print("on boundary?")
-    #         sub_facets.add(fac)
-    # sub_facets = np.array(list(sorted(sub_facets)), dtype=np.int32)
-    # _, parent_facet_indices, _, _ = df.mesh.create_submesh(
-    #     submesh, fdim, sub_facets
-    # )
-
-    # determine parent facets on submesh boundary
-    # def everywhere(x):
-    #     return np.full(x[0].shape, True, dtype=bool)
-
-    # FIXME this is the whole boundary
-    # but only 'bottom' is needed according to nt.entities
-    # boundary_facets = df.mesh.locate_entities_boundary(submesh, fdim, everywhere)
-    # boundary_vertices = df.mesh.locate_entities_boundary(submesh, 0, everywhere)
-
-    # I have all parent facet indices
-    # nt.entities has all parent facets on the Dirichlet boundary
-    # How can I determine which of nt.entities are also on the boundary of submesh?
-
-    # parent_boundary_entities = {fdim: np.intersect1d(parent_facet_indices, boundary_facets), 0: np.intersect1d(parent_vertex_indices, boundary_vertices)}
-    # parent_boundary_entities = {fdim: parent_facet_indices, 0: parent_vertex_indices}
-
     V_r_source = df.fem.functionspace(submesh, V.ufl_element())
     V_r_range = df.fem.functionspace(submesh, V.ufl_element())
     interp_data = df.fem.create_nonmatching_meshes_interpolation_data(
@@ -121,17 +83,11 @@ def test(bc_specs, V):
     assert r_range_dofs.size == magic_dofs.size
 
     u = df.fem.Function(V)
-    u.x.array[:] = np.zeros(ndofs)
-    # u.x.array[:] = np.random.rand(ndofs)
+    u.x.array[:] = np.random.rand(ndofs)
     df.fem.set_bc(u.x.array, bcs)
-    # print(np.sum(u.x.array))
 
-    u_r = np.zeros(source_dofs.size)
+    u_r = u.x.array[source_dofs[np.argsort(r_source_dofs)]].copy()
     df.fem.set_bc(u_r, bcs_V_r_range)
-    # print(np.sum(u_r)) # this should be smaller than value above
-    # somehow I get to many bc dofs in the restriction
-    # number of bc dofs can only decrease
-
 
     def get_dof_indices(bcs):
         r = []

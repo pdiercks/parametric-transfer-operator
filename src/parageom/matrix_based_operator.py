@@ -3,8 +3,6 @@ from typing import Union, NamedTuple, Any, Callable, Optional
 import numpy as np
 import numpy.typing as npt
 
-# TODO
-# consider using fem.assemble_vector & friends instead of explicitly importing petsc functions?
 import ufl
 import dolfinx as df
 from dolfinx.fem.petsc import (
@@ -43,7 +41,7 @@ class SubmeshWrapper(NamedTuple):
     geom_map: list[int]
 
 
-def _create_dirichlet_bcs(bcs: list[Union[BCGeom, BCTopo]]) -> list[df.fem.DirichletBC]:
+def _create_dirichlet_bcs(bcs: tuple[Union[BCGeom, BCTopo], ...]) -> list[df.fem.DirichletBC]:
     """Creates list of `df.fem.DirichletBC`.
 
     Args:
@@ -106,19 +104,41 @@ def _replace_integral_domains(form, common_domain):
     return form
 
 
-def _restrict_form(form, S, R, V_r_source, V_r_range, interpolation_data=None):
+def _restrict_form(form, S, R, submesh: SubmeshWrapper):
     """Restrict `form` to submesh.
 
     Args:
         form: The UFL form to restrict.
         S: Source space.
         R: Range space.
-        V_r_source: Source space on submesh.
-        V_r_range: Range space on submesh.
+        submesh: The submesh for restricted evaluation.
     """
 
+    # FIXME
+    # replace !=, == checks with V.element?
+
+    # Note that for some
+    # V = fem.functionspace(domain, S.ufl_element())
+    # W = fem.functionspace(domain, R.ufl_element())
+    # with S and R being the same object (R = S)
+    # V == W returns False
+
+    # If S == R returns True, this leads to the result that each argument
+    # in `args` below, will be an element of the space R, which may
+    # not be desired.
+    # Therefore, V_r_range = V_r_source is set if S == R.
+
+    breakpoint()
+    V_r_source = df.fem.functionspace(submesh.mesh, S.ufl_element())
     if S != R:
         assert all(arg.ufl_function_space() != S for arg in form.arguments())
+        V_r_range = df.fem.functionspace(submesh.mesh, R.ufl_element())
+    else:
+        V_r_range = V_r_source
+
+    interp_data = df.fem.create_nonmatching_meshes_interpolation_data(
+        V_r_source.mesh, V_r_source.element, S.mesh
+    )
 
     args = tuple(
         (
@@ -129,17 +149,17 @@ def _restrict_form(form, S, R, V_r_source, V_r_range, interpolation_data=None):
         for arg in form.arguments()
     )
 
-    # FIXME
-    # restrict_form for FenicsOperator may require different method
-    # there, fem.Function other than unknow solution `u` are not allowed?
-
     new_coeffs = {}
     for function in form.coefficients():
         # replace coefficients (fem.Function)
         name = function.name
+        # check function space of the function
+        # build additional function spaces if necessary ...
+        # ... quadrature spaces ...
+        breakpoint()
         new_coeffs[function] = df.fem.Function(V_r_source, name=name)
         new_coeffs[function].interpolate(
-            function, nmm_interpolation_data=interpolation_data
+            function, nmm_interpolation_data=interp_data
         )
 
     # FIXME
@@ -161,12 +181,11 @@ def _restrict_form(form, S, R, V_r_source, V_r_range, interpolation_data=None):
     # loops over `affected_cells`.
     # Implementation of custom assembler is quite involved (technical) though.
 
-    submesh = V_r_source.mesh
     form_r = _replace_integral_domains(
-        form(*args, coefficients=new_coeffs), submesh.ufl_domain()
+        form(*args, coefficients=new_coeffs), submesh.mesh.ufl_domain()
     )
 
-    return form_r
+    return form_r, V_r_source, V_r_range, interp_data
 
 
 def _build_dof_map(V, V_r, dofs, interp_data) -> npt.NDArray[np.int32]:
@@ -268,7 +287,7 @@ class FenicsxMatrixBasedOperator(Operator):
         Custom method to update all form coefficients to new parameter value.
         This is required if the form contains parametric `dolfinx.fem.Function`s.
     bcs
-        List of Dirichlet BCs.
+        Tuple of Dirichlet BCs.
     functional
         If `True` return a |VectorFunctional| instead of a |VectorOperator| in case
         `form` is a linear form.
@@ -289,7 +308,7 @@ class FenicsxMatrixBasedOperator(Operator):
         form: ufl.Form,
         params: dict,
         param_setter: Optional[Callable] = None,
-        bcs: Optional[list[Union[BCGeom, BCTopo]]] = None,
+        bcs: Optional[tuple[Union[BCGeom, BCTopo], ...]] = None,
         functional: Optional[bool] = False,
         form_compiler_options: Optional[dict] = None,
         jit_options: Optional[dict] = None,
@@ -316,8 +335,10 @@ class FenicsxMatrixBasedOperator(Operator):
             except AttributeError:
                 parameters_own[k] = v
         self.parameters_own = parameters_own
-        self._bcs = bcs or list()
+        self._bcs = bcs or tuple()
         self.bcs = _create_dirichlet_bcs(bcs) if bcs is not None else list()
+        # FIXME
+        # add check that all bcs have correct function_space attribute??
         self.compiled_form = df.fem.form(
             form, form_compiler_options=form_compiler_options, jit_options=jit_options
         )
@@ -392,6 +413,7 @@ class FenicsxMatrixBasedOperator(Operator):
         )
 
     def restricted(self, dofs):
+        breakpoint()
 
         if len(self.form.arguments()) == 1:
             raise NotImplementedError
@@ -418,17 +440,9 @@ class FenicsxMatrixBasedOperator(Operator):
             domain, tdim, cells
         ))
 
-        # prepare data structures for form restriction
-        V_r_source = df.fem.functionspace(submesh.mesh, S.ufl_element())
-        V_r_range = df.fem.functionspace(submesh.mesh, R.ufl_element())
-        interp_data = df.fem.create_nonmatching_meshes_interpolation_data(
-            V_r_source.mesh, V_r_source.element, S.mesh
-        )
-
         # ### restrict form to submesh
-        restricted_form = _restrict_form(
-            self.form, S, R, V_r_source, V_r_range, interpolation_data=interp_data
-        )
+        breakpoint()
+        restricted_form, V_r_source, V_r_range, interp_data = _restrict_form(self.form, S, R, submesh)
 
         # TODO: restrict Dirichlet BCs
         r_bcs = list()
@@ -450,6 +464,7 @@ class FenicsxMatrixBasedOperator(Operator):
             else:
                 raise TypeError
             r_bcs.append(rbc)
+        r_bcs = tuple(r_bcs)
 
         # ### compute dof mapping source
         restricted_source_dofs = _build_dof_map(S, V_r_source, source_dofs, interp_data)
@@ -469,6 +484,11 @@ class FenicsxMatrixBasedOperator(Operator):
         if self.form.coefficients():
             assert self.param_setter is not None
             set_params = self.param_setter
+
+            # FIXME
+            # this assumes that every coefficient in restricted form
+            # is an element of source (S) and is interpolated to V_r_source
+            # This results in PETSc ERROR Segmentation violation for functions of quadrature spaces!
 
             def param_setter(mu):
                 set_params(mu)
@@ -516,42 +536,88 @@ class RestrictedFenicsxMatrixBasedOperator(Operator):
         return operator
 
     def apply(self, U, mu=None):
-        return self.assemble(mu).apply(U)
+        assert U in self.source
+
+        #  ### Old version
+        # UU = self.op.source.zeros(len(U))
+        # for uu, u in zip(UU.vectors, U.to_numpy()):
+        #     uu.real_part.impl[:] = np.ascontiguousarray(u)
+        # VV = self.op.apply(UU, mu=mu)
+        # V = self.range.zeros(len(VV))
+        # for v, vv in zip(V.to_numpy(), VV.vectors):
+        #     v[:] = vv.real_part.impl[self.restricted_range_dofs]
+
+        # NOTE
+        # old version resulted in PETSc error: unassembled Vector
+
+        UU = self.op.source.from_numpy(U.to_numpy())
+        VV = self.op.apply(UU, mu=mu)
+        V = self.range.make_array(VV.dofs(self.restricted_range_dofs))
+        return V
 
 
-def test_restriction_mass_no_mu():
+def test(nx, ny, value_shape):
     from mpi4py import MPI
-    from scipy.sparse import csr_array
+    from pymor.vectorarrays.numpy import NumpyVectorSpace
+    import basix
 
-    nx = ny = 10
-    domain = df.mesh.create_unit_square(MPI.COMM_SELF, nx, ny)
-    value_shape = ()
+    domain = df.mesh.create_unit_square(MPI.COMM_WORLD, nx, ny)
     V = df.fem.functionspace(domain, ("P", 1, value_shape))
+    ndofs = V.dofmap.bs * V.dofmap.index_map.size_local
     u = ufl.TrialFunction(V)
     v = ufl.TestFunction(V)
-    mass = ufl.inner(u, v) * ufl.dx
-    op = FenicsxMatrixBasedOperator(mass, {})
-    matop = op.assemble()
-    M = csr_array(matop.matrix.getValuesCSR()[::-1])
 
-    magic = np.array([0, 5, 8], dtype=np.int32)
-    rop, rdofs = op.restricted(magic)
-    rmatop = rop.assemble()
-    Mred = csr_array(rmatop.matrix.getValuesCSR()[::-1])
+    q_deg = 1
+    qe = basix.ufl.quadrature_element(domain.topology.cell_name(), value_shape=(), degree=q_deg)
+    Q = df.fem.functionspace(domain, qe)
+    coeff = df.fem.Function(Q, name="coeff")
+    form = ufl.inner(u, v) * coeff * ufl.dx
 
-    # M at interpolation dofs (magic)
-    # should be equal to Mred at rop.restricted_range_dofs
-    ref = M[np.ix_(magic, magic)]
-    d = rop.restricted_range_dofs
-    other = Mred[np.ix_(d, d)]
+    params = {"R": 1}
+    def param_setter(mu):
+        value = mu["R"]
+        coeff.interpolate(lambda x: x[0] * value)
+
+    def bottom(x):
+        return np.isclose(x[1], 0.0)
+
+    if len(value_shape):
+        dirichlet_value = (df.default_scalar_type(5.4), ) * value_shape[0]
+    else:
+        dirichlet_value = df.default_scalar_type(5.4)
+    u_D = df.fem.Constant(domain, dirichlet_value)
+    bc_geom = BCGeom(u_D, bottom, V)
+
     breakpoint()
+    operator = FenicsxMatrixBasedOperator(form, params, param_setter=param_setter, bcs=(bc_geom, ))
 
-    # FIXME
-    # this is not quite right
-    assert np.allclose(ref.data, other.data)
+    magic_dofs = set()
+    nmagic = 13
+    while len(magic_dofs) < nmagic:
+        magic_dofs.add(np.random.randint(0, ndofs))
+    magic_dofs = np.array(list(sorted(magic_dofs)), dtype=np.int32)
+    r_op, r_source_dofs = operator.restricted(magic_dofs)
+
+    def compare(mu):
+        U = operator.source.random(3)
+        AU = operator.apply(U, mu)
+
+        U_dofs = NumpyVectorSpace.make_array(U.dofs(r_source_dofs))
+        r_AU = r_op.apply(U_dofs, mu=mu)
+        # uncomment to see that r_AU changes when mu changes
+        # print(r_AU)
+
+        is_zero = np.sum(np.abs(AU.to_numpy()[:, magic_dofs] - r_AU.to_numpy()))
+        assert is_zero < 1e-9
+
+    mus = operator.parameters.space({"R": (0.1, 10.)}).sample_randomly(2)
+    for mu in mus:
+        compare(mu)
 
 
-def test():
+
+def test_old():
+
     import numpy as np
     from mpi4py import MPI
     import ufl
@@ -620,10 +686,22 @@ def test():
     mat2 = op2.as_range_array().to_numpy()
     assert np.linalg.norm(mat1 + mat2) < 1e-6
 
-    # TODO: test with bcs
-    # TODO: test restricted evaluation
-
 
 if __name__ == "__main__":
     # test()
-    test_restriction_mass_no_mu()
+    # test_restriction_mass_no_mu()
+
+    # testing of FenicsxMatrixBasedOperator
+    # - comparison of FMBO and RFMBO
+    # - domain tdim 1d, 2d
+    # - value shape, scalar, vector
+    # - args in form: constant, function
+    # - form: bilinear, linear
+    # - with or without bcs
+
+    # only with bcs
+    # only bilinear
+    # only unit square
+    # only function and param setter
+    test(10, 10, ())
+    test(10, 10, (2,))
