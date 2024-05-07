@@ -55,7 +55,8 @@ def compute_reference_solution(mshfile, degree, d):
 
 
 def discretize_fom(auxiliary_problem, trafo_disp):
-    from .fom import ParaGeomLinEla, ParaGeomOperator
+    from .fom import ParaGeomLinEla
+    from .matrix_based_operator import FenicsxMatrixBasedOperator, BCGeom
     from pymor.basic import VectorOperator, StationaryModel
 
     top_locator = plane_at(1.0, "y")
@@ -73,10 +74,10 @@ def discretize_fom(auxiliary_problem, trafo_disp):
     V = trafo_disp.function_space
 
     problem = ParaGeomLinEla(omega, V, E=EMOD, NU=POISSON, d=trafo_disp)
-    problem.add_dirichlet_bc(value=zero, boundary=bottom_locator, method="geometrical")
+    bc_bottom = BCGeom(zero, bottom_locator, V)
+    problem.add_dirichlet_bc(value=bc_bottom.value, boundary=bc_bottom.locator, method="geometrical")
     problem.add_neumann_bc(top_marker, traction)
     problem.setup_solver()
-    # problem.assemble_matrix(bcs=problem.get_dirichlet_bcs())
     problem.assemble_vector(bcs=problem.get_dirichlet_bcs())
 
     # ### wrap as pymor model
@@ -85,14 +86,18 @@ def discretize_fom(auxiliary_problem, trafo_disp):
         auxiliary_problem.solve(trafo_disp, mu)
 
     params = {"R": 1}
-    # not sure how params would map to fem.Constant
-    # self.parameters.assert_compatible(mu) needs to eval to True
-    operator = ParaGeomOperator(problem.form_lhs, params, param_setter, bcs=problem.get_dirichlet_bcs(), name="ParaGeom_a")
+    operator = FenicsxMatrixBasedOperator(problem.form_lhs, params, param_setter=param_setter,
+                                          bcs=(bc_bottom,), name="ParaGeom")
+
     # NOTE
     # without b.copy(), fom.rhs.as_range_array() does not return correct data
-    # problem goes out of scope and problem.b is deleted
+    # problem object goes out of scope and problem.b is deleted
     rhs = VectorOperator(operator.range.make_array([problem.b.copy()]))
     fom = StationaryModel(operator, rhs, name="FOM")
+
+    assert len(problem.form_lhs.coefficients()) == 1
+    coeff = problem.form_lhs.coefficients()[0]
+    assert coeff.name == "d_trafo"
 
     return fom
 
@@ -110,7 +115,7 @@ def main():
         parent_subdomain_msh, degree, ftags, example.parameters["subdomain"]
     )
     mu = aux.parameters.parse([0.29001])
-    d = fem.Function(aux.problem.V)
+    d = fem.Function(aux.problem.V, name="d_trafo")
     aux.solve(d, mu)  # type: ignore
     u_phys = compute_reference_solution(parent_subdomain_msh, degree, d)
 

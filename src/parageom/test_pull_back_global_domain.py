@@ -1,7 +1,7 @@
 import numpy as np
 
 from mpi4py import MPI
-from dolfinx import fem, default_scalar_type
+from dolfinx import mesh, fem, default_scalar_type
 from dolfinx.io import gmshio, XDMFFile
 
 from multi.boundary import plane_at, point_at
@@ -68,7 +68,8 @@ def compute_reference_solution(mshfile, degree, d):
 
 
 def discretize_fom(auxiliary_problem, trafo_disp):
-    from .fom import ParaGeomLinEla, ParaGeomOperator
+    from .fom import ParaGeomLinEla
+    from .matrix_based_operator import FenicsxMatrixBasedOperator, BCGeom, BCTopo
     from pymor.basic import VectorOperator, StationaryModel
 
     domain = auxiliary_problem.problem.domain.grid
@@ -84,11 +85,15 @@ def discretize_fom(auxiliary_problem, trafo_disp):
 
     # Dirichlet BCs
     origin = point_at(omega.xmin)
-    bottom_right = point_at([omega.xmax[0], omega.xmin[1], 0.])
+    bottom_right_locator = point_at([omega.xmax[0], omega.xmin[1], 0.])
+    bottom_right = mesh.locate_entities_boundary(domain, 0, bottom_right_locator)
     u_origin = fem.Constant(domain, (default_scalar_type(0.0),) * omega.gdim)
     u_bottom_right = fem.Constant(domain, default_scalar_type(0.0))
-    problem.add_dirichlet_bc(u_origin, origin, method="geometrical")
-    problem.add_dirichlet_bc(u_bottom_right, bottom_right, sub=1, method="geometrical", entity_dim=0)
+
+    bc_origin = BCGeom(u_origin, origin, V)
+    bc_bottom_right = BCTopo(u_bottom_right, bottom_right, 0, V, sub=1)
+    problem.add_dirichlet_bc(value=bc_origin.value, boundary=bc_origin.locator, method="geometrical")
+    problem.add_dirichlet_bc(value=bc_bottom_right.value, boundary=bc_bottom_right.entities, sub=1, method="topological", entity_dim=bc_bottom_right.entity_dim)
 
     # Neumann BCs
     traction = fem.Constant(
@@ -105,14 +110,18 @@ def discretize_fom(auxiliary_problem, trafo_disp):
         auxiliary_problem.solve(trafo_disp, mu)
 
     params = {"R": 10}
-    # not sure how params would map to fem.Constant
-    # self.parameters.assert_compatible(mu) needs to eval to True
-    operator = ParaGeomOperator(problem.form_lhs, params, param_setter, bcs=problem.get_dirichlet_bcs(), name="ParaGeom_a")
+    operator = FenicsxMatrixBasedOperator(problem.form_lhs, params, param_setter=param_setter,
+                                          bcs=(bc_origin, bc_bottom_right), name="ParaGeom")
+
     # NOTE
     # without b.copy(), fom.rhs.as_range_array() does not return correct data
     # problem goes out of scope and problem.b is deleted
     rhs = VectorOperator(operator.range.make_array([problem.b.copy()]))
     fom = StationaryModel(operator, rhs, name="FOM")
+
+    coeffs = problem.form_lhs.coefficients()
+    assert len(coeffs) == 1
+    assert coeffs[0].name == "d_trafo"
 
     return fom
 
@@ -131,7 +140,7 @@ def main():
     )
     values = [0.15, 0.17, 0.19, 0.21, 0.23, 0.25, 0.27, 0.29, 0.2, 0.3]
     mu = aux.parameters.parse(values)
-    d = fem.Function(aux.problem.V)
+    d = fem.Function(aux.problem.V, name="d_trafo")
     aux.solve(d, mu)  # type: ignore
     u_phys = compute_reference_solution(parent_domain_msh, degree, d)
 
@@ -174,14 +183,6 @@ def main():
     rel_err = relative_error(uphys, urom, product)
     print(f"{abs_err=}")
     print(f"{rel_err=}")
-
-    # ### Option A: EI of the bilinear operator
-    # U = fom.solve(mu)
-    # evaluations.append(op.apply(U, mu)) # internal force
-    # cbasis, ipoints, data = ei_greedy(evaluations)
-    # ei_op = ...
-    # TODO: restricted evaluation for fom.operator may be more involved
-    # project ei_op
 
 
 if __name__ == "__main__":
