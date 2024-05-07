@@ -128,7 +128,6 @@ def _restrict_form(form, S, R, submesh: SubmeshWrapper):
     # not be desired.
     # Therefore, V_r_range = V_r_source is set if S == R.
 
-    breakpoint()
     V_r_source = df.fem.functionspace(submesh.mesh, S.ufl_element())
     if S != R:
         assert all(arg.ufl_function_space() != S for arg in form.arguments())
@@ -153,33 +152,12 @@ def _restrict_form(form, S, R, submesh: SubmeshWrapper):
     for function in form.coefficients():
         # replace coefficients (fem.Function)
         name = function.name
-        # check function space of the function
-        # build additional function spaces if necessary ...
-        # ... quadrature spaces ...
-        breakpoint()
+        if function.function_space != S:
+            raise NotImplementedError("Restriction of coefficients that are not elements of the source space of the full operator is not supported.")
         new_coeffs[function] = df.fem.Function(V_r_source, name=name)
         new_coeffs[function].interpolate(
             function, nmm_interpolation_data=interp_data
         )
-
-    # FIXME
-    # the original form contains some fem.Function that is parameter dependent
-    # it's up to the user to update via code in `param_setter`
-    # However, the form restriction is done only once and the connection
-    # between `function` and `new_coeffs[function]` is lost.
-
-    # How can `new_coeffs[function]` be updated to new mu?
-
-    # method `param_setter` must be defined before `FenicsxMatrixBasedOperator.restricted`
-    # is called.
-
-    # Workaround: call `restrict_form` each time the operator is evaluated
-    # if form contains coefficients
-
-    # OTHER APPROACH
-    # do not restrict form at all, but work with custom assembler that only
-    # loops over `affected_cells`.
-    # Implementation of custom assembler is quite involved (technical) though.
 
     form_r = _replace_integral_domains(
         form(*args, coefficients=new_coeffs), submesh.mesh.ufl_domain()
@@ -413,18 +391,17 @@ class FenicsxMatrixBasedOperator(Operator):
         )
 
     def restricted(self, dofs):
-        breakpoint()
 
         if len(self.form.arguments()) == 1:
             raise NotImplementedError
 
-        # TODO: compute affected cells
+        # ### compute affected cells
         S = self.source.V
         R = self.range.V
         domain = S.mesh
         cells = _affected_cells(S, dofs)
 
-        # TODO: compute source dofs based on affected cells
+        # ### compute source dofs based on affected cells
         source_dofmap = S.dofmap
         source_dofs = set()
         for cell_index in cells:
@@ -434,17 +411,16 @@ class FenicsxMatrixBasedOperator(Operator):
                     source_dofs.add(ld * source_dofmap.bs + b)
         source_dofs = np.array(sorted(source_dofs), dtype=dofs.dtype)
 
-        # TODO: build submesh
+        # ### build submesh
         tdim = domain.topology.dim
         submesh = SubmeshWrapper(*df.mesh.create_submesh(
             domain, tdim, cells
         ))
 
         # ### restrict form to submesh
-        breakpoint()
         restricted_form, V_r_source, V_r_range, interp_data = _restrict_form(self.form, S, R, submesh)
 
-        # TODO: restrict Dirichlet BCs
+        # ### restrict Dirichlet BCs
         r_bcs = list()
         for nt in self._bcs:
             if isinstance(nt.value, df.fem.Function):
@@ -556,27 +532,40 @@ class RestrictedFenicsxMatrixBasedOperator(Operator):
         return V
 
 
-def test(nx, ny, value_shape):
+def test(nx, ny, degree, value_shape):
     from mpi4py import MPI
     from pymor.vectorarrays.numpy import NumpyVectorSpace
-    import basix
 
     domain = df.mesh.create_unit_square(MPI.COMM_WORLD, nx, ny)
-    V = df.fem.functionspace(domain, ("P", 1, value_shape))
+    gdim = domain.geometry.dim
+    V = df.fem.functionspace(domain, ("P", degree, value_shape))
     ndofs = V.dofmap.bs * V.dofmap.index_map.size_local
     u = ufl.TrialFunction(V)
     v = ufl.TestFunction(V)
 
-    q_deg = 1
-    qe = basix.ufl.quadrature_element(domain.topology.cell_name(), value_shape=(), degree=q_deg)
-    Q = df.fem.functionspace(domain, qe)
-    coeff = df.fem.Function(Q, name="coeff")
-    form = ufl.inner(u, v) * coeff * ufl.dx
-
     params = {"R": 1}
-    def param_setter(mu):
-        value = mu["R"]
-        coeff.interpolate(lambda x: x[0] * value)
+    coeff = df.fem.Function(V, name="coeff")
+    match value_shape:
+        case ():
+            form = ufl.inner(u, v) * coeff * ufl.dx
+
+            def param_setter(mu):
+                value = mu["R"]
+                coeff.interpolate(lambda x: x[0] * value)
+
+        case (gdim, ):
+            grad_u = ufl.grad(u)
+            grad_v = ufl.grad(v)
+            F = ufl.grad(coeff) + ufl.Identity(gdim)
+            i, j, k = ufl.indices(3)
+            form = grad_v[i, j] * grad_u[j, k] * F[k, i] * ufl.dx
+
+            def param_setter(mu):
+                value = mu["R"]
+                coeff.interpolate(lambda x: (x[0] * value, x[1] * value))
+
+        case _:
+            raise NotImplementedError
 
     def bottom(x):
         return np.isclose(x[1], 0.0)
@@ -588,7 +577,6 @@ def test(nx, ny, value_shape):
     u_D = df.fem.Constant(domain, dirichlet_value)
     bc_geom = BCGeom(u_D, bottom, V)
 
-    breakpoint()
     operator = FenicsxMatrixBasedOperator(form, params, param_setter=param_setter, bcs=(bc_geom, ))
 
     magic_dofs = set()
@@ -598,7 +586,11 @@ def test(nx, ny, value_shape):
     magic_dofs = np.array(list(sorted(magic_dofs)), dtype=np.int32)
     r_op, r_source_dofs = operator.restricted(magic_dofs)
 
-    def compare(mu):
+    red_coeffs = r_op.op.form.coefficients()
+    assert len(red_coeffs) == 1
+    assert red_coeffs[0].name == "coeff"
+
+    def compare(mu) -> bool:
         U = operator.source.random(3)
         AU = operator.apply(U, mu)
 
@@ -608,16 +600,19 @@ def test(nx, ny, value_shape):
         # print(r_AU)
 
         is_zero = np.sum(np.abs(AU.to_numpy()[:, magic_dofs] - r_AU.to_numpy()))
-        assert is_zero < 1e-9
+        return is_zero < 1e-9
 
     mus = operator.parameters.space({"R": (0.1, 10.)}).sample_randomly(2)
+    success = []
     for mu in mus:
-        compare(mu)
+        success.append(compare(mu))
+
+    if all(success):
+        print(f"test passed for {degree=}, {value_shape=}")
 
 
 
-def test_old():
-
+def test_simple():
     import numpy as np
     from mpi4py import MPI
     import ufl
@@ -648,8 +643,6 @@ def test_old():
     # ### Test 2: Scalar Function, bilinear form
     fun = fem.Function(V, name="f")
     poisson_2 = ufl.inner(ufl.grad(u), ufl.grad(v)) * fun * ufl.dx
-    # poisson.coefficients() --> list[fem.Function, ...]
-    # poisson.constants() --> list[fem.Constant, ...]
 
     params = {"R": 1}
 
@@ -688,20 +681,28 @@ def test_old():
 
 
 if __name__ == "__main__":
-    # test()
-    # test_restriction_mass_no_mu()
+    # simple assembly of full operator for
+    # 1 bilinear form with scalar valued constant
+    # 2 bilinear form with scalar valued function
+    # 3 linear form with vector-valued constant
+    test_simple()
 
     # testing of FenicsxMatrixBasedOperator
     # - comparison of FMBO and RFMBO
-    # - domain tdim 1d, 2d
+    # - domain tdim 1d, 2d, 3d
     # - value shape, scalar, vector
     # - args in form: constant, function
     # - form: bilinear, linear
     # - with or without bcs
 
-    # only with bcs
-    # only bilinear
-    # only unit square
-    # only function and param setter
-    test(10, 10, ())
-    test(10, 10, (2,))
+    # below test uses
+    # - unit square
+    # - degree 1, 2
+    # - value shape (), (2,)
+    # - some form with coefficient as element of full source space
+    # - definition of single BCGeom
+    # - comparison of operator.apply(U, mu) and restricted_op.apply(U, mu)
+    test(10, 10, 1, ())
+    test(10, 10, 2, ())
+    test(10, 10, 1, (2,))
+    test(10, 10, 2, (2,))
