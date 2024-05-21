@@ -33,7 +33,7 @@ def compute_reference_solution(mshfile, degree, d):
     )
     x_subdomain += disp
 
-    top_locator = plane_at(1.0, "y")
+    top_locator = plane_at(1000.0, "y")
     bottom_locator = plane_at(0.0, "y")
     tdim = domain.topology.dim
     fdim = tdim - 1
@@ -51,6 +51,9 @@ def compute_reference_solution(mshfile, degree, d):
     problem.add_neumann_bc(top_marker, traction)
     problem.setup_solver()
     u = problem.solve()
+
+    # K = csr_array(problem.A.getValuesCSR()[::-1])
+    # kappa = np.linalg.norm(K.todense())
     return u
 
 
@@ -59,7 +62,7 @@ def discretize_fom(auxiliary_problem, trafo_disp):
     from .matrix_based_operator import FenicsxMatrixBasedOperator, BCGeom
     from pymor.basic import VectorOperator, StationaryModel
 
-    top_locator = plane_at(1.0, "y")
+    top_locator = plane_at(1000.0, "y")
     bottom_locator = plane_at(0.0, "y")
     domain = auxiliary_problem.problem.domain.grid
     tdim = domain.topology.dim
@@ -114,7 +117,7 @@ def main():
     aux = discretize_auxiliary_problem(
         parent_subdomain_msh, degree, ftags, example.parameters["subdomain"]
     )
-    mu = aux.parameters.parse([0.29001])
+    mu = aux.parameters.parse([290.01])
     d = fem.Function(aux.problem.V, name="d_trafo")
     aux.solve(d, mu)  # type: ignore
     u_phys = compute_reference_solution(parent_subdomain_msh, degree, d)
@@ -154,6 +157,7 @@ def main():
     urom = source.make_array([u.vector]) # type: ignore
     uphys = source.make_array([u_phys.vector]) # type: ignore
 
+    print(f"{uphys.amax()=}")
     abs_err = absolute_error(uphys, urom, product)
     rel_err = relative_error(uphys, urom, product)
     print(f"{abs_err=}")

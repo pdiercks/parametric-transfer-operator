@@ -1,14 +1,13 @@
 import typing
 
-UNIT_LENGTH = 1.0
-
 
 def discretize_unit_cell(
-    mu, num_cells: int, output: str, gmsh_options: typing.Optional[dict] = None
+    unit_length, mu, num_cells: int, output: str, gmsh_options: typing.Optional[dict] = None
 ) -> None:
     """Discretizes square domain with circular void.
 
     Args:
+        unit_length: Unit length of the unit cell.
         mu: parameter value, i.e. radius of the void.
         num_cells: Number of cells per edge of the unit cell.
         output: Write .msh file.
@@ -17,9 +16,9 @@ def discretize_unit_cell(
     from multi.preprocessing import create_voided_rectangle
 
     xmin = 0.0
-    xmax = UNIT_LENGTH
+    xmax = unit_length
     ymin = 0.0
-    ymax = UNIT_LENGTH
+    ymax = unit_length
     radius = mu.to_numpy().item()
 
     create_voided_rectangle(
@@ -57,6 +56,7 @@ def create_structured_coarse_grid(config: str, output: str):
         case _:
             raise NotImplementedError
 
+    UNIT_LENGTH = example.unit_length
     xmax = xmin + UNIT_LENGTH * num_cells[0]
     ymin = 0.0
     ymax = ymin + UNIT_LENGTH * num_cells[1]
@@ -97,6 +97,7 @@ def create_parent_domain(config: str, output: str):
     ]
 
     offset = {2: 0, 1: 0}
+    UNIT_LENGTH = example.unit_length
     for cell in range(num_cells):
         subdomains.append(tempfile.NamedTemporaryFile(suffix=".msh"))
         to_be_merged.append(subdomains[cell].name)
@@ -108,6 +109,7 @@ def create_parent_domain(config: str, output: str):
         xmin, ymin, zc = xc[0]
         xmax = xmin + UNIT_LENGTH
         ymax = ymin + UNIT_LENGTH
+        radius = example.mu_bar
 
         create_voided_rectangle(
             xmin,
@@ -115,7 +117,7 @@ def create_parent_domain(config: str, output: str):
             ymin,
             ymax,
             z=zc,
-            radius=example.mu_bar,
+            radius=radius,
             num_cells=example.num_intervals,
             recombine=True,
             cell_tags={"matrix": 1},
@@ -205,13 +207,12 @@ def create_physical_domain(config: str):
                 dx = mesh.compute_midpoints(coarse_grid.grid, 0, vertices)
                 dx = np.around(dx, decimals=3)
                 xmin = np.amin(dx, axis=0, keepdims=True)
-                x_subdomain += xmin[:, :x_subdomain.shape[1]]
+                x_subdomain += xmin[:, : x_subdomain.shape[1]]
                 # Write physical mesh for target subdomain
                 filename = example.target_subdomain(config, k).as_posix()
                 xdmf = XDMFFile(parent_subdomain.comm, filename, "w")
                 xdmf.write_mesh(parent_subdomain)
                 xdmf.close()
-
 
         oversampling_msh = example.oversampling_domain(config, k).as_posix()
         coarse_grid.fine_grid_method = subdomains
@@ -228,7 +229,8 @@ def create_physical_domain(config: str):
 
 
 if __name__ == "__main__":
-    import sys, argparse
+    import sys
+    import argparse
 
     parser = argparse.ArgumentParser(
         description="Preprocessing for the parageom example."

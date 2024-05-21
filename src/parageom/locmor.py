@@ -1,33 +1,40 @@
 from typing import Tuple, Optional
 
+from collections import defaultdict
+
 import numpy as np
 from scipy.sparse import coo_array
 
 from mpi4py import MPI
-from dolfinx import fem
+import dolfinx as df
 from dolfinx.fem.petsc import set_bc
-from dolfinx.io import gmshio
 from dolfinx.io.utils import XDMFFile
 from basix.ufl import element
 
 from pymor.algorithms.gram_schmidt import gram_schmidt
+from pymor.algorithms.projection import project
 from pymor.bindings.fenicsx import FenicsxMatrixOperator, FenicsxVectorSpace
+from pymor.operators.constructions import VectorOperator, LincombOperator
 from pymor.operators.interface import Operator
 from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.vectorarrays.numpy import NumpyVectorSpace
 from pymor.parameters.base import Parameters, ParameterSpace
 
+from multi.boundary import point_at
 from multi.domain import RectangularDomain, RectangularSubdomain
+from multi.dofmap import DofMap
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinearElasticityProblem, LinElaSubProblem, TransferProblem
 from multi.product import InnerProduct
 from multi.solver import build_nullspace
-from multi.io import read_mesh
+from multi.io import read_mesh, select_modes
+from multi.interpolation import make_mapping
 from .definitions import BeamData, BeamProblem
 
 
-class COOMatrixOperator(Operator):
-    """Wraps COO matrix data as an |Operator|.
+class GlobalParaGeomOperator(Operator):
+    """Operator for geometrically parametrized linear elastic problem
+    in the context of localized MOR.
 
     Args:
         data: COO matrix data. See scipy.sparse.coo_array.
@@ -81,6 +88,189 @@ class COOMatrixOperator(Operator):
 
     def apply_inverse(self, V, mu=None, initial_guess=None, least_squares=False):
         return self.assemble(mu).apply_inverse(V, initial_guess=initial_guess, least_squares=least_squares)
+
+
+def reconstruct(
+    U_rb: np.ndarray,
+    dofmap: DofMap,
+    bases: list[np.ndarray],
+    u_local: df.fem.Function,
+    u_global: df.fem.Function,
+) -> None:
+    """Reconstructs rom solution on the global domain.
+
+    Args:
+        Urb: ROM solution in the reduced space.
+        dofmap: The dofmap of the reduced space.
+        bases: Local basis for each subdomain.
+        u_local: The local solution field.
+        u_global: The global solution field to be filled with values.
+
+    """
+    coarse_grid = dofmap.grid
+    V = u_global.function_space
+    Vsub = u_local.function_space
+    submesh = Vsub.mesh
+    x_submesh = submesh.geometry.x
+    u_global_view = u_global.x.array
+
+    for cell in range(dofmap.num_cells):
+
+        # translate subdomain mesh
+        vertices = coarse_grid.get_entities(0, cell)
+        dx_cell = coarse_grid.get_entity_coordinates(0, vertices)[0]
+        x_submesh += dx_cell
+
+        # fill u_local with rom solution
+        basis = bases[cell]
+        dofs = dofmap.cell_dofs(cell)
+
+        # fill global field via dof mapping
+        V_to_Vsub = make_mapping(Vsub, V)
+        u_global_view[V_to_Vsub] = U_rb[0, dofs] @ basis
+
+        # move subdomain mesh to origin
+        x_submesh -= dx_cell
+    u_global.x.scatter_forward()
+
+
+def assemble_system(
+    num_modes: int,
+    dofmap: DofMap,
+    A: FenicsxMatrixOperator,
+    b: VectorOperator,
+    bases: list[np.ndarray],
+    num_max_modes: np.ndarray,
+    parameters: Parameters
+):
+    """Assembles ``operator`` and ``rhs`` for localized ROM as ``StationaryModel``.
+
+    Args:
+        num_modes: Number of fine scale modes per edge to be used.
+        dofmap: The dofmap of the global reduced space.
+        A: Local high fidelity stiffness matrix.
+        b: Local high fidelity external force vector.
+        bases: Local reduced basis for each subdomain.
+        num_max_modes: Maximum number of fine scale modes for each edge.
+        parameters: The |Parameters| the ROM depends on.
+
+    """
+    from .locmor import COOMatrixOperator
+
+    dofs_per_vertex = 2
+    dofs_per_face = 0
+
+    dofs_per_edge = num_max_modes.copy()
+    dofs_per_edge[num_max_modes > num_modes] = num_modes
+    dofmap.distribute_dofs(dofs_per_vertex, dofs_per_edge, dofs_per_face)
+    # logger.debug("Dofs per edge:\n"+f"{dofs_per_edge=}")
+
+    # ### Definition of Dirichlet BCs
+    # This also depends on number of modes and can only be defined after
+    # distribution of dofs
+    origin = dofmap.grid.locate_entities_boundary(0, point_at([0.0, 0.0, 0.0]))
+    bottom_right = dofmap.grid.locate_entities_boundary(0, point_at([10.0, 0.0, 0.0]))
+    bc_dofs = []
+    for vertex in origin:
+        bc_dofs += dofmap.entity_dofs(0, vertex)
+    for vertex in bottom_right:
+        dofs = dofmap.entity_dofs(0, vertex)
+        bc_dofs.append(dofs[1])  # constrain uy, but not ux
+    assert len(bc_dofs) == 3
+    bc_dofs = np.array(bc_dofs)
+
+    lhs = defaultdict(list)
+    rhs = defaultdict(list)
+    bc_mat = defaultdict(list)
+    local_bases = []
+
+    for ci in range(dofmap.num_cells):
+        dofs = dofmap.cell_dofs(ci)
+
+        # select active modes
+        local_basis = select_modes(bases[ci], num_max_modes[ci], dofs_per_edge[ci])
+        local_bases.append(local_basis)
+        B = A.source.from_numpy(local_basis)  # type: ignore
+        A_local = project(A, B, B)
+        b_local = project(b, B, None)
+        element_matrix = A_local.matrix  # type: ignore
+        element_vector = b_local.matrix  # type: ignore
+
+        for ld, x in enumerate(dofs):
+            if x in bc_dofs:
+                rhs["rows"].append(x)
+                rhs["cols"].append(0)
+                rhs["data"].append(0.0)
+            else:
+                rhs["rows"].append(x)
+                rhs["cols"].append(0)
+                rhs["data"].append(element_vector[ld, 0])
+
+            for k, y in enumerate(dofs):
+                if x in bc_dofs or y in bc_dofs:
+                    # Note: in the MOR context set diagonal to zero
+                    # for the matrices arising from a_q
+                    if x == y:
+                        if x not in lhs["diagonals"]:  # only set diagonal entry once
+                            lhs["rows"].append(x)
+                            lhs["cols"].append(y)
+                            lhs["data"].append(0.0)
+                            lhs["diagonals"].append(x)
+                            bc_mat["rows"].append(x)
+                            bc_mat["cols"].append(y)
+                            bc_mat["data"].append(1.0)
+                            bc_mat["diagonals"].append(x)
+                else:
+                    lhs["rows"].append(x)
+                    lhs["cols"].append(y)
+                    lhs["data"].append(element_matrix[ld, k])
+
+        lhs["indexptr"].append(len(lhs["rows"]))
+        rhs["indexptr"].append(len(rhs["rows"]))
+
+    Ndofs = dofmap.num_dofs
+    data = np.array(lhs["data"])
+    rows = np.array(lhs["rows"])
+    cols = np.array(lhs["cols"])
+    indexptr = np.array(lhs["indexptr"])
+    shape = (Ndofs, Ndofs)
+    options = None
+    op = COOMatrixOperator(
+        (data, rows, cols),
+        indexptr,
+        dofmap.num_cells,
+        shape,
+        parameters=parameters,
+        solver_options=options,
+        name="K",
+    )
+
+    # ### Add matrix to account for BCs
+    bc_array = coo_array(
+        (bc_mat["data"], (bc_mat["rows"], bc_mat["cols"])), shape=shape
+    )
+    bc_array.eliminate_zeros()
+    bc_op = NumpyMatrixOperator(
+        bc_array.tocsr(), op.source.id, op.range.id, op.solver_options, "bc_mat"
+    )
+
+    lincomb = LincombOperator([op, bc_op], [1.0, 1.0])
+
+    data = np.array(rhs["data"])
+    rows = np.array(rhs["rows"])
+    cols = np.array(rhs["cols"])
+    indexptr = np.array(rhs["indexptr"])
+    shape = (Ndofs, 1)
+    rhs_op = COOMatrixOperator(
+        (data, rows, cols),
+        indexptr,
+        dofmap.num_cells,
+        shape,
+        parameters=Parameters({}),
+        solver_options=options,
+        name="F",
+    )
+    return lincomb, rhs_op, local_bases
 
 
 def discretize_oversampling_problem(example: BeamData, configuration: str, index: int):
@@ -149,8 +339,8 @@ def discretize_oversampling_problem(example: BeamData, configuration: str, index
     # ### FE spaces
     degree = example.fe_deg
     fe = element("P", domain.basix_cell(), degree, shape=(gdim,))
-    V = fem.functionspace(omega.grid, fe) # full space
-    W = fem.functionspace(omega_in.grid, fe) # range space
+    V = df.fem.functionspace(omega.grid, fe) # full space
+    W = df.fem.functionspace(omega_in.grid, fe) # range space
 
     # ### Oversampling problem
     emod = example.youngs_modulus

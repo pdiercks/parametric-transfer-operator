@@ -88,7 +88,7 @@ class GlobalAuxiliaryProblem:
         # center of the subdomain circle
         # good solution: work with the coarse grid
         # quick and dirty: I know the geometry
-        UNIT_LENGTH = 1.0
+        UNIT_LENGTH = 1e3 # [mm]
         _xmin = 0.0 + UNIT_LENGTH * k
         _xmax = 1.0 + UNIT_LENGTH * k
         _ymin = 0.0

@@ -3,7 +3,7 @@ import ufl
 
 import dolfinx as df
 
-from multi.domain import Domain
+from multi.domain import Domain, RectangularDomain
 from multi.problems import LinearProblem
 from multi.materials import LinearElasticMaterial
 
@@ -82,3 +82,35 @@ class ParaGeomLinEla(LinearProblem):
             rhs += self._bc_handler.neumann_bcs
 
         return rhs
+
+
+def discretize_subdomain_operator(example):
+    from .auxiliary_problem import discretize_auxiliary_problem
+    from .matrix_based_operator import FenicsxMatrixBasedOperator
+
+    parent_subdomain_msh = example.parent_unit_cell.as_posix()
+    degree = example.geom_deg
+
+    ftags = {"bottom": 11, "left": 12, "right": 13, "top": 14, "interface": 15}
+    aux = discretize_auxiliary_problem(
+        parent_subdomain_msh, degree, ftags, example.parameters["subdomain"]
+    )
+    d = df.fem.Function(aux.problem.V, name="d_trafo")
+
+    EMOD = 1. # dimless formulation
+    POISSON = example.poisson_ratio
+    domain = aux.problem.domain.grid
+    omega = RectangularDomain(domain)
+    problem = ParaGeomLinEla(omega, aux.problem.V, E=EMOD, NU=POISSON, d=d)
+
+    # ### wrap as pymor model
+    def param_setter(mu):
+        d.x.array[:] = 0.0
+        aux.solve(d, mu)
+        d.x.scatter_forward()
+
+    params = {"R": 1}
+    operator = FenicsxMatrixBasedOperator(
+        problem.form_lhs, params, param_setter=param_setter, name="ParaGeom"
+    )
+    return operator

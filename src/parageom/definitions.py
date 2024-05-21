@@ -25,8 +25,7 @@ class BeamData:
     Args:
         name: The name of the example.
         gdim: The geometric dimension of the problem.
-        length: The length of the beam.
-        height: The height of the beam.
+        unit_length: Unit length of the unit cell (subdomain).
         nx: Number of coarse grid cells (subdomains) in x.
         ny: Number of coarse grid cells (subdomains) in y.
         geom_deg: Degree for geometry interpolation.
@@ -51,8 +50,7 @@ class BeamData:
 
     name: str = "parageom"
     gdim: int = 2
-    length: float = 10.0
-    height: float = 1.0
+    unit_length: float = 1000. # [mm]
     nx: int = 10
     ny: int = 1
     geom_deg: int = 2
@@ -68,8 +66,8 @@ class BeamData:
             "inner": Parameters({"R": 3}),
         }
     )
-    mu_range: tuple[float, float] = (0.1, 0.3)
-    mu_bar: float = 0.2
+    mu_range: tuple[float, float] = (100., 300.)
+    mu_bar: float = 200.
     training_set_seed: int = 767667058
     configurations: tuple[str, str, str] = ("left", "inner", "right")
     distributions: tuple[str, ...] = ("normal",)
@@ -83,6 +81,9 @@ class BeamData:
 
     def __post_init__(self):
         """Creates directory structure"""
+
+        self.length = self.unit_length * self.nx
+        self.height = self.unit_length * self.ny
 
         self.grids_path.mkdir(exist_ok=True, parents=True)
         self.figures_path.mkdir(exist_ok=True, parents=True)
