@@ -1,7 +1,7 @@
 import numpy as np
 
 from mpi4py import MPI
-from dolfinx import mesh, fem, default_scalar_type
+from dolfinx import fem, default_scalar_type
 from dolfinx.io import gmshio, XDMFFile
 
 from multi.boundary import plane_at, point_at
@@ -13,8 +13,6 @@ from multi.product import InnerProduct
 
 from pymor.bindings.fenicsx import FenicsxMatrixOperator, FenicsxVectorSpace
 from multi.projection import relative_error, absolute_error
-
-TY = -10.
 
 
 def compute_reference_solution(example, mshfile, degree, d):
@@ -54,6 +52,7 @@ def compute_reference_solution(example, mshfile, degree, d):
     problem.add_dirichlet_bc(u_bottom_right, bottom_right, sub=1, method="geometrical", entity_dim=0)
 
     # Neumann BCs
+    TY = -example.traction_y
     traction = fem.Constant(
         domain, (default_scalar_type(0.0), default_scalar_type(TY))
     )
@@ -65,70 +64,10 @@ def compute_reference_solution(example, mshfile, degree, d):
     return u
 
 
-def discretize_fom(example, auxiliary_problem, trafo_disp):
-    from .fom import ParaGeomLinEla
-    from .matrix_based_operator import FenicsxMatrixBasedOperator, BCGeom, BCTopo
-    from pymor.basic import VectorOperator, StationaryModel
-
-    domain = auxiliary_problem.problem.domain.grid
-    tdim = domain.topology.dim
-    fdim = tdim - 1
-    top_marker = int(194)
-    top_locator = plane_at(example.height, "y")
-    facet_tags, _ = create_meshtags(domain, fdim, {"top": (top_marker, top_locator)})
-    omega = RectangularDomain(domain, facet_tags=facet_tags)
-
-    EMOD = example.youngs_modulus
-    POISSON = example.poisson_ratio
-    V = trafo_disp.function_space
-    problem = ParaGeomLinEla(omega, V, E=EMOD, NU=POISSON, d=trafo_disp)
-
-    # Dirichlet BCs
-    origin = point_at(omega.xmin)
-    bottom_right_locator = point_at([omega.xmax[0], omega.xmin[1], 0.])
-    bottom_right = mesh.locate_entities_boundary(domain, 0, bottom_right_locator)
-    u_origin = fem.Constant(domain, (default_scalar_type(0.0),) * omega.gdim)
-    u_bottom_right = fem.Constant(domain, default_scalar_type(0.0))
-
-    bc_origin = BCGeom(u_origin, origin, V)
-    bc_bottom_right = BCTopo(u_bottom_right, bottom_right, 0, V, sub=1)
-    problem.add_dirichlet_bc(value=bc_origin.value, boundary=bc_origin.locator, method="geometrical")
-    problem.add_dirichlet_bc(value=bc_bottom_right.value, boundary=bc_bottom_right.entities, sub=1, method="topological", entity_dim=bc_bottom_right.entity_dim)
-
-    # Neumann BCs
-    traction = fem.Constant(
-        domain, (default_scalar_type(0.0), default_scalar_type(TY))
-    )
-    problem.add_neumann_bc(top_marker, traction)
-
-    problem.setup_solver()
-    problem.assemble_vector(bcs=problem.get_dirichlet_bcs())
-
-    # ### wrap as pymor model
-    def param_setter(mu):
-        trafo_disp.x.array[:] = 0.
-        auxiliary_problem.solve(trafo_disp, mu)
-
-    params = {"R": 10}
-    operator = FenicsxMatrixBasedOperator(problem.form_lhs, params, param_setter=param_setter,
-                                          bcs=(bc_origin, bc_bottom_right), name="ParaGeom")
-
-    # NOTE
-    # without b.copy(), fom.rhs.as_range_array() does not return correct data
-    # problem goes out of scope and problem.b is deleted
-    rhs = VectorOperator(operator.range.make_array([problem.b.copy()]))
-    fom = StationaryModel(operator, rhs, name="FOM")
-
-    coeffs = problem.form_lhs.coefficients()
-    assert len(coeffs) == 1
-    assert coeffs[0].name == "d_trafo"
-
-    return fom
-
-
 def main():
     from .tasks import example
     from .auxiliary_problem import discretize_auxiliary_problem
+    from .fom import discretize_fom
 
     coarse_grid_path = example.coarse_grid("global").as_posix()
     parent_domain_path = example.global_parent_domain.as_posix()
