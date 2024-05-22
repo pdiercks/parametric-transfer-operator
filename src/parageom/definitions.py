@@ -56,7 +56,7 @@ class BeamData:
     geom_deg: int = 2
     fe_deg: int = 2
     poisson_ratio: float = 0.3
-    youngs_modulus: float = 20e3
+    youngs_modulus: float = 20e3 # [MPa]
     parameters: dict = field(
         default_factory=lambda: {
             "subdomain": Parameters({"R": 1}),
@@ -66,8 +66,8 @@ class BeamData:
             "inner": Parameters({"R": 3}),
         }
     )
-    mu_range: tuple[float, float] = (100., 300.)
-    mu_bar: float = 200.
+    mu_range: tuple[float, float] = (100., 300.) # [mm]
+    mu_bar: float = 200. # [mm]
     training_set_seed: int = 767667058
     configurations: tuple[str, str, str] = ("left", "inner", "right")
     distributions: tuple[str, ...] = ("normal",)
