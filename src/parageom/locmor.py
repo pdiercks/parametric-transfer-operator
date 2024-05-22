@@ -1,9 +1,10 @@
 from typing import Tuple, Optional
 
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 
 import numpy as np
-from scipy.sparse import coo_array
+from scipy.sparse import coo_array, csr_array
+from scipy.linalg import solve
 
 from mpi4py import MPI
 import dolfinx as df
@@ -32,9 +33,11 @@ from multi.interpolation import make_mapping
 from .definitions import BeamData, BeamProblem
 
 
-class GlobalParaGeomOperator(Operator):
-    """Operator for geometrically parametrized linear elastic problem
-    in the context of localized MOR.
+EISubdomainOperatorWrapper = namedtuple("EISubdomainOperator", ["rop", "cb", "interpolation_matrix"])
+
+
+class COOMatrixOperator(Operator):
+    """Wraps COO matrix data as an |Operator|.
 
     Args:
         data: COO matrix data. See scipy.sparse.coo_array.
@@ -90,6 +93,99 @@ class GlobalParaGeomOperator(Operator):
         return self.assemble(mu).apply_inverse(V, initial_guess=initial_guess, least_squares=least_squares)
 
 
+class GlobalParaGeomOperator(Operator):
+    """Operator for geometrically parametrized linear elastic problem
+    in the context of localized MOR.
+
+    Args:
+        r_sub_op: Restricted subdomain operator.
+        data:
+        rows:
+        cols:
+        indexptr: Points to end of data for each cell.
+        num_cells: Number of cells.
+        shape: The shape of the matrix.
+        parameters: The |Parameters| the operator depends on.
+        solver_options: Solver options.
+        name: The name of the operator.
+
+    """
+
+    linear = True
+
+    def __init__(
+        self,
+        ei_sub_op: EISubdomainOperatorWrapper,
+        data: np.ndarray,
+        rows: np.ndarray,
+        cols: np.ndarray,
+        indexptr: np.ndarray,
+        num_cells: int,
+        shape: Tuple[int, int],
+        parameters: Parameters = {},
+        solver_options: Optional[dict] = None,
+        name: Optional[str] = None,
+    ):
+        self.__auto_init(locals())  # type: ignore
+        self.source = NumpyVectorSpace(shape[1])
+        self.range = NumpyVectorSpace(shape[0])
+
+    def assemble(self, mu=None):
+        assert self.parameters.assert_compatible(mu)
+        assert self.parametric
+        assert mu is not None
+
+        op = self.ei_sub_op.rop
+        rdofs = op.restricted_range_dofs
+        interpolation_matrix = self.ei_sub_op.interpolation_matrix
+        indexptr = self.indexptr
+        M = len(self.ei_sub_op.cb)
+
+        data = self.data
+        new = np.zeros((data.shape[1],), dtype=np.float32)
+
+        # TODO: works as expected?
+
+        for i, mu_i in enumerate(mu.to_numpy()):
+            # restricted evaluation of the subdomain operator
+            loc_mu = op.parameters.parse([mu_i])
+            A = csr_array(op.assemble(loc_mu).matrix.getValuesCSR()[::-1])
+            _coeffs = solve(interpolation_matrix, A[rdofs, rdofs])
+            λ = _coeffs.reshape(1, M)
+
+            subdomain_range = np.s_[indexptr[i-1]:indexptr[i]]
+            if i == 0:
+                subdomain_range = np.s_[0:indexptr[i]]
+            new[subdomain_range] = np.dot(λ, data[:, subdomain_range])
+
+        K = coo_array((new, (self.rows, self.cols)), shape=self.shape)  # type: ignore
+        K.eliminate_zeros()
+        return NumpyMatrixOperator(
+            K.tocsr(),
+            self.source.id,
+            self.range.id,
+            self.solver_options,
+            self.name + "_assembled",
+        )
+
+    def apply(self, U, mu=None):
+        return self.assemble(mu).apply(U)
+
+    def apply_adjoint(self, V, mu=None):
+        return self.assemble(mu).apply_adjoint(V)
+
+    def as_range_array(self, mu=None):
+        return self.assemble(mu).as_range_array()
+
+    def as_source_array(self, mu=None):
+        return self.assemble(mu).as_source_array()
+
+    def apply_inverse(self, V, mu=None, initial_guess=None, least_squares=False):
+        return self.assemble(mu).apply_inverse(
+            V, initial_guess=initial_guess, least_squares=least_squares
+        )
+
+
 def reconstruct(
     U_rb: np.ndarray,
     dofmap: DofMap,
@@ -115,7 +211,6 @@ def reconstruct(
     u_global_view = u_global.x.array
 
     for cell in range(dofmap.num_cells):
-
         # translate subdomain mesh
         vertices = coarse_grid.get_entities(0, cell)
         dx_cell = coarse_grid.get_entity_coordinates(0, vertices)[0]
@@ -135,9 +230,10 @@ def reconstruct(
 
 
 def assemble_system(
+    example,
     num_modes: int,
     dofmap: DofMap,
-    A: FenicsxMatrixOperator,
+    ei_sub_op: EISubdomainOperatorWrapper,
     b: VectorOperator,
     bases: list[np.ndarray],
     num_max_modes: np.ndarray,
@@ -148,14 +244,13 @@ def assemble_system(
     Args:
         num_modes: Number of fine scale modes per edge to be used.
         dofmap: The dofmap of the global reduced space.
-        A: Local high fidelity stiffness matrix.
+        mops: Collateral basis (matrix operators) of subdomain operator.
         b: Local high fidelity external force vector.
         bases: Local reduced basis for each subdomain.
         num_max_modes: Maximum number of fine scale modes for each edge.
         parameters: The |Parameters| the ROM depends on.
 
     """
-    from .locmor import COOMatrixOperator
 
     dofs_per_vertex = 2
     dofs_per_face = 0
@@ -163,13 +258,13 @@ def assemble_system(
     dofs_per_edge = num_max_modes.copy()
     dofs_per_edge[num_max_modes > num_modes] = num_modes
     dofmap.distribute_dofs(dofs_per_vertex, dofs_per_edge, dofs_per_face)
-    # logger.debug("Dofs per edge:\n"+f"{dofs_per_edge=}")
 
     # ### Definition of Dirichlet BCs
     # This also depends on number of modes and can only be defined after
     # distribution of dofs
+    length = example.length
     origin = dofmap.grid.locate_entities_boundary(0, point_at([0.0, 0.0, 0.0]))
-    bottom_right = dofmap.grid.locate_entities_boundary(0, point_at([10.0, 0.0, 0.0]))
+    bottom_right = dofmap.grid.locate_entities_boundary(0, point_at([length, 0.0, 0.0]))
     bc_dofs = []
     for vertex in origin:
         bc_dofs += dofmap.entity_dofs(0, vertex)
@@ -184,16 +279,20 @@ def assemble_system(
     bc_mat = defaultdict(list)
     local_bases = []
 
+    mops = ei_sub_op.cb
+    source = mops[0].source
+    M = len(mops)  # size of collateral basis
+
     for ci in range(dofmap.num_cells):
         dofs = dofmap.cell_dofs(ci)
 
         # select active modes
         local_basis = select_modes(bases[ci], num_max_modes[ci], dofs_per_edge[ci])
         local_bases.append(local_basis)
-        B = A.source.from_numpy(local_basis)  # type: ignore
-        A_local = project(A, B, B)
+        B = source.from_numpy(local_basis)  # type: ignore
+        mops_local = [project(A, B, B) for A in mops]
         b_local = project(b, B, None)
-        element_matrix = A_local.matrix  # type: ignore
+        element_matrices = [a_local.matrix for a_local in mops_local]  # type: ignore
         element_vector = b_local.matrix  # type: ignore
 
         for ld, x in enumerate(dofs):
@@ -214,7 +313,8 @@ def assemble_system(
                         if x not in lhs["diagonals"]:  # only set diagonal entry once
                             lhs["rows"].append(x)
                             lhs["cols"].append(y)
-                            lhs["data"].append(0.0)
+                            for m in range(M):
+                                lhs[f"data_{m}"].append(0.0)
                             lhs["diagonals"].append(x)
                             bc_mat["rows"].append(x)
                             bc_mat["cols"].append(y)
@@ -223,20 +323,46 @@ def assemble_system(
                 else:
                     lhs["rows"].append(x)
                     lhs["cols"].append(y)
-                    lhs["data"].append(element_matrix[ld, k])
+                    for m, elem_mat in enumerate(element_matrices):
+                        lhs[f"data_{m}"].append(elem_mat[ld, k])
 
         lhs["indexptr"].append(len(lhs["rows"]))
         rhs["indexptr"].append(len(rhs["rows"]))
 
     Ndofs = dofmap.num_dofs
-    data = np.array(lhs["data"])
+
+    _data = []
+    for m in range(M):
+        _data.append(lhs[f"data_{m}"])
+    data = np.vstack(_data)
+    # stack matrix data as row vectors
+    # need to form linear combination with interpolation coeff per row
+    # need to account for different geometry (μ) per column using indexptr
+
+    # mu_0 will give coefficient vector of length M
+    # and each entries in data corresponding to subdomain 0 need to
+    # be multiplied with the coefficients and summed up
+
+    # The summation is finally handled by the COO array
+    # although here I need data with shape (1, nnz)
+
+    # After solving the interpolation eq. for each subdomain
+    # all coefficients can be stored in a matrix of shape (M, 10)
+
+    # data (M, nnz)
+    # coeff (M, 10)
+    # indexptr --> defining 10 ranges within [0, nnz-1] that corresponds to values for each subdomain
+
     rows = np.array(lhs["rows"])
     cols = np.array(lhs["cols"])
     indexptr = np.array(lhs["indexptr"])
     shape = (Ndofs, Ndofs)
     options = None
-    op = COOMatrixOperator(
-        (data, rows, cols),
+    op = GlobalParaGeomOperator(
+        ei_sub_op,
+        data,
+        rows,
+        cols,
         indexptr,
         dofmap.num_cells,
         shape,
@@ -284,32 +410,34 @@ def discretize_oversampling_problem(example: BeamData, configuration: str, index
     """
 
     # use MPI.COMM_SELF for embarrassingly parallel workloads
-    oversamplingdomain_xdmf = example.oversampling_domain(configuration, index).as_posix()
+    oversamplingdomain_xdmf = example.oversampling_domain(
+        configuration, index
+    ).as_posix()
     with XDMFFile(MPI.COMM_SELF, oversamplingdomain_xdmf, "r") as fh:
         domain = fh.read_mesh(name="Grid")
 
     omega = RectangularDomain(domain, cell_tags=None, facet_tags=None)
-    omega.create_facet_tags({
-        "bottom": int(11), "left": int(12), "right": int(13), "top": int(14)
-        })
+    omega.create_facet_tags(
+        {"bottom": int(11), "left": int(12), "right": int(13), "top": int(14)}
+    )
 
     if configuration == "inner":
-        assert omega.facet_tags.find(11).size == example.num_intervals * 3 # bottom
-        assert omega.facet_tags.find(12).size == example.num_intervals * 1 # left
-        assert omega.facet_tags.find(13).size == example.num_intervals * 1 # right
-        assert omega.facet_tags.find(14).size == example.num_intervals * 3 # top
+        assert omega.facet_tags.find(11).size == example.num_intervals * 3  # bottom
+        assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
+        assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
+        assert omega.facet_tags.find(14).size == example.num_intervals * 3  # top
 
     elif configuration == "left":
-        assert omega.facet_tags.find(11).size == example.num_intervals * 2 # bottom
-        assert omega.facet_tags.find(12).size == example.num_intervals * 1 # left
-        assert omega.facet_tags.find(13).size == example.num_intervals * 1 # right
-        assert omega.facet_tags.find(14).size == example.num_intervals * 2 # top
+        assert omega.facet_tags.find(11).size == example.num_intervals * 2  # bottom
+        assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
+        assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
+        assert omega.facet_tags.find(14).size == example.num_intervals * 2  # top
 
     elif configuration == "right":
-        assert omega.facet_tags.find(11).size == example.num_intervals * 2 # bottom
-        assert omega.facet_tags.find(12).size == example.num_intervals * 1 # left
-        assert omega.facet_tags.find(13).size == example.num_intervals * 1 # right
-        assert omega.facet_tags.find(14).size == example.num_intervals * 2 # top
+        assert omega.facet_tags.find(11).size == example.num_intervals * 2  # bottom
+        assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
+        assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
+        assert omega.facet_tags.find(14).size == example.num_intervals * 2  # top
 
     else:
         raise NotImplementedError
@@ -320,7 +448,9 @@ def discretize_oversampling_problem(example: BeamData, configuration: str, index
 
     # BeamProblem is only used to get stuff for transfer problem definition
     # here we do not need the actual physical meshes?
-    beamproblem = BeamProblem(example.coarse_grid("global"), example.global_parent_domain, example)
+    beamproblem = BeamProblem(
+        example.coarse_grid("global"), example.global_parent_domain, example
+    )
     cell_index = beamproblem.config_to_cell(configuration)
     gamma_out = beamproblem.get_gamma_out(cell_index)
     dirichlet = beamproblem.get_dirichlet(cell_index)
@@ -328,7 +458,9 @@ def discretize_oversampling_problem(example: BeamData, configuration: str, index
 
     # ### Omega in
     gdim = example.gdim
-    target_subdomain, _, _ = read_mesh(example.target_subdomain(configuration, index), MPI.COMM_WORLD, gdim=gdim)
+    target_subdomain, _, _ = read_mesh(
+        example.target_subdomain(configuration, index), MPI.COMM_WORLD, gdim=gdim
+    )
     id_omega_in = 99
     omega_in = RectangularSubdomain(id_omega_in, target_subdomain)
     # create coarse grid of target subdomain
@@ -339,8 +471,8 @@ def discretize_oversampling_problem(example: BeamData, configuration: str, index
     # ### FE spaces
     degree = example.fe_deg
     fe = element("P", domain.basix_cell(), degree, shape=(gdim,))
-    V = df.fem.functionspace(omega.grid, fe) # full space
-    W = df.fem.functionspace(omega_in.grid, fe) # range space
+    V = df.fem.functionspace(omega.grid, fe)  # full space
+    W = df.fem.functionspace(omega_in.grid, fe)  # range space
 
     # ### Oversampling problem
     emod = example.youngs_modulus
@@ -383,14 +515,14 @@ def discretize_oversampling_problem(example: BeamData, configuration: str, index
     oversampling_problem.clear_bcs()
     subproblem.clear_bcs()
     transfer = TransferProblem(
-            oversampling_problem,
-            subproblem,
-            gamma_out,
-            dirichlet=dirichlet,
-            source_product={"product": "l2", "bcs": ()},
-            range_product=range_product,
-            kernel=kernel,
-            )
+        oversampling_problem,
+        subproblem,
+        gamma_out,
+        dirichlet=dirichlet,
+        source_product={"product": "l2", "bcs": ()},
+        range_product=range_product,
+        kernel=kernel,
+    )
     return transfer
 
 
@@ -398,23 +530,24 @@ if __name__ == "__main__":
     from .tasks import example
     from multi.misc import x_dofs_vectorspace, locate_dofs
     from pymor.bindings.fenicsx import FenicsxVisualizer
+
     param = Parameters({"E": 2})
-    ps = ParameterSpace(param, (1., 2.))
+    ps = ParameterSpace(param, (1.0, 2.0))
     mu = ps.parameters.parse([1.5 for _ in range(2)])
     configuration = "right"
     # configuration = "left"
     index = 0
     T = discretize_oversampling_problem(example, configuration, index)
-    v = T.generate_random_boundary_data(1, distribution='normal')
-    v[:, ::2] = 0.1 # set x component to value
-    v[:, 1::2] = 0.1 # set y component to value
+    v = T.generate_random_boundary_data(1, distribution="normal")
+    v[:, ::2] = 0.1  # set x component to value
+    v[:, 1::2] = 0.1  # set y component to value
     U = T.solve(v)
 
     xdofs = x_dofs_vectorspace(T.range.V)
     if configuration == "left":
-        dofs = locate_dofs(xdofs, np.array([[0., 0., 0.]]))
+        dofs = locate_dofs(xdofs, np.array([[0.0, 0.0, 0.0]]))
     elif configuration == "right":
-        dofs = locate_dofs(xdofs, np.array([[10., 0., 0.]]))
+        dofs = locate_dofs(xdofs, np.array([[10.0, 0.0, 0.0]]))
     assert np.allclose(U.dofs(dofs)[:, 1], np.zeros_like(U.dofs(dofs)[:, 1]))
 
     viz = FenicsxVisualizer(T.range)
