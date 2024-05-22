@@ -97,7 +97,7 @@ def discretize_subdomain_operator(example):
     )
     d = df.fem.Function(aux.problem.V, name="d_trafo")
 
-    EMOD = 1. # dimless formulation
+    EMOD = example.youngs_modulus
     POISSON = example.poisson_ratio
     domain = aux.problem.domain.grid
     omega = RectangularDomain(domain)
