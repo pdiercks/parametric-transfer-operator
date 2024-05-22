@@ -295,7 +295,7 @@ def approximate_range(args, example, index, logfilename):
 
     # Multiscale problem definition
     beam_problem = BeamProblem(
-        example.coarse_grid("global"), example.global_parent_domain
+        example.coarse_grid("global"), example.global_parent_domain, example
     )
     cell_index = beam_problem.config_to_cell(configuration)
     gamma_out = beam_problem.get_gamma_out(cell_index)
@@ -337,8 +337,9 @@ def approximate_range(args, example, index, logfilename):
     omega = neumann_problem.domain
 
     # Add Neumann bc
+    traction_y = example.traction_y
     loading = fem.Constant(
-        omega.grid, (default_scalar_type(0.0), default_scalar_type(-10.0))
+        omega.grid, (default_scalar_type(0.0), default_scalar_type(-traction_y))
     )
     top_facets = int(14)  # see locmor.py l. 95
     neumann_problem.add_neumann_bc(top_facets, loading)

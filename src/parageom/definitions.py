@@ -57,6 +57,7 @@ class BeamData:
     fe_deg: int = 2
     poisson_ratio: float = 0.3
     youngs_modulus: float = 20e3 # [MPa]
+    traction_y: float = 10.0 # [MPa]
     parameters: dict = field(
         default_factory=lambda: {
             "subdomain": Parameters({"R": 1}),
@@ -69,6 +70,7 @@ class BeamData:
     mu_range: tuple[float, float] = (100., 300.) # [mm]
     mu_bar: float = 200. # [mm]
     training_set_seed: int = 767667058
+    validation_set_seed: int = 986718877
     configurations: tuple[str, str, str] = ("left", "inner", "right")
     distributions: tuple[str, ...] = ("normal",)
     methods: tuple[str, ...] = ("hapod",)
@@ -277,6 +279,9 @@ class BeamData:
         """logfile for extension"""
         return self.logs_path(nr, method) / f"extension_{distr}_{cell:02}.log"
 
+    def log_run_locrom(self, nr: int, method: str, distr: str) -> Path:
+        return self.logs_path(nr, method) / f"run_locrom_{distr}.log"
+
     def hapod_pod_data(self, nr: int, distr: str, conf: str) -> Path:
         """POD data (HAPOD)"""
         return self.method_folder(nr, "hapod") / f"pod_data_{distr}_{conf}.json"
@@ -304,11 +309,13 @@ class BeamData:
 
 
 class BeamProblem(MultiscaleProblemDefinition):
-    def __init__(self, coarse_grid: Path, fine_grid: Path):
+    gdim = 2
+
+    def __init__(self, coarse_grid: Path, fine_grid: Path, data: BeamData):
         super().__init__(coarse_grid, fine_grid)
-        gdim = 2
-        self.setup_coarse_grid(MPI.COMM_WORLD, gdim)
-        self.setup_fine_grid(MPI.COMM_WORLD, gdim)
+        self.data = data
+        self.setup_coarse_grid(MPI.COMM_WORLD, gdim=self.gdim)
+        self.setup_fine_grid(MPI.COMM_WORLD, gdim=self.gdim)
         self.build_edge_basis_config(self.cell_sets)
 
     def config_to_cell(self, config: str) -> int:
@@ -350,19 +357,12 @@ class BeamProblem(MultiscaleProblemDefinition):
             "bottom_right": (int(102), point_at([xmax[0], xmin[1], xmin[2]])),
         }
 
-    def get_xmin_omega_in(self, cell_index: Optional[int] = None) -> np.ndarray:
+    def get_xmin_omega_in(self, cell_index: int) -> np.ndarray:
         """Returns coordinate xmin of target subdomain"""
-        if cell_index is not None:
-            assert cell_index in (0, 4, 9)
-        if cell_index == 0:
-            xmin = np.array([[0.0, 0.0, 0.0]])
-        elif cell_index == 4:
-            xmin = np.array([[4.0, 0.0, 0.0]])
-        elif cell_index == 9:
-            xmin = np.array([[9.0, 0.0, 0.0]])
-        else:
-            raise NotImplementedError
-        return xmin
+        grid = self.coarse_grid
+        verts = grid.get_entities(0, cell_index)
+        coord = grid.get_entity_coordinates(0, verts)
+        return coord[0]
 
     def get_dirichlet(self, cell_index: Optional[int] = None) -> Union[dict, None]:
         _, origin = self.boundaries["origin"]
@@ -406,16 +406,19 @@ class BeamProblem(MultiscaleProblemDefinition):
             return (0, 2)
 
     def get_gamma_out(self, cell_index: Optional[int] = None) -> Callable:
+        data = self.data
+        unit_length = data.unit_length
+
         if cell_index is not None:
             assert cell_index in (0, 4, 9)
         if cell_index == 0:
-            gamma_out = plane_at(2.0, "x")
+            gamma_out = plane_at(2 * unit_length, "x")
         elif cell_index == 4:
-            left = plane_at(3.0, "x")
-            right = plane_at(6.0, "x")
+            left = plane_at(3 * unit_length, "x")
+            right = plane_at(6 * unit_length, "x")
             gamma_out = lambda x: np.logical_or(left(x), right(x))
         elif cell_index == 9:
-            gamma_out = plane_at(8.0, "x")
+            gamma_out = plane_at(8 * unit_length, "x")
         else:
             raise NotImplementedError
         return gamma_out

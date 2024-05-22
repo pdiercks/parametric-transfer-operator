@@ -32,7 +32,7 @@ def main(args):
 
     # problem definition
     beamproblem = BeamProblem(
-        example.coarse_grid("global"), example.global_parent_domain
+        example.coarse_grid("global"), example.global_parent_domain, example
     )
     coarsegrid = beamproblem.coarse_grid
 

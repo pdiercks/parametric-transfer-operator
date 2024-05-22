@@ -39,6 +39,7 @@ def discretize_unit_cell(
 def create_structured_coarse_grid(config: str, output: str):
     from .tasks import example
     from multi.preprocessing import create_rectangle
+    a = example.unit_length
 
     match config:
         case "left":
@@ -46,20 +47,19 @@ def create_structured_coarse_grid(config: str, output: str):
             xmin = 0.0
         case "right":
             num_cells = (2, 1)
-            xmin = 8.0
+            xmin = 8 * a
         case "inner":
             num_cells = (3, 1)
-            xmin = 3.0
+            xmin = 3 * a
         case "global":
             num_cells = (example.nx, example.ny)
             xmin = 0.0
         case _:
             raise NotImplementedError
 
-    UNIT_LENGTH = example.unit_length
-    xmax = xmin + UNIT_LENGTH * num_cells[0]
+    xmax = xmin + a * num_cells[0]
     ymin = 0.0
-    ymax = ymin + UNIT_LENGTH * num_cells[1]
+    ymax = ymin + a * num_cells[1]
     create_rectangle(
         xmin, xmax, ymin, ymax, num_cells=num_cells, recombine=True, out_file=output
     )
