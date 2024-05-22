@@ -35,7 +35,7 @@ def compute_reference_solution(mshfile, degree, d):
     x_domain += disp
 
     # Physical Domain
-    top_locator = plane_at(1.0, "y")
+    top_locator = plane_at(1000.0, "y")
     tdim = domain.topology.dim
     fdim = tdim - 1
     top_marker = int(194)
@@ -76,7 +76,7 @@ def discretize_fom(auxiliary_problem, trafo_disp):
     tdim = domain.topology.dim
     fdim = tdim - 1
     top_marker = int(194)
-    top_locator = plane_at(1.0, "y")
+    top_locator = plane_at(1000.0, "y")
     facet_tags, _ = create_meshtags(domain, fdim, {"top": (top_marker, top_locator)})
     omega = RectangularDomain(domain, facet_tags=facet_tags)
 
@@ -138,11 +138,16 @@ def main():
     aux = discretize_auxiliary_problem(
         parent_domain_msh, degree, interface_tags, example.parameters["global"]
     )
-    values = [0.15, 0.17, 0.19, 0.21, 0.23, 0.25, 0.27, 0.29, 0.2, 0.3]
+    values = [150., 170., 190., 210., 230., 250., 270., 290., 200., 300.]
     mu = aux.parameters.parse(values)
     d = fem.Function(aux.problem.V, name="d_trafo")
     aux.solve(d, mu)  # type: ignore
     u_phys = compute_reference_solution(parent_domain_msh, degree, d)
+
+    # u on physical mesh
+    with XDMFFile(u_phys.function_space.mesh.comm, "uphys.xdmf", "w") as xdmf:
+        xdmf.write_mesh(u_phys.function_space.mesh) # type: ignore
+        xdmf.write_function(u_phys, t=0.0) # type: ignore
 
     fom = discretize_fom(aux, d)
     U = fom.solve(mu)
@@ -150,6 +155,7 @@ def main():
     u.x.array[:] = U.to_numpy().flatten()
 
     # compare on reference domain
+    breakpoint()
     V = aux.problem.V
     u_ref = fem.Function(V)
     interpolation_data = fem.create_nonmatching_meshes_interpolation_data(
@@ -166,11 +172,6 @@ def main():
         xdmf.write_mesh(u.function_space.mesh)
         xdmf.write_function(u, t=0.0)
         # xdmf.write_function(u_ref, t=0.0)
-
-    # u on physical mesh
-    with XDMFFile(u_phys.function_space.mesh.comm, "uphys.xdmf", "w") as xdmf:
-        xdmf.write_mesh(u_phys.function_space.mesh) # type: ignore
-        xdmf.write_function(u_phys, t=0.0) # type: ignore
 
     inner_product = InnerProduct(V, "mass")
     prod_mat = inner_product.assemble_matrix()
