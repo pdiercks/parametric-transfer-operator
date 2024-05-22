@@ -69,12 +69,12 @@ def interpolate_subdomain_operator(operator):
 
 if __name__ == "__main__":
     from .tasks import example
-    from .fom import discretize_subdomain_operator
+    from .fom import discretize_subdomain_operators
     from scipy.linalg import solve
     from scipy.sparse.linalg import norm
     from pymor.operators.constructions import LincombOperator
 
-    operator = discretize_subdomain_operator(example)
+    operator, _ = discretize_subdomain_operators(example)
     cb, interpmat, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(operator)
     r_op, source_dofs = operator.restricted(magic_dofs)
 
