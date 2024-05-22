@@ -19,7 +19,7 @@ def vec2mat(A: csr_array):
     return mapping
 
 
-def interpolate_subdomain_operator(operator):
+def interpolate_subdomain_operator(example, operator):
     from pymor.vectorarrays.numpy import NumpyVectorSpace
     from pymor.operators.numpy import NumpyMatrixOperator
     from pymor.algorithms.ei import deim
@@ -75,7 +75,7 @@ if __name__ == "__main__":
     from pymor.operators.constructions import LincombOperator
 
     operator, _ = discretize_subdomain_operators(example)
-    cb, interpmat, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(operator)
+    cb, interpmat, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator)
     r_op, source_dofs = operator.restricted(magic_dofs)
 
     test_mu = operator.parameters.parse([287.])
