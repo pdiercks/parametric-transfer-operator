@@ -15,13 +15,9 @@ from pymor.bindings.fenicsx import FenicsxMatrixOperator, FenicsxVectorSpace
 from multi.projection import relative_error, absolute_error
 
 TY = -10.
-# material parameters for the test problem
-# E and NU for auxiliary problem are defined in function `discretize_auxiliary_problem`
-EMOD = 20e3
-POISSON = 0.3
 
 
-def compute_reference_solution(mshfile, degree, d):
+def compute_reference_solution(example, mshfile, degree, d):
     # translate parent domain
     domain = gmshio.read_from_msh(
         mshfile, MPI.COMM_WORLD, gdim=2
@@ -35,7 +31,7 @@ def compute_reference_solution(mshfile, degree, d):
     x_domain += disp
 
     # Physical Domain
-    top_locator = plane_at(1000.0, "y")
+    top_locator = plane_at(example.height, "y")
     tdim = domain.topology.dim
     fdim = tdim - 1
     top_marker = int(194)
@@ -43,6 +39,8 @@ def compute_reference_solution(mshfile, degree, d):
     omega = RectangularDomain(domain, facet_tags=facet_tags)
 
     # Problem
+    EMOD = example.youngs_modulus
+    POISSON = example.poisson_ratio
     material = LinearElasticMaterial(gdim=omega.gdim, E=EMOD, NU=POISSON)
     V = fem.functionspace(domain, ("P", degree, (omega.gdim,)))
     problem = LinearElasticityProblem(omega, V, phases=material)
@@ -67,7 +65,7 @@ def compute_reference_solution(mshfile, degree, d):
     return u
 
 
-def discretize_fom(auxiliary_problem, trafo_disp):
+def discretize_fom(example, auxiliary_problem, trafo_disp):
     from .fom import ParaGeomLinEla
     from .matrix_based_operator import FenicsxMatrixBasedOperator, BCGeom, BCTopo
     from pymor.basic import VectorOperator, StationaryModel
@@ -76,10 +74,12 @@ def discretize_fom(auxiliary_problem, trafo_disp):
     tdim = domain.topology.dim
     fdim = tdim - 1
     top_marker = int(194)
-    top_locator = plane_at(1000.0, "y")
+    top_locator = plane_at(example.height, "y")
     facet_tags, _ = create_meshtags(domain, fdim, {"top": (top_marker, top_locator)})
     omega = RectangularDomain(domain, facet_tags=facet_tags)
 
+    EMOD = example.youngs_modulus
+    POISSON = example.poisson_ratio
     V = trafo_disp.function_space
     problem = ParaGeomLinEla(omega, V, E=EMOD, NU=POISSON, d=trafo_disp)
 
@@ -130,32 +130,31 @@ def main():
     from .tasks import example
     from .auxiliary_problem import discretize_auxiliary_problem
 
-    # Generate physical subdomain
-    parent_domain_msh = example.global_parent_domain.as_posix()
+    coarse_grid_path = example.coarse_grid("global").as_posix()
+    parent_domain_path = example.global_parent_domain.as_posix()
     degree = example.geom_deg
 
     interface_tags = [i for i in range(15, 25)] # FIXME better define in Example data class
     aux = discretize_auxiliary_problem(
-        parent_domain_msh, degree, interface_tags, example.parameters["global"]
+        parent_domain_path, degree, interface_tags, example.parameters["global"], coarse_grid=coarse_grid_path
     )
     values = [150., 170., 190., 210., 230., 250., 270., 290., 200., 300.]
     mu = aux.parameters.parse(values)
     d = fem.Function(aux.problem.V, name="d_trafo")
     aux.solve(d, mu)  # type: ignore
-    u_phys = compute_reference_solution(parent_domain_msh, degree, d)
+    u_phys = compute_reference_solution(example, parent_domain_path, degree, d)
 
     # u on physical mesh
     with XDMFFile(u_phys.function_space.mesh.comm, "uphys.xdmf", "w") as xdmf:
         xdmf.write_mesh(u_phys.function_space.mesh) # type: ignore
         xdmf.write_function(u_phys, t=0.0) # type: ignore
 
-    fom = discretize_fom(aux, d)
+    fom = discretize_fom(example, aux, d)
     U = fom.solve(mu)
     u = fem.Function(aux.problem.V)
     u.x.array[:] = U.to_numpy().flatten()
 
     # compare on reference domain
-    breakpoint()
     V = aux.problem.V
     u_ref = fem.Function(V)
     interpolation_data = fem.create_nonmatching_meshes_interpolation_data(
@@ -173,7 +172,7 @@ def main():
         xdmf.write_function(u, t=0.0)
         # xdmf.write_function(u_ref, t=0.0)
 
-    inner_product = InnerProduct(V, "mass")
+    inner_product = InnerProduct(V, "h1")
     prod_mat = inner_product.assemble_matrix()
     product = FenicsxMatrixOperator(prod_mat, V, V)
     source = FenicsxVectorSpace(V)
