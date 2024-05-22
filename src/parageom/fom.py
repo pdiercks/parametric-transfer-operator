@@ -109,8 +109,7 @@ def discretize_subdomain_operators(example):
 
     EMOD = example.youngs_modulus
     POISSON = example.poisson_ratio
-    domain = aux.problem.domain.grid
-    omega = RectangularDomain(domain)
+    omega = aux.problem.domain
     problem = ParaGeomLinEla(omega, aux.problem.V, E=EMOD, NU=POISSON, d=d)
 
     # ### wrap stiffness matrix as pymor operator
@@ -127,7 +126,7 @@ def discretize_subdomain_operators(example):
     # ### wrap external force as pymor operator
     TY = -example.traction_y
     traction = df.fem.Constant(
-        domain, (df.default_scalar_type(0.0), df.default_scalar_type(TY))
+        omega.grid, (df.default_scalar_type(0.0), df.default_scalar_type(TY))
     )
     problem.add_neumann_bc(ftags["top"], traction)
     problem.setup_solver()
