@@ -64,20 +64,21 @@ def interpolate_subdomain_operator(operator):
         cbm = NumpyMatrixOperator(csr_array((data, indices, indptr), shape=K.shape))
         mops.append(cbm)
 
-    return mops, interpolation_matrix, idofs, magic_dofs
+    return mops, interpolation_matrix, idofs, magic_dofs, deim_data
 
 
 if __name__ == "__main__":
     from .tasks import example
     from .fom import discretize_subdomain_operator
     from scipy.linalg import solve
+    from scipy.sparse.linalg import norm
     from pymor.operators.constructions import LincombOperator
 
     operator = discretize_subdomain_operator(example)
-    cb, interpmat, idofs, magic_dofs = interpolate_subdomain_operator(operator)
+    cb, interpmat, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(operator)
     r_op, source_dofs = operator.restricted(magic_dofs)
 
-    test_mu = operator.parameters.parse([230.])
+    test_mu = operator.parameters.parse([287.])
     # ### Reference matrix
     kref = csr_array(operator.assemble(test_mu).matrix.getValuesCSR()[::-1])
 
@@ -88,6 +89,13 @@ if __name__ == "__main__":
 
     ei_approx = LincombOperator(cb, interpolation_coefficients)
     K = ei_approx.assemble().matrix
-    err = kref.data - K.data
-    err_norm = np.linalg.norm(err)
-    breakpoint()
+
+    abserr = norm(kref - K, ord="fro")
+    relerr = norm(kref - K, ord="fro") / norm(kref, ord="fro")
+    print(f"{abserr=} of MDEIM approximation in Frobenious norm.")
+    print(f"{relerr=} of MDEIM approximation in Frobenious norm.")
+
+    interp_mat_inv = np.linalg.inv(interpmat)
+    # FIXME: actually need to get the first discarded singular value
+    sigma_m_1 = deim_data['svals'][-1]
+    bound = np.linalg.norm(interp_mat_inv) * sigma_m_1
