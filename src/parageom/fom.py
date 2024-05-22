@@ -8,8 +8,14 @@ from multi.problems import LinearProblem
 from multi.materials import LinearElasticMaterial
 from multi.boundary import plane_at, point_at
 from multi.preprocessing import create_meshtags
+from multi.product import InnerProduct
 
 from pymor.basic import VectorOperator, StationaryModel
+from pymor.bindings.fenicsx import (
+    FenicsxVectorSpace,
+    FenicsxVisualizer,
+    FenicsxMatrixOperator,
+)
 
 
 class ParaGeomLinEla(LinearProblem):
@@ -88,7 +94,7 @@ class ParaGeomLinEla(LinearProblem):
         return rhs
 
 
-def discretize_subdomain_operator(example):
+def discretize_subdomain_operators(example):
     from .auxiliary_problem import discretize_auxiliary_problem
     from .matrix_based_operator import FenicsxMatrixBasedOperator
 
@@ -107,17 +113,28 @@ def discretize_subdomain_operator(example):
     omega = RectangularDomain(domain)
     problem = ParaGeomLinEla(omega, aux.problem.V, E=EMOD, NU=POISSON, d=d)
 
-    # ### wrap as pymor model
+    # ### wrap stiffness matrix as pymor operator
     def param_setter(mu):
         d.x.array[:] = 0.0
         aux.solve(d, mu)
         d.x.scatter_forward()
 
-    params = {"R": 1}
+    params = example.parameters["subdomain"]
     operator = FenicsxMatrixBasedOperator(
         problem.form_lhs, params, param_setter=param_setter, name="ParaGeom"
     )
-    return operator
+
+    # ### wrap external force as pymor operator
+    TY = -example.traction_y
+    traction = df.fem.Constant(
+        domain, (df.default_scalar_type(0.0), df.default_scalar_type(TY))
+    )
+    problem.add_neumann_bc(ftags["top"], traction)
+    problem.setup_solver()
+    problem.assemble_vector(bcs=[])
+    rhs = VectorOperator(operator.range.make_array([problem.b.copy()]))  # type: ignore
+
+    return operator, rhs
 
 
 def discretize_fom(example, auxiliary_problem, trafo_disp):
@@ -140,15 +157,23 @@ def discretize_fom(example, auxiliary_problem, trafo_disp):
 
     # Dirichlet BCs
     origin = point_at(omega.xmin)
-    bottom_right_locator = point_at([omega.xmax[0], omega.xmin[1], 0.])
+    bottom_right_locator = point_at([omega.xmax[0], omega.xmin[1], 0.0])
     bottom_right = df.mesh.locate_entities_boundary(domain, 0, bottom_right_locator)
     u_origin = df.fem.Constant(domain, (df.default_scalar_type(0.0),) * omega.gdim)
     u_bottom_right = df.fem.Constant(domain, df.default_scalar_type(0.0))
 
     bc_origin = BCGeom(u_origin, origin, V)
     bc_bottom_right = BCTopo(u_bottom_right, bottom_right, 0, V, sub=1)
-    problem.add_dirichlet_bc(value=bc_origin.value, boundary=bc_origin.locator, method="geometrical")
-    problem.add_dirichlet_bc(value=bc_bottom_right.value, boundary=bc_bottom_right.entities, sub=1, method="topological", entity_dim=bc_bottom_right.entity_dim)
+    problem.add_dirichlet_bc(
+        value=bc_origin.value, boundary=bc_origin.locator, method="geometrical"
+    )
+    problem.add_dirichlet_bc(
+        value=bc_bottom_right.value,
+        boundary=bc_bottom_right.entities,
+        sub=1,
+        method="topological",
+        entity_dim=bc_bottom_right.entity_dim,
+    )
 
     # Neumann BCs
     TY = -example.traction_y
@@ -158,27 +183,44 @@ def discretize_fom(example, auxiliary_problem, trafo_disp):
     problem.add_neumann_bc(top_marker, traction)
 
     problem.setup_solver()
-    problem.assemble_vector(bcs=problem.get_dirichlet_bcs())
+    dirichlet = problem.get_dirichlet_bcs()
+    problem.assemble_vector(bcs=dirichlet)
 
     # ### wrap as pymor model
     def param_setter(mu):
-        trafo_disp.x.array[:] = 0.
+        trafo_disp.x.array[:] = 0.0
         auxiliary_problem.solve(trafo_disp, mu)
+        trafo_disp.x.scatter_forward()
 
-    params = {"R": 10}
-    operator = FenicsxMatrixBasedOperator(problem.form_lhs, params, param_setter=param_setter,
-                                          bcs=(bc_origin, bc_bottom_right), name="ParaGeom")
+    params = example.parameters["global"]
+    coeffs = problem.form_lhs.coefficients()  # type: ignore
+    assert len(coeffs) == 1  # type: ignore
+    operator = FenicsxMatrixBasedOperator(
+        problem.form_lhs,
+        params,
+        param_setter=param_setter,
+        bcs=(bc_origin, bc_bottom_right),
+        name="ParaGeom",
+    )
 
     # NOTE
     # without b.copy(), fom.rhs.as_range_array() does not return correct data
     # problem goes out of scope and problem.b is deleted
-    rhs = VectorOperator(operator.range.make_array([problem.b.copy()]))
-    fom = StationaryModel(operator, rhs, name="FOM")
+    rhs = VectorOperator(operator.range.make_array([problem.b.copy()]))  # type: ignore
 
-    coeffs = problem.form_lhs.coefficients()
-    assert len(coeffs) == 1
-    assert coeffs[0].name == "d_trafo"
+    # ### Inner product
+    inner_product = InnerProduct(V, product="h1-semi", bcs=dirichlet)
+    product_mat = inner_product.assemble_matrix()
+    product_name = "h1_0_semi"
+    h1_product = FenicsxMatrixOperator(product_mat, V, V, name=product_name)
 
+    # ### Visualizer
+    viz = FenicsxVisualizer(FenicsxVectorSpace(V))
+
+    # TODO
+    # output functional !!!
+
+    fom = StationaryModel(
+        operator, rhs, products={product_name: h1_product}, visualizer=viz, name="FOM"
+    )
     return fom
-
-
