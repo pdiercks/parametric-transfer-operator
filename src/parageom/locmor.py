@@ -320,7 +320,7 @@ def discretize_oversampling_problem(example: BeamData, configuration: str, index
 
     # BeamProblem is only used to get stuff for transfer problem definition
     # here we do not need the actual physical meshes?
-    beamproblem = BeamProblem(example.coarse_grid("global"), example.global_parent_domain)
+    beamproblem = BeamProblem(example.coarse_grid("global"), example.global_parent_domain, example)
     cell_index = beamproblem.config_to_cell(configuration)
     gamma_out = beamproblem.get_gamma_out(cell_index)
     dirichlet = beamproblem.get_dirichlet(cell_index)
