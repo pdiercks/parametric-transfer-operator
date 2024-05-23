@@ -330,6 +330,9 @@ def approximate_range(args, example, index, logfilename):
     table_title = f"\nNumber of basis functions after rrf ({pid=})."
     logger.info(format_table(table_basis_length, title=table_title))
 
+    # viz = FenicsxVisualizer(fullsnapshots.space)
+    # viz.visualize(fullsnapshots, filename="snapshots_before_neumann.bp")
+
     # ### Add Solution of Neumann Problem
     # Neumann problem
     neumann_problem = transfer_problem.problem
