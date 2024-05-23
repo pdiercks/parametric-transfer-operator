@@ -31,6 +31,7 @@ from multi.solver import build_nullspace
 from multi.io import read_mesh, select_modes
 from multi.interpolation import make_mapping
 from .definitions import BeamData, BeamProblem
+from .matrix_based_operator import FenicsxMatrixBasedOperator
 
 
 EISubdomainOperatorWrapper = namedtuple("EISubdomainOperator", ["rop", "cb", "interpolation_matrix"])
@@ -230,6 +231,153 @@ def reconstruct(
 
 
 def assemble_system(
+    example,
+    num_modes: int,
+    dofmap: DofMap,
+    operator: FenicsxMatrixBasedOperator,
+    b: VectorOperator,
+    mu,
+    bases: list[np.ndarray],
+    num_max_modes: np.ndarray,
+    parameters: Parameters
+):
+    """Assembles ``operator`` and ``rhs`` for localized ROM as ``StationaryModel``.
+
+    Args:
+        example: The example data class.
+        num_modes: Number of fine scale modes per edge to be used.
+        dofmap: The dofmap of the global reduced space.
+        operator: Local high fidelity operator for stiffness matrix.
+        b: Local high fidelity external force vector.
+        mu: Parameter value.
+        bases: Local reduced basis for each subdomain.
+        num_max_modes: Maximum number of fine scale modes for each edge.
+        parameters: The |Parameters| the ROM depends on.
+
+    """
+    dofs_per_vertex = 2
+    dofs_per_face = 0
+
+    dofs_per_edge = num_max_modes.copy()
+    dofs_per_edge[num_max_modes > num_modes] = num_modes
+    dofmap.distribute_dofs(dofs_per_vertex, dofs_per_edge, dofs_per_face)
+
+    # ### Definition of Dirichlet BCs
+    # This also depends on number of modes and can only be defined after
+    # distribution of dofs
+    origin = dofmap.grid.locate_entities_boundary(0, point_at([0.0, 0.0, 0.0]))
+    bottom_right = dofmap.grid.locate_entities_boundary(0, point_at([example.length, 0.0, 0.0]))
+    bc_dofs = []
+    for vertex in origin:
+        bc_dofs += dofmap.entity_dofs(0, vertex)
+    for vertex in bottom_right:
+        dofs = dofmap.entity_dofs(0, vertex)
+        bc_dofs.append(dofs[1])  # constrain uy, but not ux
+    assert len(bc_dofs) == 3
+    bc_dofs = np.array(bc_dofs)
+
+    lhs = defaultdict(list)
+    rhs = defaultdict(list)
+    bc_mat = defaultdict(list)
+    local_bases = []
+
+    for ci, mu_i in zip(range(dofmap.num_cells), mu.to_numpy()):
+        dofs = dofmap.cell_dofs(ci)
+
+        # assemble full subdomain operator
+        loc_mu = operator.parameters.parse([mu_i])
+        A = operator.assemble(loc_mu)
+
+        # select active modes
+        local_basis = select_modes(bases[ci], num_max_modes[ci], dofs_per_edge[ci])
+        local_bases.append(local_basis)
+        B = A.source.from_numpy(local_basis)  # type: ignore
+        A_local = project(A, B, B)
+        b_local = project(b, B, None)
+        element_matrix = A_local.matrix  # type: ignore
+        element_vector = b_local.matrix  # type: ignore
+        print(f"{ci=}")
+        print(f"{element_matrix[0, 0]=}")
+        # print(f"{element_vector=}")
+
+        for l, x in enumerate(dofs):
+            if x in bc_dofs:
+                rhs["rows"].append(x)
+                rhs["cols"].append(0)
+                rhs["data"].append(0.0)
+            else:
+                rhs["rows"].append(x)
+                rhs["cols"].append(0)
+                rhs["data"].append(element_vector[l, 0])
+
+            for k, y in enumerate(dofs):
+                if x in bc_dofs or y in bc_dofs:
+                    # Note: in the MOR context set diagonal to zero
+                    # for the matrices arising from a_q
+                    if x == y:
+                        if x not in lhs["diagonals"]:  # only set diagonal entry once
+                            lhs["rows"].append(x)
+                            lhs["cols"].append(y)
+                            lhs["data"].append(0.0)
+                            lhs["diagonals"].append(x)
+                            bc_mat["rows"].append(x)
+                            bc_mat["cols"].append(y)
+                            bc_mat["data"].append(1.0)
+                            bc_mat["diagonals"].append(x)
+                else:
+                    lhs["rows"].append(x)
+                    lhs["cols"].append(y)
+                    lhs["data"].append(element_matrix[l, k])
+
+        lhs["indexptr"].append(len(lhs["rows"]))
+        rhs["indexptr"].append(len(rhs["rows"]))
+
+    Ndofs = dofmap.num_dofs
+    data = np.array(lhs["data"])
+    rows = np.array(lhs["rows"])
+    cols = np.array(lhs["cols"])
+    indexptr = np.array(lhs["indexptr"])
+    shape = (Ndofs, Ndofs)
+    options = None
+    op = COOMatrixOperator(
+        (data, rows, cols),
+        indexptr,
+        dofmap.num_cells,
+        shape,
+        parameters=Parameters({}),
+        solver_options=options,
+        name="K",
+    )
+
+    # ### Add matrix to account for BCs
+    bc_array = coo_array(
+        (bc_mat["data"], (bc_mat["rows"], bc_mat["cols"])), shape=shape
+    )
+    bc_array.eliminate_zeros()
+    bc_op = NumpyMatrixOperator(
+        bc_array.tocsr(), op.source.id, op.range.id, op.solver_options, "bc_mat"
+    )
+
+    lincomb = LincombOperator([op, bc_op], [1.0, 1.0])
+
+    data = np.array(rhs["data"])
+    rows = np.array(rhs["rows"])
+    cols = np.array(rhs["cols"])
+    indexptr = np.array(rhs["indexptr"])
+    shape = (Ndofs, 1)
+    rhs_op = COOMatrixOperator(
+        (data, rows, cols),
+        indexptr,
+        dofmap.num_cells,
+        shape,
+        parameters=Parameters({}),
+        solver_options=options,
+        name="F",
+    )
+    return lincomb, rhs_op, local_bases
+
+
+def assemble_system_with_ei(
     example,
     num_modes: int,
     dofmap: DofMap,
@@ -531,9 +679,9 @@ if __name__ == "__main__":
     from multi.misc import x_dofs_vectorspace, locate_dofs
     from pymor.bindings.fenicsx import FenicsxVisualizer
 
-    param = Parameters({"E": 2})
-    ps = ParameterSpace(param, (1.0, 2.0))
-    mu = ps.parameters.parse([1.5 for _ in range(2)])
+    param = example.parameters["right"]
+    ps = ParameterSpace(param, example.mu_range)
+    mu = ps.parameters.parse([0.15 * example.unit_length for _ in range(2)])
     configuration = "right"
     # configuration = "left"
     index = 0
@@ -547,7 +695,7 @@ if __name__ == "__main__":
     if configuration == "left":
         dofs = locate_dofs(xdofs, np.array([[0.0, 0.0, 0.0]]))
     elif configuration == "right":
-        dofs = locate_dofs(xdofs, np.array([[10.0, 0.0, 0.0]]))
+        dofs = locate_dofs(xdofs, np.array([[example.length, 0.0, 0.0]]))
     assert np.allclose(U.dofs(dofs)[:, 1], np.zeros_like(U.dofs(dofs)[:, 1]))
 
     viz = FenicsxVisualizer(T.range)

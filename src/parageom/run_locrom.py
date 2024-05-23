@@ -20,7 +20,7 @@ def main(args):
     from .auxiliary_problem import discretize_auxiliary_problem
     from .fom import discretize_fom, discretize_subdomain_operators
     from .ei import interpolate_subdomain_operator
-    from .locmor import reconstruct, assemble_system, EISubdomainOperatorWrapper
+    from .locmor import reconstruct, assemble_system, assemble_system_with_ei, EISubdomainOperatorWrapper
 
     # ### logger
     set_defaults(
@@ -43,12 +43,12 @@ def main(args):
     h1_product = fom.products["h1_0_semi"]
 
     # ### Discretize subdomain operators
-    operator, rhs = discretize_subdomain_operators(example)
+    operator_local, rhs_local = discretize_subdomain_operators(example)
 
     # ### EI of subdomain operator
-    mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator)
-    restricted_op, _ = operator.restricted(magic_dofs)
-    wrapped_op = EISubdomainOperatorWrapper(restricted_op, mops, interpolation_matrix)
+    # mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local)
+    # restricted_op, _ = operator_local.restricted(magic_dofs)
+    # wrapped_op = EISubdomainOperatorWrapper(restricted_op, mops, interpolation_matrix)
 
     # ### Multiscale Problem
     beam_problem = BeamProblem(
@@ -72,13 +72,18 @@ def main(args):
     logger.info(f"Global maximum number of modes per edge is: {max_modes}.")
 
     # ### ROM Assembly and Error Analysis
-    P = fom.parameters.space(example.mu_range)
-    with new_rng(example.validation_set_seed):
-        validation_set = P.sample_randomly(args.num_test)
+    # P = fom.parameters.space(example.mu_range)
+    # with new_rng(example.validation_set_seed):
+    #     validation_set = P.sample_randomly(args.num_test)
+    validation_set = list()
+    mymu = fom.parameters.parse([0.12 * example.unit_length for _ in range(10)])
+    # mymu = fom.parameters.parse([0.2 * example.unit_length for _ in range(10)])
+    # mymu = fom.parameters.parse([0.28 * example.unit_length for _ in range(10)])
+    validation_set.append(mymu)
 
     # better not create functions inside loops
     u_rb = df.fem.Function(fom.solution_space.V)
-    u_loc = df.fem.Function(operator.source.V)
+    u_loc = df.fem.Function(operator_local.source.V)
 
     max_errors = []
     max_relerrors = []
@@ -87,16 +92,16 @@ def main(args):
     num_fine_scale_modes = list(range(0, max_modes + 1, 2))
 
     # Conversion of rhs to NumpyVectorSpace
-    range_space = mops[0].range
-    b = VectorOperator(range_space.from_numpy(
-        rhs.as_range_array().to_numpy()
-        ))
+    # range_space = mops[0].range
+    # b = VectorOperator(range_space.from_numpy(
+    #     rhs.as_range_array().to_numpy()
+    #     ))
 
     for nmodes in num_fine_scale_modes:
-        operator, rhs, local_bases = assemble_system(
-                example, nmodes, dofmap, wrapped_op, b, bases, num_max_modes, fom.parameters
-        )
-        rom = StationaryModel(operator, rhs, name="locROM")
+        # operator, rhs, local_bases = assemble_system_with_ei(
+        #         example, nmodes, dofmap, wrapped_op, b, bases, num_max_modes, fom.parameters
+        # )
+        # rom = StationaryModel(operator, rhs, name="locROM")
 
         fom_solutions = fom.solution_space.empty()
         rom_solutions = fom.solution_space.empty()
@@ -105,6 +110,10 @@ def main(args):
         for mu in validation_set:
             U_fom = fom.solve(mu)  # is this cached or computed everytime?
             fom_solutions.append(U_fom)
+            operator, rhs, local_bases = assemble_system(
+                    example, nmodes, dofmap, operator_local, rhs_local, mu, bases, num_max_modes, fom.parameters
+                    )
+            rom = StationaryModel(operator, rhs, name="locROM")
             U_rb_ = rom.solve(mu)
 
             reconstruct(U_rb_.to_numpy(), dofmap, local_bases, u_loc, u_rb)
@@ -122,9 +131,9 @@ def main(args):
         max_relerrors.append(max_err / fom_norms[np.argmax(err_norms)])
 
         breakpoint()
-        # TODO
-        # debug rom; make sure that EI is the problem instead of something else ...
-        # use full operator
+        # FIXME
+        # norm of rom solution is much smaller, although qualitatively rom solution
+        # seems to be okay
 
     if args.output is not None:
         np.savetxt(

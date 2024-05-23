@@ -21,7 +21,7 @@ EMOD = 20e3
 POISSON = 0.3
 
 
-def compute_reference_solution(mshfile, degree, d):
+def compute_reference_solution(example, mshfile, degree, d):
     domain = gmshio.read_from_msh(
         mshfile, MPI.COMM_WORLD, gdim=2
     )[0]
@@ -33,7 +33,7 @@ def compute_reference_solution(mshfile, degree, d):
     )
     x_subdomain += disp
 
-    top_locator = plane_at(1000.0, "y")
+    top_locator = plane_at(example.height, "y")
     bottom_locator = plane_at(0.0, "y")
     tdim = domain.topology.dim
     fdim = tdim - 1
@@ -57,12 +57,12 @@ def compute_reference_solution(mshfile, degree, d):
     return u
 
 
-def discretize_fom(auxiliary_problem, trafo_disp):
+def discretize_fom(example, auxiliary_problem, trafo_disp):
     from .fom import ParaGeomLinEla
     from .matrix_based_operator import FenicsxMatrixBasedOperator, BCGeom
     from pymor.basic import VectorOperator, StationaryModel
 
-    top_locator = plane_at(1000.0, "y")
+    top_locator = plane_at(example.height, "y")
     bottom_locator = plane_at(0.0, "y")
     domain = auxiliary_problem.problem.domain.grid
     tdim = domain.topology.dim
@@ -117,59 +117,25 @@ def main():
     aux = discretize_auxiliary_problem(
         parent_subdomain_msh, degree, ftags, example.parameters["subdomain"]
     )
-    mu = aux.parameters.parse([290.01])
     d = fem.Function(aux.problem.V, name="d_trafo")
+    mu = aux.parameters.parse([example.unit_length * 0.2511])
     aux.solve(d, mu)  # type: ignore
-    u_phys = compute_reference_solution(parent_subdomain_msh, degree, d)
+    u_phys = compute_reference_solution(example, parent_subdomain_msh, degree, d)
 
-    fom = discretize_fom(aux, d)
+    fom = discretize_fom(example, aux, d)
     U = fom.solve(mu)
-    u = fem.Function(aux.problem.V)
-    u.x.array[:] = U.to_numpy().flatten()
 
-    # compare on reference domain
     V = aux.problem.V
-    u_ref = fem.Function(V)
-    interpolation_data = fem.create_nonmatching_meshes_interpolation_data(
-        V.mesh,
-        V.element,
-        u_phys.function_space.mesh,
-        padding=1e-12,
-    )
-    u_ref.interpolate(u_phys, nmm_interpolation_data=interpolation_data) # type: ignore
-
-    # u rom on parent domain
-    # u physical interpolated onto parent domain
-    with XDMFFile(aux.problem.domain.grid.comm, "urom.xdmf", "w") as xdmf:
-        xdmf.write_mesh(u.function_space.mesh)
-        xdmf.write_function(u, t=0.0)
-        # xdmf.write_function(u_ref, t=0.0)
-
-    # u on physical mesh
-    with XDMFFile(u_phys.function_space.mesh.comm, "uphys.xdmf", "w") as xdmf:
-        xdmf.write_mesh(u_phys.function_space.mesh) # type: ignore
-        xdmf.write_function(u_phys, t=0.0) # type: ignore
-
     inner_product = InnerProduct(V, "mass")
     prod_mat = inner_product.assemble_matrix()
     product = FenicsxMatrixOperator(prod_mat, V, V)
     source = FenicsxVectorSpace(V)
-    urom = source.make_array([u.vector]) # type: ignore
-    uphys = source.make_array([u_phys.vector]) # type: ignore
+    Uref = source.from_numpy(u_phys.x.array.reshape(1, -1)) # type: ignore
 
-    print(f"{uphys.amax()=}")
-    abs_err = absolute_error(uphys, urom, product)
-    rel_err = relative_error(uphys, urom, product)
+    abs_err = absolute_error(Uref, U, product)
+    rel_err = relative_error(Uref, U, product)
     print(f"{abs_err=}")
     print(f"{rel_err=}")
-
-    # ### Option A: EI of the bilinear operator
-    # U = fom.solve(mu)
-    # evaluations.append(op.apply(U, mu)) # internal force
-    # cbasis, ipoints, data = ei_greedy(evaluations)
-    # ei_op = ...
-    # TODO: restricted evaluation for fom.operator may be more involved
-    # project ei_op
 
 
 if __name__ == "__main__":

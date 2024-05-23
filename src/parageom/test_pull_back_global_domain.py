@@ -2,7 +2,8 @@ import numpy as np
 
 from mpi4py import MPI
 from dolfinx import fem, default_scalar_type
-from dolfinx.io import gmshio, XDMFFile
+from dolfinx.io import gmshio
+from dolfinx.io.utils import XDMFFile
 
 from multi.boundary import plane_at, point_at
 from multi.preprocessing import create_meshtags
@@ -77,10 +78,12 @@ def main():
     aux = discretize_auxiliary_problem(
         parent_domain_path, degree, interface_tags, example.parameters["global"], coarse_grid=coarse_grid_path
     )
-    values = [150., 170., 190., 210., 230., 250., 270., 290., 200., 300.]
+    values = np.array([0.15, 0.17, 0.19, 0.21, 0.23, 0.25, 0.27, 0.29, 0.2, 0.3]) * example.unit_length
     mu = aux.parameters.parse(values)
     d = fem.Function(aux.problem.V, name="d_trafo")
     aux.solve(d, mu)  # type: ignore
+
+    # ### reference displacement solution on the physical mesh
     u_phys = compute_reference_solution(example, parent_domain_path, degree, d)
 
     # u on physical mesh
@@ -90,36 +93,24 @@ def main():
 
     fom = discretize_fom(example, aux, d)
     U = fom.solve(mu)
-    u = fem.Function(aux.problem.V)
-    u.x.array[:] = U.to_numpy().flatten()
+    # fom.visualize(U, filename="test_fom.bp")
 
-    # compare on reference domain
-    V = aux.problem.V
-    u_ref = fem.Function(V)
-    interpolation_data = fem.create_nonmatching_meshes_interpolation_data(
-        V.mesh,
-        V.element,
-        u_phys.function_space.mesh,
-        padding=1e-12,
-    )
-    u_ref.interpolate(u_phys, nmm_interpolation_data=interpolation_data) # type: ignore
+    # ISSUE
+    # interpolation does not work to compare the two, because
+    # it works based on geometry.
+    # In the physical mesh, the whole might actually be bigger/smaller and therefore
+    # for some cells in the parent mesh there are no cells at these positions.
+    # Therefore, after the interpolation the zeros at these locations are simply zero.
+    source = fom.solution_space
+    U_ref = source.from_numpy(u_phys.x.array.reshape(1, -1)) # type: ignore
+    # fom.visualize(U_ref, filename="test_fom_ref.bp")
 
-    # u rom on parent domain
-    # u physical interpolated onto parent domain
-    with XDMFFile(aux.problem.domain.grid.comm, "urom.xdmf", "w") as xdmf:
-        xdmf.write_mesh(u.function_space.mesh)
-        xdmf.write_function(u, t=0.0)
-        # xdmf.write_function(u_ref, t=0.0)
-
-    inner_product = InnerProduct(V, "h1")
+    inner_product = InnerProduct(source.V, "h1")
     prod_mat = inner_product.assemble_matrix()
-    product = FenicsxMatrixOperator(prod_mat, V, V)
-    source = FenicsxVectorSpace(V)
-    urom = source.make_array([u.vector]) # type: ignore
-    uphys = source.make_array([u_phys.vector]) # type: ignore
+    product = FenicsxMatrixOperator(prod_mat, source.V, source.V)
 
-    abs_err = absolute_error(uphys, urom, product)
-    rel_err = relative_error(uphys, urom, product)
+    abs_err = absolute_error(U_ref, U, product)
+    rel_err = relative_error(U_ref, U, product)
     print(f"{abs_err=}")
     print(f"{rel_err=}")
 
