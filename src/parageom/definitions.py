@@ -50,7 +50,7 @@ class BeamData:
 
     name: str = "parageom"
     gdim: int = 2
-    unit_length: float = 1000. # [mm]
+    unit_length: float = 1. # [mm]
     nx: int = 10
     ny: int = 1
     geom_deg: int = 2
@@ -67,8 +67,6 @@ class BeamData:
             "inner": Parameters({"R": 3}),
         }
     )
-    mu_range: tuple[float, float] = (100., 300.) # [mm]
-    mu_bar: float = 200. # [mm]
     training_set_seed: int = 767667058
     validation_set_seed: int = 986718877
     configurations: tuple[str, str, str] = ("left", "inner", "right")
@@ -82,10 +80,13 @@ class BeamData:
     run_mode: str = "DEBUG"
 
     def __post_init__(self):
-        """Creates directory structure"""
+        """Creates directory structure and dependent attributes"""
 
-        self.length = self.unit_length * self.nx
-        self.height = self.unit_length * self.ny
+        self.length: float = self.unit_length * self.nx
+        self.height: float = self.unit_length * self.ny
+        a = self.unit_length
+        self.mu_range: tuple[float, float] = (0.1 * a, 0.3 * a) # [mm]
+        self.mu_bar: float = 0.2 * a # [mm]
 
         self.grids_path.mkdir(exist_ok=True, parents=True)
         self.figures_path.mkdir(exist_ok=True, parents=True)
