@@ -78,7 +78,8 @@ if __name__ == "__main__":
     cb, interpmat, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator)
     r_op, source_dofs = operator.restricted(magic_dofs)
 
-    test_mu = operator.parameters.parse([287.])
+    a = example.unit_length
+    test_mu = operator.parameters.parse([0.287 * a])
     # ### Reference matrix
     kref = csr_array(operator.assemble(test_mu).matrix.getValuesCSR()[::-1])
 

@@ -294,8 +294,9 @@ def main():
     xdmf.write_mesh(d.function_space.mesh)
 
     mu_values = []
-    mu_values.append(auxp.parameters.parse([100.]))
-    mu_values.append(auxp.parameters.parse([300.]))
+    a = example.unit_length
+    mu_values.append(auxp.parameters.parse([0.1 * a]))
+    mu_values.append(auxp.parameters.parse([0.3 * a]))
 
     for time, mu in enumerate(mu_values):
         auxp.solve(d, mu)
@@ -313,8 +314,8 @@ def main():
     xdmf.write_mesh(d.function_space.mesh)
 
     mu_values = []
-    mu_values.append(auxp.parameters.parse([200. for _ in range(10)]))
-    values = [150., 170., 190., 210., 230., 250., 270., 290., 200., 300.]
+    mu_values.append(auxp.parameters.parse([0.2 * a for _ in range(10)]))
+    values = np.array([0.15, 0.17, 0.19, 0.21, 0.23, 0.25, 0.27, 0.29, 0.2, 0.3]) * a
     mu_values.append(auxp.parameters.parse(values))
 
     for time, mu in enumerate(mu_values):
