@@ -142,6 +142,14 @@ def task_oversampling_grids():
                 }
 
 
+def task_preproc():
+    """ParaGeom: All tasks related to preprocessing"""
+    return {
+            "actions": None,
+            "task_dep": ["oversampling_grids", "global_parent_domain", "coarse_grid", "training_sets", "parent_unit_cell"]
+            }
+
+
 def task_hapod():
     """ParaGeom: Construct edge basis via HAPOD"""
     module = "src.parageom.hapod"
