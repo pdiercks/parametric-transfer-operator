@@ -37,8 +37,6 @@ def main(args):
     coarsegrid = beamproblem.coarse_grid
 
     # ### Subdomain problem
-    # TODO translate the subdomain to correct global coordinates
-    # this will make postprocessing easier?
     gdim = example.gdim
     domain, _, _ = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, gdim=gdim)
     omega = RectangularSubdomain(12, domain)
@@ -50,6 +48,13 @@ def main(args):
     E = example.youngs_modulus
     NU = example.poisson_ratio
     mat = LinearElasticMaterial(gdim, E, NU, plane_stress=False)
+
+    # FIXME parametric extension problem
+    # need data structures that LinElaSupProblem provides
+    # also need to pass `problem` instance to method `extend`
+    # but need to use FenicsxMatrixBasedOperator to implement
+    # parameter dependence
+
     problem = LinElaSubProblem(omega, V, phases=mat)
     problem.setup_coarse_space()
     problem.setup_edge_spaces()
