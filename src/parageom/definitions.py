@@ -276,28 +276,12 @@ class BeamData:
     def log_edge_basis(self, nr: int, method: str, distr: str, config: str) -> Path:
         return self.logs_path(nr, method) / f"edge_basis_{distr}_{config}.log"
 
-    def log_extension(self, nr: int, method: str, distr: str, cell: int) -> Path:
-        """logfile for extension"""
-        return self.logs_path(nr, method) / f"extension_{distr}_{cell:02}.log"
-
     def log_run_locrom(self, nr: int, method: str, distr: str) -> Path:
         return self.logs_path(nr, method) / f"run_locrom_{distr}.log"
 
     def hapod_pod_data(self, nr: int, distr: str, conf: str) -> Path:
         """POD data (HAPOD)"""
         return self.method_folder(nr, "hapod") / f"pod_data_{distr}_{conf}.json"
-
-    def rrf_bases_length(self, nr: int, method: str, distr: str, conf: str) -> Path:
-        """length of each edge basis after rrf algo in training strategy"""
-        return self.method_folder(nr, method) / f"rrf_bases_length_{distr}_{conf}.npz"
-
-    def fine_scale_edge_modes_npz(self, nr: int, method: str, distr: str, conf: str) -> Path:
-        """final fine scale edge bases"""
-        return self.bases_path(nr, method, distr) / f"fine_scale_edge_modes_{conf}.npz"
-
-    def fine_scale_modes_bp(self, nr: int, method: str, distr: str, cell: int) -> Path:
-        """fine scale modes after extension"""
-        return self.bases_path(nr, method, distr) / f"fine_scale_functions_{cell:02}.bp"
 
     def hapod_singular_values_npz(self, nr: int, distr: str, conf: str) -> Path:
         """singular values of POD"""

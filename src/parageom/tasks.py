@@ -150,60 +150,36 @@ def task_preproc():
             }
 
 
-def task_hapod():
-    """ParaGeom: Construct edge basis via HAPOD"""
-    module = "src.parageom.hapod"
-    nworkers = 4  # number of workers in pool
-    distr = example.distributions[0]
-    for nreal in range(example.num_real):
-        for config in CONFIGS:
-            deps = [SRC / "hapod.py"]
-            # global grids needed for BeamProblem initialization
-            deps.append(example.coarse_grid("global"))
-            deps.append(example.global_parent_domain)
-            targets = []
-            for k in range(example.ntrain(config)):
-                deps.append(example.oversampling_domain(config, k))
-                targets.extend(with_h5(
-                        example.hapod_snapshots(nreal, distr, config, k)
-                        ))
-            targets.append(example.log_edge_basis(nreal, "hapod", distr, config))
-            targets.append(example.rrf_bases_length(nreal, "hapod", distr, config))
-            targets.append(example.fine_scale_edge_modes_npz(nreal, "hapod", distr, config))
-            targets.append(example.hapod_singular_values_npz(nreal, distr, config))
-            targets.append(example.hapod_pod_data(nreal, distr, config))
-            yield {
-                "name": config+":"+str(nreal),
-                "file_dep": deps,
-                "actions": [
-                    "python3 -m {} {} {} {} --max_workers {}".format(
-                        module, distr, config, nreal, nworkers
-                    )
-                ],
-                "targets": targets,
-                "clean": True,
-            }
-
-
-def task_extension():
-    """ParaGeom: Extend fine scale modes and write final basis"""
-    module = "src.parageom.extension"
-    num_cells = example.nx * example.ny
-    distr = example.distributions[0]
-    for nreal in range(example.num_real):
-        for method in example.methods:
-            for cell_index in range(num_cells):
-                config = example.cell_to_config(cell_index)
-                yield {
-                    "name": f"{method}_{cell_index}",
-                    "file_dep": [example.fine_scale_edge_modes_npz(nreal, method, distr, config)],
-                    "actions": [
-                        "python3 -m {} {} {} {} {}".format(module, nreal, method, distr, cell_index)
-                    ],
-                    "targets": [
-                        example.local_basis_npz(nreal, method, distr, cell_index),
-                        example.fine_scale_modes_bp(nreal, method, distr, cell_index),
-                        example.log_extension(nreal, method, distr, cell_index),
-                    ],
-                    "clean": [rm_rf],
-                }
+# def task_hapod():
+#     """ParaGeom: Construct edge basis via HAPOD"""
+#     module = "src.parageom.hapod"
+#     nworkers = 4  # number of workers in pool
+#     distr = example.distributions[0]
+#     for nreal in range(example.num_real):
+#         for config in CONFIGS:
+#             deps = [SRC / "hapod.py"]
+#             # global grids needed for BeamProblem initialization
+#             deps.append(example.coarse_grid("global"))
+#             deps.append(example.global_parent_domain)
+#             targets = []
+#             for k in range(example.ntrain(config)):
+#                 deps.append(example.oversampling_domain(config, k))
+#                 targets.extend(with_h5(
+#                         example.hapod_snapshots(nreal, distr, config, k)
+#                         ))
+#             targets.append(example.log_edge_basis(nreal, "hapod", distr, config))
+#             targets.append(example.rrf_bases_length(nreal, "hapod", distr, config))
+#             targets.append(example.fine_scale_edge_modes_npz(nreal, "hapod", distr, config))
+#             targets.append(example.hapod_singular_values_npz(nreal, distr, config))
+#             targets.append(example.hapod_pod_data(nreal, distr, config))
+#             yield {
+#                 "name": config+":"+str(nreal),
+#                 "file_dep": deps,
+#                 "actions": [
+#                     "python3 -m {} {} {} {} --max_workers {}".format(
+#                         module, distr, config, nreal, nworkers
+#                     )
+#                 ],
+#                 "targets": targets,
+#                 "clean": True,
+#             }
