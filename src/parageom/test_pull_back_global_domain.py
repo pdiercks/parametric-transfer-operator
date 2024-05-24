@@ -2,7 +2,8 @@ import numpy as np
 
 from mpi4py import MPI
 from dolfinx import fem, default_scalar_type
-from dolfinx.io import gmshio, XDMFFile
+from dolfinx.io import gmshio
+from dolfinx.io.utils import XDMFFile
 
 from multi.boundary import plane_at, point_at
 from multi.preprocessing import create_meshtags
@@ -14,14 +15,8 @@ from multi.product import InnerProduct
 from pymor.bindings.fenicsx import FenicsxMatrixOperator, FenicsxVectorSpace
 from multi.projection import relative_error, absolute_error
 
-TY = -10.
-# material parameters for the test problem
-# E and NU for auxiliary problem are defined in function `discretize_auxiliary_problem`
-EMOD = 20e3
-POISSON = 0.3
 
-
-def compute_reference_solution(mshfile, degree, d):
+def compute_reference_solution(example, mshfile, degree, d):
     # translate parent domain
     domain = gmshio.read_from_msh(
         mshfile, MPI.COMM_WORLD, gdim=2
@@ -35,7 +30,7 @@ def compute_reference_solution(mshfile, degree, d):
     x_domain += disp
 
     # Physical Domain
-    top_locator = plane_at(1.0, "y")
+    top_locator = plane_at(example.height, "y")
     tdim = domain.topology.dim
     fdim = tdim - 1
     top_marker = int(194)
@@ -43,6 +38,8 @@ def compute_reference_solution(mshfile, degree, d):
     omega = RectangularDomain(domain, facet_tags=facet_tags)
 
     # Problem
+    EMOD = example.youngs_modulus
+    POISSON = example.poisson_ratio
     material = LinearElasticMaterial(gdim=omega.gdim, E=EMOD, NU=POISSON)
     V = fem.functionspace(domain, ("P", degree, (omega.gdim,)))
     problem = LinearElasticityProblem(omega, V, phases=material)
@@ -56,6 +53,7 @@ def compute_reference_solution(mshfile, degree, d):
     problem.add_dirichlet_bc(u_bottom_right, bottom_right, sub=1, method="geometrical", entity_dim=0)
 
     # Neumann BCs
+    TY = -example.traction_y
     traction = fem.Constant(
         domain, (default_scalar_type(0.0), default_scalar_type(TY))
     )
@@ -67,121 +65,54 @@ def compute_reference_solution(mshfile, degree, d):
     return u
 
 
-def discretize_fom(auxiliary_problem, trafo_disp):
-    from .fom import ParaGeomLinEla, ParaGeomOperator
-    from pymor.basic import VectorOperator, StationaryModel
-
-    domain = auxiliary_problem.problem.domain.grid
-    tdim = domain.topology.dim
-    fdim = tdim - 1
-    top_marker = int(194)
-    top_locator = plane_at(1.0, "y")
-    facet_tags, _ = create_meshtags(domain, fdim, {"top": (top_marker, top_locator)})
-    omega = RectangularDomain(domain, facet_tags=facet_tags)
-
-    V = trafo_disp.function_space
-    problem = ParaGeomLinEla(omega, V, E=EMOD, NU=POISSON, d=trafo_disp)
-
-    # Dirichlet BCs
-    origin = point_at(omega.xmin)
-    bottom_right = point_at([omega.xmax[0], omega.xmin[1], 0.])
-    u_origin = fem.Constant(domain, (default_scalar_type(0.0),) * omega.gdim)
-    u_bottom_right = fem.Constant(domain, default_scalar_type(0.0))
-    problem.add_dirichlet_bc(u_origin, origin, method="geometrical")
-    problem.add_dirichlet_bc(u_bottom_right, bottom_right, sub=1, method="geometrical", entity_dim=0)
-
-    # Neumann BCs
-    traction = fem.Constant(
-        domain, (default_scalar_type(0.0), default_scalar_type(TY))
-    )
-    problem.add_neumann_bc(top_marker, traction)
-
-    problem.setup_solver()
-    problem.assemble_vector(bcs=problem.get_dirichlet_bcs())
-
-    # ### wrap as pymor model
-    def param_setter(mu):
-        trafo_disp.x.array[:] = 0.
-        auxiliary_problem.solve(trafo_disp, mu)
-
-    params = {"R": 10}
-    # not sure how params would map to fem.Constant
-    # self.parameters.assert_compatible(mu) needs to eval to True
-    operator = ParaGeomOperator(problem.form_lhs, params, param_setter, bcs=problem.get_dirichlet_bcs(), name="ParaGeom_a")
-    # NOTE
-    # without b.copy(), fom.rhs.as_range_array() does not return correct data
-    # problem goes out of scope and problem.b is deleted
-    rhs = VectorOperator(operator.range.make_array([problem.b.copy()]))
-    fom = StationaryModel(operator, rhs, name="FOM")
-
-    return fom
-
-
 def main():
     from .tasks import example
     from .auxiliary_problem import discretize_auxiliary_problem
+    from .fom import discretize_fom
 
-    # Generate physical subdomain
-    parent_domain_msh = example.global_parent_domain.as_posix()
+    coarse_grid_path = example.coarse_grid("global").as_posix()
+    parent_domain_path = example.global_parent_domain.as_posix()
     degree = example.geom_deg
 
     interface_tags = [i for i in range(15, 25)] # FIXME better define in Example data class
     aux = discretize_auxiliary_problem(
-        parent_domain_msh, degree, interface_tags, example.parameters["global"]
+        parent_domain_path, degree, interface_tags, example.parameters["global"], coarse_grid=coarse_grid_path
     )
-    values = [0.15, 0.17, 0.19, 0.21, 0.23, 0.25, 0.27, 0.29, 0.2, 0.3]
+    values = np.array([0.15, 0.17, 0.19, 0.21, 0.23, 0.25, 0.27, 0.29, 0.2, 0.3]) * example.unit_length
     mu = aux.parameters.parse(values)
-    d = fem.Function(aux.problem.V)
+    d = fem.Function(aux.problem.V, name="d_trafo")
     aux.solve(d, mu)  # type: ignore
-    u_phys = compute_reference_solution(parent_domain_msh, degree, d)
 
-    fom = discretize_fom(aux, d)
-    U = fom.solve(mu)
-    u = fem.Function(aux.problem.V)
-    u.x.array[:] = U.to_numpy().flatten()
-
-    # compare on reference domain
-    V = aux.problem.V
-    u_ref = fem.Function(V)
-    interpolation_data = fem.create_nonmatching_meshes_interpolation_data(
-        V.mesh,
-        V.element,
-        u_phys.function_space.mesh,
-        padding=1e-12,
-    )
-    u_ref.interpolate(u_phys, nmm_interpolation_data=interpolation_data) # type: ignore
-
-    # u rom on parent domain
-    # u physical interpolated onto parent domain
-    with XDMFFile(aux.problem.domain.grid.comm, "urom.xdmf", "w") as xdmf:
-        xdmf.write_mesh(u.function_space.mesh)
-        xdmf.write_function(u, t=0.0)
-        # xdmf.write_function(u_ref, t=0.0)
+    # ### reference displacement solution on the physical mesh
+    u_phys = compute_reference_solution(example, parent_domain_path, degree, d)
 
     # u on physical mesh
     with XDMFFile(u_phys.function_space.mesh.comm, "uphys.xdmf", "w") as xdmf:
         xdmf.write_mesh(u_phys.function_space.mesh) # type: ignore
         xdmf.write_function(u_phys, t=0.0) # type: ignore
 
-    inner_product = InnerProduct(V, "mass")
-    prod_mat = inner_product.assemble_matrix()
-    product = FenicsxMatrixOperator(prod_mat, V, V)
-    source = FenicsxVectorSpace(V)
-    urom = source.make_array([u.vector]) # type: ignore
-    uphys = source.make_array([u_phys.vector]) # type: ignore
+    fom = discretize_fom(example, aux, d)
+    U = fom.solve(mu)
+    # fom.visualize(U, filename="test_fom.bp")
 
-    abs_err = absolute_error(uphys, urom, product)
-    rel_err = relative_error(uphys, urom, product)
+    # ISSUE
+    # interpolation does not work to compare the two, because
+    # it works based on geometry.
+    # In the physical mesh, the whole might actually be bigger/smaller and therefore
+    # for some cells in the parent mesh there are no cells at these positions.
+    # Therefore, after the interpolation the zeros at these locations are simply zero.
+    source = fom.solution_space
+    U_ref = source.from_numpy(u_phys.x.array.reshape(1, -1)) # type: ignore
+    # fom.visualize(U_ref, filename="test_fom_ref.bp")
+
+    inner_product = InnerProduct(source.V, "h1")
+    prod_mat = inner_product.assemble_matrix()
+    product = FenicsxMatrixOperator(prod_mat, source.V, source.V)
+
+    abs_err = absolute_error(U_ref, U, product)
+    rel_err = relative_error(U_ref, U, product)
     print(f"{abs_err=}")
     print(f"{rel_err=}")
-
-    # ### Option A: EI of the bilinear operator
-    # U = fom.solve(mu)
-    # evaluations.append(op.apply(U, mu)) # internal force
-    # cbasis, ipoints, data = ei_greedy(evaluations)
-    # ei_op = ...
-    # TODO: restricted evaluation for fom.operator may be more involved
-    # project ei_op
 
 
 if __name__ == "__main__":

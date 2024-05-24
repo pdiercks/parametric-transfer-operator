@@ -8,9 +8,7 @@ from pymor.parameters.base import Mu, ParameterSpace
 def scale_range(samples: np.ndarray, ranges: np.ndarray):
     n = ranges.shape[0]
     for k in range(n):
-        samples[:, k] = ranges[k, 0] + samples[:, k] * (
-            ranges[k, 1] - ranges[k, 0]
-        )
+        samples[:, k] = ranges[k, 0] + samples[:, k] * (ranges[k, 1] - ranges[k, 0])
     return samples
 
 
@@ -40,7 +38,7 @@ def sample_lhs(parameter_space: ParameterSpace, name: str, **kwargs) -> list[Mu]
 
 
 if __name__ == "__main__":
-    E_range = [1., 2.]
+    E_range = [1.0, 2.0]
     xr = np.array([E_range], dtype=np.float32)
     ndim = 2
     x = np.repeat(xr, ndim, axis=0)
@@ -53,5 +51,3 @@ if __name__ == "__main__":
 
     plt.plot(samples[:, 0], samples[:, 1], "o")
     plt.show()
-
-

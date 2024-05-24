@@ -42,10 +42,11 @@ def main():
     parent_subdomain_msh = example.parent_unit_cell.as_posix()
     degree = example.geom_deg
 
+    ftags = {"bottom": 11, "left": 12, "right": 13, "top": 14, "interface": 15}
     aux = discretize_auxiliary_problem(
-        parent_subdomain_msh, degree, example.parameters["subdomain"]
+        parent_subdomain_msh, degree, ftags, example.parameters["subdomain"]
     )
-    radius = 0.29544
+    radius = 0.29544 * example.unit_length
     mu = aux.parameters.parse([radius])
     d = fem.Function(aux.problem.V)
     aux.solve(d, mu)  # type: ignore

@@ -1,18 +1,21 @@
 import typing
 import ufl
-import numpy as np
 
-from dolfinx import mesh, fem, default_scalar_type
-from dolfinx.fem.petsc import create_matrix, assemble_matrix
+import dolfinx as df
 
-from pymor.operators.interface import Operator
-from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator
-from pymor.operators.constructions import ZeroOperator
-from pymor.vectorarrays.numpy import NumpyVectorSpace
-
-from multi.domain import Domain
+from multi.domain import Domain, RectangularDomain
 from multi.problems import LinearProblem
 from multi.materials import LinearElasticMaterial
+from multi.boundary import plane_at, point_at
+from multi.preprocessing import create_meshtags
+from multi.product import InnerProduct
+
+from pymor.basic import VectorOperator, StationaryModel
+from pymor.bindings.fenicsx import (
+    FenicsxVectorSpace,
+    FenicsxVisualizer,
+    FenicsxMatrixOperator,
+)
 
 
 class ParaGeomLinEla(LinearProblem):
@@ -21,10 +24,10 @@ class ParaGeomLinEla(LinearProblem):
     def __init__(
         self,
         domain: Domain,
-        V: fem.FunctionSpace,
-        E: typing.Union[float, fem.Constant],
-        NU: typing.Union[float, fem.Constant],
-        d: fem.Function,
+        V: df.fem.FunctionSpace,
+        E: typing.Union[float, df.fem.Constant],
+        NU: typing.Union[float, df.fem.Constant],
+        d: df.fem.Function,
     ):
         """Initialize linear elastic model with pull back.
 
@@ -80,8 +83,8 @@ class ParaGeomLinEla(LinearProblem):
     @property
     def form_rhs(self):
         v = self.test
-        zero = fem.Constant(
-            self.domain.grid, (default_scalar_type(0.0), default_scalar_type(0.0))
+        zero = df.fem.Constant(
+            self.domain.grid, (df.default_scalar_type(0.0), df.default_scalar_type(0.0))
         )
         rhs = ufl.inner(zero, v) * ufl.dx
 
@@ -91,252 +94,132 @@ class ParaGeomLinEla(LinearProblem):
         return rhs
 
 
-# TODO type hints and docstring
-# TODO params and param_setter, support fem.Constant?
-class ParaGeomOperator(Operator):
-    """Wraps the FEniCSx bilinear form for a geometrically parametrized linear elastic problem as an |Operator|.
+def discretize_subdomain_operators(example):
+    from .auxiliary_problem import discretize_auxiliary_problem
+    from .matrix_based_operator import FenicsxMatrixBasedOperator
 
-    Parameters
-    ----------
-    form
-        The `Form` object which is assembled to a matrix.
-    params
-        Dict mapping parameter names to dimensions.
-    param_setter
-        Method to update coefficients according to new value of mu.
-        (Solution of the auxiliary problem for new value of mu).
-    bcs
-        List of `dolfinx.fem.DirichletBC` objects to be applied.
-    form_compiler_options
-        FFCX Form compiler options.
-    jit_options
-        JIT compilation options.
-    solver_options
-        The |solver_options| for the assembled :class:`FenicsxMatrixOperator`.
-    name
-        Name of the operator.
-    """
+    parent_subdomain_msh = example.parent_unit_cell.as_posix()
+    degree = example.geom_deg
 
-    linear = True
+    ftags = {"bottom": 11, "left": 12, "right": 13, "top": 14, "interface": 15}
+    aux = discretize_auxiliary_problem(
+        parent_subdomain_msh, degree, ftags, example.parameters["subdomain"]
+    )
+    d = df.fem.Function(aux.problem.V, name="d_trafo")
 
-    def __init__(
-        self,
-        form,
+    EMOD = example.youngs_modulus
+    POISSON = example.poisson_ratio
+    omega = aux.problem.domain
+    problem = ParaGeomLinEla(omega, aux.problem.V, E=EMOD, NU=POISSON, d=d)
+
+    # ### wrap stiffness matrix as pymor operator
+    def param_setter(mu):
+        d.x.array[:] = 0.0
+        aux.solve(d, mu)
+        d.x.scatter_forward()
+
+    params = example.parameters["subdomain"]
+    operator = FenicsxMatrixBasedOperator(
+        problem.form_lhs, params, param_setter=param_setter, name="ParaGeom"
+    )
+
+    # ### wrap external force as pymor operator
+    TY = -example.traction_y
+    traction = df.fem.Constant(
+        omega.grid, (df.default_scalar_type(0.0), df.default_scalar_type(TY))
+    )
+    problem.add_neumann_bc(ftags["top"], traction)
+    problem.setup_solver()
+    problem.assemble_vector(bcs=[])
+    rhs = VectorOperator(operator.range.make_array([problem.b.copy()]))  # type: ignore
+
+    return operator, rhs
+
+
+def discretize_fom(example, auxiliary_problem, trafo_disp):
+    """Discretize FOM with Pull Back"""
+    from .fom import ParaGeomLinEla
+    from .matrix_based_operator import FenicsxMatrixBasedOperator, BCGeom, BCTopo
+
+    domain = auxiliary_problem.problem.domain.grid
+    tdim = domain.topology.dim
+    fdim = tdim - 1
+    top_marker = int(194)
+    top_locator = plane_at(example.height, "y")
+    facet_tags, _ = create_meshtags(domain, fdim, {"top": (top_marker, top_locator)})
+    omega = RectangularDomain(domain, facet_tags=facet_tags)
+
+    EMOD = example.youngs_modulus
+    POISSON = example.poisson_ratio
+    V = trafo_disp.function_space
+    problem = ParaGeomLinEla(omega, V, E=EMOD, NU=POISSON, d=trafo_disp)
+
+    # Dirichlet BCs
+    origin = point_at(omega.xmin)
+    bottom_right_locator = point_at([omega.xmax[0], omega.xmin[1], 0.0])
+    bottom_right = df.mesh.locate_entities_boundary(domain, 0, bottom_right_locator)
+    u_origin = df.fem.Constant(domain, (df.default_scalar_type(0.0),) * omega.gdim)
+    u_bottom_right = df.fem.Constant(domain, df.default_scalar_type(0.0))
+
+    bc_origin = BCGeom(u_origin, origin, V)
+    bc_bottom_right = BCTopo(u_bottom_right, bottom_right, 0, V, sub=1)
+    problem.add_dirichlet_bc(
+        value=bc_origin.value, boundary=bc_origin.locator, method="geometrical"
+    )
+    problem.add_dirichlet_bc(
+        value=bc_bottom_right.value,
+        boundary=bc_bottom_right.entities,
+        sub=1,
+        method="topological",
+        entity_dim=bc_bottom_right.entity_dim,
+    )
+
+    # Neumann BCs
+    TY = -example.traction_y
+    traction = df.fem.Constant(
+        domain, (df.default_scalar_type(0.0), df.default_scalar_type(TY))
+    )
+    problem.add_neumann_bc(top_marker, traction)
+
+    problem.setup_solver()
+    dirichlet = problem.get_dirichlet_bcs()
+    problem.assemble_vector(bcs=dirichlet)
+
+    # ### wrap as pymor model
+    def param_setter(mu):
+        trafo_disp.x.array[:] = 0.0
+        auxiliary_problem.solve(trafo_disp, mu)
+        trafo_disp.x.scatter_forward()
+
+    params = example.parameters["global"]
+    coeffs = problem.form_lhs.coefficients()  # type: ignore
+    assert len(coeffs) == 1  # type: ignore
+    operator = FenicsxMatrixBasedOperator(
+        problem.form_lhs,
         params,
-        param_setter,
-        bcs=None,
-        form_compiler_options=None,
-        jit_options=None,
-        solver_options=None,
-        name=None,
-    ):
-        assert len(form.arguments()) == 2
-        self.__auto_init(locals())
-        range_space = form.arguments()[0].ufl_function_space()
-        self.range = FenicsxVectorSpace(range_space)
-        source_space = form.arguments()[1].ufl_function_space()
-        self.source = FenicsxVectorSpace(source_space)
-        self.parameters_own = {k: v for k, v in params.items()}
-        self.bcs = bcs or list()
+        param_setter=param_setter,
+        bcs=(bc_origin, bc_bottom_right),
+        name="ParaGeom",
+    )
 
-        self.compiled_form = fem.form(
-            form, form_compiler_options=form_compiler_options, jit_options=jit_options
-        )
-        self.matrix = create_matrix(self.compiled_form)
+    # NOTE
+    # without b.copy(), fom.rhs.as_range_array() does not return correct data
+    # problem goes out of scope and problem.b is deleted
+    rhs = VectorOperator(operator.range.make_array([problem.b.copy()]))  # type: ignore
 
-    def _set_mu(self, mu=None):
-        assert self.parameters.assert_compatible(mu)
-        # NOTE
-        # in this context param setter solves the auxiliary problem to get new d(mu)
-        # but user could also assign new value to any fem.Constant in the form
-        if self.param_setter is not None:
-            self.param_setter(mu)
+    # ### Inner product
+    inner_product = InnerProduct(V, product="h1-semi", bcs=dirichlet)
+    product_mat = inner_product.assemble_matrix()
+    product_name = "h1_0_semi"
+    h1_product = FenicsxMatrixOperator(product_mat, V, V, name=product_name)
 
-    def assemble(self, mu=None):
-        assert self.parameters.assert_compatible(mu)
-        # update coefficients in form
-        self._set_mu(mu)
-        # assemble matrix
-        self.matrix.zeroEntries()
-        assemble_matrix(self.matrix, self.compiled_form, bcs=self.bcs)
-        self.matrix.assemble()
+    # ### Visualizer
+    viz = FenicsxVisualizer(FenicsxVectorSpace(V))
 
-        return FenicsxMatrixOperator(
-            self.matrix,
-            self.source.V,
-            self.range.V,
-            self.solver_options,
-            self.name + "_assembled",
-        )
+    # TODO
+    # output functional !!!
 
-    def apply(self, U, mu=None):
-        return self.assemble(mu).apply(U)
-
-    def apply_adjoint(self, V, mu=None):
-        return self.assemble(mu).apply_adjoint(V)
-
-    def as_range_array(self, mu=None):
-        return self.assemble(mu).as_range_array()
-
-    def as_source_array(self, mu=None):
-        return self.assemble(mu).as_source_array()
-
-    def apply_inverse(self, V, mu=None, initial_guess=None, least_squares=False):
-        return self.assemble(mu).apply_inverse(
-            V, initial_guess=initial_guess, least_squares=least_squares
-        )
-
-    # def restricted(self, dofs):
-    #     # FIXME
-    #     with self.logger.block(f"Restricting operator to {len(dofs)} dofs ..."):
-    #         if len(dofs) == 0:
-    #             return ZeroOperator(NumpyVectorSpace(0), NumpyVectorSpace(0)), np.array(
-    #                 [], dtype=int
-    #             )
-    #
-    #         if self.source.V.mesh.__hash__() != self.range.V.mesh.__hash__():
-    #             raise NotImplementedError
-    #
-    #         def blocked(dofs: np.ndarray, bs: int):
-    #             ndofs = dofs.size
-    #             blocked = np.zeros((ndofs, bs), dtype=dofs.dtype)
-    #             for i in range(bs):
-    #                 blocked[:, i] = i
-    #             r = blocked + np.repeat(dofs[:, np.newaxis], bs, axis=1) * bs
-    #             return r.flatten()
-    #
-    #         self.logger.info("Computing affected cells ...")
-    #         domain = self.source.V.mesh
-    #         range_dofmap = self.range.V.dofmap
-    #         num_cells = domain.topology.index_map(domain.topology.dim).size_local
-    #         affected_cell_indices = set()
-    #         for cell_index in range(num_cells):
-    #             local_dofs = range_dofmap.cell_dofs(cell_index)
-    #             # dofmap.cell_dofs() returns non-blocked dof indices
-    #             for ld in blocked(local_dofs, range_dofmap.bs):
-    #                 if ld in dofs:
-    #                     affected_cell_indices.add(cell_index)
-    #                     continue
-    #         affected_cell_indices = list(sorted(affected_cell_indices))
-    #
-    #         if any(
-    #             i.integral_type() not in ("cell", "exterior_facet")
-    #             for i in self.form.integrals()
-    #         ):
-    #             # enlarge affected_cell_indices if needed
-    #             raise NotImplementedError
-    #
-    #         self.logger.info("Computing source DOFs ...")
-    #         source_dofmap = self.source.V.dofmap
-    #         source_dofs = set()
-    #         for cell_index in affected_cell_indices:
-    #             local_dofs = source_dofmap.cell_dofs(cell_index)
-    #             # dofmap.cell_dofs returns non-blocked dof indices
-    #             source_dofs.update(blocked(local_dofs, source_dofmap.bs))
-    #         source_dofs = np.array(sorted(source_dofs), dtype=np.int32)
-    #
-    #         self.logger.info("Building submesh ...")
-    #         tdim = domain.topology.dim
-    #         submesh = mesh.create_submesh(domain, tdim, affected_cell_indices)[0]
-    #
-    #         self.logger.info("Building UFL form on submesh ...")
-    #         form_r, V_r_source, V_r_range, source_function_r = self._restrict_form(
-    #             submesh, source_dofs
-    #         )
-    #
-    #         self.logger.info("Building DirichletBCs on submesh ...")
-    #         bc_r = self._restrict_dirichlet_bcs(submesh, source_dofs, V_r_source)
-    #
-    #         self.logger.info("Computing source DOF mapping ...")
-    #         restricted_source_dofs = self._build_dof_map(
-    #             self.source.V, V_r_source, source_dofs
-    #         )
-    #
-    #         self.logger.info("Computing range DOF mapping ...")
-    #         restricted_range_dofs = self._build_dof_map(self.range.V, V_r_range, dofs)
-    #
-    #         op_r = FenicsOperator(
-    #             form_r,
-    #             FenicsVectorSpace(V_r_source),
-    #             FenicsVectorSpace(V_r_range),
-    #             source_function_r,
-    #             dirichlet_bcs=bc_r,
-    #             parameter_setter=self.parameter_setter,
-    #             parameters=self.parameters,
-    #         )
-    #
-    #         return (
-    #             RestrictedFenicsOperator(op_r, restricted_range_dofs),
-    #             source_dofs[np.argsort(restricted_source_dofs)],
-    #         )
-
-
-    # def _restrict_form(self, submesh, source_dofs):
-    #     # TODO
-    #     # figure out how to restrict the given form to the submesh
-    #
-    #     V_r_source = fem.functionspace(submesh, self.source.V.ufl_element())
-    #     V_r_range = fem.functionspace(submesh, self.range.V.ufl_element())
-    #     Vdim = V_r_source.dofmap.bs * V_r_source.dofmap.index_map.size_local
-    #     assert Vdim == len(source_dofs)
-    #
-    #     if self.source.V != self.range.V:
-    #         assert all(arg.ufl_function_space() != self.source.V for arg in self.form.arguments())
-    #     args = tuple((fem.function.ufl.argument.Argument(V_r_range, arg.number(), arg.part())
-    #                   if arg.ufl_function_space() == self.range.V else arg)
-    #                  for arg in self.form.arguments())
-    #
-    #     # FIXME
-    #     # transformation displacement is a coefficient of the form
-    #     # need to create new restricted function and interpolate the values
-    #     # of transformation displacement ...
-    #     # possibly for every new parameter mu
-    #     if any(isinstance(coeff, df.Function) and coeff != self.source_function for coeff in
-    #            self.form.coefficients()):
-    #         raise NotImplementedError
-    #
-    #     source_function_r = fem.Function(V_r_source)
-    #     # ufl.replace_integral_domains does not exist anymore
-    #     form_r = ufl.replace_integral_domains(
-    #         self.form(*args, coefficients={self.source_function: source_function_r}),
-    #         submesh.ufl_domain()
-    #     )
-    #
-    #     return form_r, V_r_source, V_r_range, source_function_r
-
-    # def _restrict_dirichlet_bcs(self, submesh, source_dofs, V_r_source):
-    #     mesh = self.source.V.mesh()
-    #     parent_facet_indices = compute_parent_facet_indices(submesh, mesh)
-    #
-    #     def restrict_dirichlet_bc(bc):
-    #         # ensure that markers are initialized
-    #         bc.get_boundary_values()
-    #         facets = np.zeros(mesh.num_facets(), dtype=np.uint)
-    #         facets[bc.markers()] = 1
-    #         facets_r = facets[parent_facet_indices]
-    #         sub_domains = df.MeshFunction('size_t', submesh, mesh.topology().dim() - 1)
-    #         sub_domains.array()[:] = facets_r
-    #
-    #         bc_r = df.DirichletBC(V_r_source, bc.value(), sub_domains, 1, bc.method())
-    #         return bc_r
-    #
-    #     return tuple(restrict_dirichlet_bc(bc) for bc in self.dirichlet_bcs)
-
-    # def _build_dof_map(self, V, V_r, dofs):
-    #     u = df.Function(V)
-    #     u_vec = u.vector()
-    #     restricted_dofs = []
-    #     for dof in dofs:
-    #         u_vec.zero()
-    #         u_vec[dof] = 1
-    #         u_r = df.interpolate(u, V_r)
-    #         u_r = u_r.vector().get_local()
-    #         if not np.all(np.logical_or(np.abs(u_r) < 1e-10, np.abs(u_r - 1.) < 1e-10)):
-    #             raise NotImplementedError
-    #         r_dof = np.where(np.abs(u_r - 1.) < 1e-10)[0]
-    #         if not len(r_dof) == 1:
-    #             raise NotImplementedError
-    #         restricted_dofs.append(r_dof[0])
-    #     restricted_dofs = np.array(restricted_dofs, dtype=np.int32)
-    #     assert len(set(restricted_dofs)) == len(set(dofs))
-    #     return restricted_dofs
+    fom = StationaryModel(
+        operator, rhs, products={product_name: h1_product}, visualizer=viz, name="FOM"
+    )
+    return fom

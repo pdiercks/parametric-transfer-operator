@@ -47,10 +47,11 @@ def task_parent_unit_cell():
     from .preprocessing import discretize_unit_cell
 
     def create_parent_unit_cell(targets):
+        unit_length = example.unit_length
         mu_bar = example.parameters["subdomain"].parse([example.mu_bar])
         num_cells = example.num_intervals
         options = {"Mesh.ElementOrder": example.geom_deg}
-        discretize_unit_cell(mu_bar, num_cells, targets[0], options)
+        discretize_unit_cell(unit_length, mu_bar, num_cells, targets[0], options)
 
     return {
         "file_dep": [SRC / "preprocessing.py"],
@@ -139,6 +140,14 @@ def task_oversampling_grids():
                 "targets": targets,
                 "clean": True,
                 }
+
+
+def task_preproc():
+    """ParaGeom: All tasks related to preprocessing"""
+    return {
+            "actions": None,
+            "task_dep": ["oversampling_grids", "global_parent_domain", "coarse_grid", "training_sets", "parent_unit_cell"]
+            }
 
 
 def task_hapod():

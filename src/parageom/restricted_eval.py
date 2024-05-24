@@ -190,3 +190,8 @@ def test_interval():
 if __name__ == "__main__":
     test_interval()
     test_square((2,))
+
+    # TODO
+    # move somewhere else
+    # may be useful for Restricted Evaluation of functions
+    # that are elements of QuadratureSpaces
