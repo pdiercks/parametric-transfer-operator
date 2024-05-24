@@ -78,10 +78,11 @@ def main():
     aux = discretize_auxiliary_problem(
         parent_domain_path, degree, interface_tags, example.parameters["global"], coarse_grid=coarse_grid_path
     )
-    values = np.array([0.15, 0.17, 0.19, 0.21, 0.23, 0.25, 0.27, 0.29, 0.2, 0.3]) * example.unit_length
-    mu = aux.parameters.parse(values)
+    parameter_space = aux.parameters.space(example.mu_range)
+    mu = parameter_space.sample_randomly(1)[0]
     d = fem.Function(aux.problem.V, name="d_trafo")
-    aux.solve(d, mu)  # type: ignore
+    fom = discretize_fom(example, aux, d)
+    U = fom.solve(mu)
 
     # ### reference displacement solution on the physical mesh
     u_phys = compute_reference_solution(example, parent_domain_path, degree, d)
@@ -91,8 +92,6 @@ def main():
         xdmf.write_mesh(u_phys.function_space.mesh) # type: ignore
         xdmf.write_function(u_phys, t=0.0) # type: ignore
 
-    fom = discretize_fom(example, aux, d)
-    U = fom.solve(mu)
     # fom.visualize(U, filename="test_fom.bp")
 
     # ISSUE
@@ -100,10 +99,10 @@ def main():
     # it works based on geometry.
     # In the physical mesh, the whole might actually be bigger/smaller and therefore
     # for some cells in the parent mesh there are no cells at these positions.
-    # Therefore, after the interpolation the zeros at these locations are simply zero.
+    # Therefore, after the interpolation the values at these locations are simply zero.
     source = fom.solution_space
     U_ref = source.from_numpy(u_phys.x.array.reshape(1, -1)) # type: ignore
-    # fom.visualize(U_ref, filename="test_fom_ref.bp")
+    fom.visualize(U_ref, filename="test_fom_pull_back.xdmf")
 
     inner_product = InnerProduct(source.V, "h1")
     prod_mat = inner_product.assemble_matrix()
