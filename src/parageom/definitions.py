@@ -121,7 +121,7 @@ class BeamData:
                 # self.method_folder(nr, name).mkdir(exist_ok=True, parents=True)
                 self.logs_path(nr, name).mkdir(exist_ok=True, parents=True)
                 self.bases_path(nr, name).mkdir(exist_ok=True, parents=True)
-            (self.method_folder(nr, "hapod") / "snapshots").mkdir(exist_ok=True, parents=True)
+            (self.method_folder(nr, "hapod") / "pod_modes").mkdir(exist_ok=True, parents=True)
 
 
     @property
@@ -211,7 +211,7 @@ class BeamData:
     def ntrain(self, config: str) -> int:
         """Define size of training set"""
         if self.run_mode == "DEBUG":
-            map = {"left": 10, "inner": 10, "right": 10}
+            map = {"left": 10, "inner": 20, "right": 10}
             return map[config]
         elif self.run_mode == "PRODUCTION":
             map = {"left": 40, "inner": 60, "right": 40}
@@ -279,18 +279,19 @@ class BeamData:
     def log_run_locrom(self, nr: int, method: str, distr: str) -> Path:
         return self.logs_path(nr, method) / f"run_locrom_{distr}.log"
 
-    def hapod_pod_data(self, nr: int, distr: str, conf: str) -> Path:
-        """POD data (HAPOD)"""
-        return self.method_folder(nr, "hapod") / f"pod_data_{distr}_{conf}.json"
-
-    def hapod_singular_values_npz(self, nr: int, distr: str, conf: str) -> Path:
+    def hapod_singular_values(self, nr: int, distr: str, conf: str) -> Path:
         """singular values of POD"""
-        return self.method_folder(nr, "hapod") / f"singular_values_{distr}_{conf}.npz"
+        return self.method_folder(nr, "hapod") / f"singular_values_{distr}_{conf}.npy"
 
-    def hapod_snapshots(self, nr: int, distr: str, config: str, sample_index: int) -> Path:
+    def hapod_modes_xdmf(self, nr: int, distr: str, config: str) -> Path:
         """displacement snapshots to be used for EI"""
-        dir = self.method_folder(nr, "hapod") / "snapshots"
-        return dir / f"snapshots_u_{distr}_{config}_{sample_index:03}.xdmf"
+        dir = self.method_folder(nr, "hapod") / "pod_modes"
+        return dir / f"modes_{distr}_{config}.xdmf"
+
+    def hapod_modes_npy(self, nr: int, distr: str, config: str) -> Path:
+        """displacement snapshots to be used for EI"""
+        dir = self.method_folder(nr, "hapod") / "pod_modes"
+        return dir / f"modes_{distr}_{config}.npy"
 
 
 class BeamProblem(MultiscaleProblemDefinition):
