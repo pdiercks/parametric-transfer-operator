@@ -2,12 +2,14 @@
 
 from mpi4py import MPI
 import dolfinx as df
+import numpy as np
 
 from multi.io import read_mesh, BasesLoader, select_modes
 from multi.interpolation import make_mapping
 from multi.dofmap import DofMap
 from multi.projection import compute_absolute_proj_errors
 from multi.product import InnerProduct
+from multi.solver import build_nullspace
 
 from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator
 
@@ -53,39 +55,50 @@ def main(args):
     dofs = make_mapping(V, fom.solution_space.V)
 
     # read reduced basis from file
-    nreal = 0
-    method = "hapod"
-    distr = "normal"
-    bases_folder = example.bases_path(nreal, method, distr)
-    num_cells = example.nx * example.ny
-    bases_loader = BasesLoader(bases_folder, num_cells)
-    bases, num_max_modes = bases_loader.read_bases()
-
-    dofmap = DofMap(coarse_grid)
-    dofs_per_vertex = 2
-    dofs_per_face = 0
-    num_modes = 12
-
-    dofs_per_edge = num_max_modes.copy()
-    dofs_per_edge[num_max_modes > num_modes] = num_modes
-    dofmap.distribute_dofs(dofs_per_vertex, dofs_per_edge, dofs_per_face)
-    local_basis = select_modes(
-        bases[args.cell], num_max_modes[args.cell], dofs_per_edge[args.cell]
-    )
+    # nreal = 0
+    # method = "hapod"
+    # distr = "normal"
+    # bases_folder = example.bases_path(nreal, method, distr)
+    # num_cells = example.nx * example.ny
+    # bases_loader = BasesLoader(bases_folder, num_cells)
+    # bases, num_max_modes = bases_loader.read_bases()
+    #
+    # dofmap = DofMap(coarse_grid)
+    # dofs_per_vertex = 2
+    # dofs_per_face = 0
+    # num_modes = 12
+    #
+    # dofs_per_edge = num_max_modes.copy()
+    # dofs_per_edge[num_max_modes > num_modes] = num_modes
+    # dofmap.distribute_dofs(dofs_per_vertex, dofs_per_edge, dofs_per_face)
+    # local_basis = select_modes(
+    #     bases[args.cell], num_max_modes[args.cell], dofs_per_edge[args.cell]
+    # )
 
     # ### wrap as pymor objects
     source = FenicsxVectorSpace(V)
+    local_basis = np.load("/home/pdiercks/projects/2023_04_opt_am_concrete/muto/work/parageom/realization_00/hapod/pod_modes/modes_normal_inner.npy")
     basis = source.from_numpy(local_basis)
+
+    # FIXME
+    # for comparison with the basis from the hapod
+    # I would need to either subtract the kernel or add the kernel to the basis functions
+    nullspace = build_nullspace(V, gdim=2)
+    full_basis = source.make_array(nullspace)
+    full_basis.append(basis)
+    basis = full_basis
 
     inner_product = InnerProduct(V, "h1")
     product_mat = inner_product.assemble_matrix()
     product = FenicsxMatrixOperator(product_mat, V, V)
 
     # compute projection error
+    pspace = fom.parameters.space(example.mu_range)
     test_set = []
     test_set.append(fom.parameters.parse([0.12 * example.unit_length for _ in range(10)]))
     test_set.append(fom.parameters.parse([0.2 * example.unit_length for _ in range(10)]))
     test_set.append(fom.parameters.parse([0.27 * example.unit_length for _ in range(10)]))
+    test_set.extend(pspace.sample_randomly(1))
 
     for mu in test_set:
         U_fom = fom.solve(mu)
