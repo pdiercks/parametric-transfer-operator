@@ -111,33 +111,15 @@ def task_coarse_grid():
                 }
 
 
-def task_global_parent_domain():
-    """ParaGeom: Create global parent domain mesh"""
+def task_parent_domain():
+    """ParaGeom: Create parent domain mesh"""
     module = "src.parageom.preprocessing"
-    config = "global"
-    return {
-            "file_dep": [example.coarse_grid(config)],
-            "actions": ["python3 -m {} {} {} --output %(targets)s".format(module, config, "parent")],
-            "targets": [example.global_parent_domain],
-            "clean": True,
-            }
-
-
-def task_oversampling_grids():
-    """ParaGeom: Create physical meshes (Ω, Ω_in) for each μ"""
-    module = "src.parageom.preprocessing"
-
-    for config in CONFIGS:
-        ntrain = example.ntrain(config)
-        targets = []
-        for k in range(ntrain):
-            targets.extend(with_h5(example.oversampling_domain(config, k)))
-            targets.extend(with_h5(example.target_subdomain(config, k)))
+    for config in list(CONFIGS) + ["global"]:
         yield {
                 "name": config,
-                "file_dep": [example.parent_unit_cell, example.training_set(config), example.coarse_grid(config)],
-                "actions": ["python3 -m {} {} {}".format(module, config, "oversampling")],
-                "targets": targets,
+                "file_dep": [example.coarse_grid(config), example.parent_unit_cell],
+                "actions": ["python3 -m {} {} {} --output %(targets)s".format(module, config, "parent")],
+                "targets": [example.parent_domain(config)],
                 "clean": True,
                 }
 
@@ -146,7 +128,7 @@ def task_preproc():
     """ParaGeom: All tasks related to preprocessing"""
     return {
             "actions": None,
-            "task_dep": ["oversampling_grids", "global_parent_domain", "coarse_grid", "training_sets", "parent_unit_cell"]
+            "task_dep": ["parent_domain", "coarse_grid", "training_sets", "parent_unit_cell"]
             }
 
 

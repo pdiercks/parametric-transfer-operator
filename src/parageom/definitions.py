@@ -171,9 +171,9 @@ class BeamData:
         assert config in list(self.configurations) + ["global"]
         return self.grids_path / config / "coarse_grid.msh"
 
-    @property
-    def global_parent_domain(self) -> Path:
-        return self.grids_path / "global" / "parent_domain.msh"
+    def parent_domain(self, config: str) -> Path:
+        assert config in list(self.configurations) + ["global"]
+        return self.grids_path / config / "parent_domain.msh"
 
     @property
     def parent_unit_cell(self) -> Path:
@@ -190,14 +190,6 @@ class BeamData:
             case _:
                 return "quad"
 
-    def oversampling_domain(self, config: str, k: int) -> Path:
-        """Oversampling domain for config and index k of training set element"""
-        return self.grids_path / config / f"oversampling_domain_{k:03}.xdmf"
-
-    def target_subdomain(self, config: str, k: int) -> Path:
-        """Target subdomain for config and index k of training set element"""
-        return self.grids_path / config / f"target_subdomain_{k:03}.xdmf"
-
     def config_to_cell(self, config: str) -> int:
         """Maps config to global cell index."""
         map = {"inner": 4, "left": 0, "right": 9}
@@ -211,7 +203,7 @@ class BeamData:
     def ntrain(self, config: str) -> int:
         """Define size of training set"""
         if self.run_mode == "DEBUG":
-            map = {"left": 10, "inner": 20, "right": 10}
+            map = {"left": 10, "inner": 10, "right": 10}
             return map[config]
         elif self.run_mode == "PRODUCTION":
             map = {"left": 40, "inner": 60, "right": 40}
