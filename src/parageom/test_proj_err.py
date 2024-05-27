@@ -95,10 +95,13 @@ def main(args):
     # compute projection error
     pspace = fom.parameters.space(example.mu_range)
     test_set = []
-    test_set.append(fom.parameters.parse([0.12 * example.unit_length for _ in range(10)]))
+    # test_set.append(fom.parameters.parse([0.12 * example.unit_length for _ in range(10)]))
     test_set.append(fom.parameters.parse([0.2 * example.unit_length for _ in range(10)]))
     test_set.append(fom.parameters.parse([0.27 * example.unit_length for _ in range(10)]))
     test_set.extend(pspace.sample_randomly(1))
+    mymu = np.ones(10) * 0.2
+    mymu[[3, 4, 5]] = np.array([0.125, 0.2216668, 0.105])
+    test_set.append(fom.parameters.parse(mymu))
 
     for mu in test_set:
         U_fom = fom.solve(mu)
