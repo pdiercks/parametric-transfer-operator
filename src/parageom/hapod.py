@@ -11,6 +11,7 @@ from scipy.sparse.linalg import LinearOperator, eigsh
 from scipy.special import erfinv
 from time import perf_counter
 
+from mpi4py import MPI
 import dolfinx as df
 
 from pymor.bindings.fenicsx import (
@@ -27,8 +28,12 @@ from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.operators.constructions import NumpyConversionOperator
 from pymor.tools.random import new_rng
 
+from multi.io import read_mesh
 from multi.problems import TransferProblem
 from multi.projection import orthogonal_part
+from multi.domain import RectangularDomain, StructuredQuadGrid
+from multi.materials import LinearElasticMaterial
+from multi.problems import LinearElasticityProblem
 
 
 def adaptive_rrf_normal(
@@ -167,7 +172,6 @@ def approximate_range(args, example, transfer_problem, logfilename):
     configuration = args.configuration
 
     logger = getLogger("range_approximation", level="INFO", filename=logfilename)
-    pid = os.getpid()
 
     if distribution != "normal":
         raise NotImplementedError
@@ -284,6 +288,7 @@ def approximate_range(args, example, transfer_problem, logfilename):
 def main(args):
     from .tasks import example
     from .locmor import discretize_oversampling_problem
+    from .auxiliary_problem import GlobalAuxiliaryProblem
 
     method = Path(__file__).stem  # hapod
     logfilename = example.log_edge_basis(
@@ -292,15 +297,15 @@ def main(args):
     set_defaults({"pymor.core.logger.getLogger.filename": logfilename})
     logger = getLogger(method, level="INFO")
 
-    # The training set was already defined in order to generate physical meshes.
-    # Here, the actual parameter values are not needed, but for each mesh I have
-    # to run the range finder.
-
     ntrain = example.ntrain(args.configuration)
     logger.info(
         "Starting range approximation of transfer operators"
         f" for training set of size {ntrain}."
     )
+
+    # FIXME
+    # remove task_training_set
+    # generate training set here instead of dodo.py
 
     # with concurrent.futures.ProcessPoolExecutor(
     #     max_workers=args.max_workers
@@ -316,6 +321,69 @@ def main(args):
     realizations = np.load(example.realizations)
     this = realizations[args.nreal]
     seed_seqs_rrf = np.random.SeedSequence(this).generate_state(ntrain)
+
+    # ### Oversampling Domain
+    domain, ct, ft = read_mesh(example.parent_domain(args.configuration), MPI.COMM_SELF, gdim=example.gdim)
+    omega = RectangularDomain(domain, cell_tags=ct, facet_tags=ft)
+    omega.create_facet_tags(
+        {"bottom": int(11), "left": int(12), "right": int(13), "top": int(14)}
+    )
+
+    aux_tags = None
+    if args.configuration == "inner":
+        assert omega.facet_tags.find(11).size == example.num_intervals * 3  # bottom
+        assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
+        assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
+        assert omega.facet_tags.find(14).size == example.num_intervals * 3  # top
+        assert omega.facet_tags.find(15).size == example.num_intervals * 4  # void 1
+        assert omega.facet_tags.find(16).size == example.num_intervals * 4  # void 2
+        assert omega.facet_tags.find(17).size == example.num_intervals * 4  # void 3
+        aux_tags = [15, 16, 17]
+
+    elif args.configuration == "left":
+        assert omega.facet_tags.find(11).size == example.num_intervals * 2  # bottom
+        assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
+        assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
+        assert omega.facet_tags.find(14).size == example.num_intervals * 2  # top
+        assert omega.facet_tags.find(15).size == example.num_intervals * 4  # void 1
+        assert omega.facet_tags.find(16).size == example.num_intervals * 4  # void 2
+        aux_tags = [15, 16]
+
+    elif args.configuration == "right":
+        assert omega.facet_tags.find(11).size == example.num_intervals * 2  # bottom
+        assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
+        assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
+        assert omega.facet_tags.find(14).size == example.num_intervals * 2  # top
+        assert omega.facet_tags.find(15).size == example.num_intervals * 4  # void 1
+        assert omega.facet_tags.find(16).size == example.num_intervals * 4  # void 2
+        aux_tags = [15, 16]
+    else:
+        raise NotImplementedError
+
+    # ### Structured coarse grid
+    grid, _, _ = read_mesh(example.coarse_grid(args.configuration), MPI.COMM_SELF, gdim=example.gdim)
+    coarse_grid = StructuredQuadGrid(grid)
+
+    # ### Auxiliary Problem
+    emod = df.fem.Constant(omega.grid, df.default_scalar_type(1.0))
+    nu = df.fem.Constant(omega.grid, df.default_scalar_type(0.25))
+    mat = LinearElasticMaterial(example.gdim, E=emod, NU=nu)
+    V = df.fem.functionspace(omega.grid, ("P", example.geom_deg, (example.gdim,)))
+    problem = LinearElasticityProblem(omega, V, phases=mat)
+    auxiliary_problem = GlobalAuxiliaryProblem(problem, aux_tags, example.parameters[args.configuration], coarse_grid)
+    d_trafo = df.fem.Function(V, name="d_trafo")
+
+    # ### Transfer Problem
+
+    # definition of FenicsxMatrixBasedOperator
+    # definition of rhs (Dirichlet Lift Operator?)
+    # range space (requires (correctly translated) target subdomain)
+    # gamma out?
+    # source product
+    # range product
+    # kernel
+
+    # no need to setup a LinElaSubProblem, because coarse/fine scale split is not used
 
     # first sample
     index = 0

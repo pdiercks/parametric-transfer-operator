@@ -7,9 +7,9 @@ from scipy.sparse import coo_array, csr_array
 from scipy.linalg import solve
 
 from mpi4py import MPI
+from petsc4py import PETSc
 import dolfinx as df
-from dolfinx.fem.petsc import set_bc
-from dolfinx.io.utils import XDMFFile
+from dolfinx.fem.petsc import set_bc, apply_lifting
 from basix.ufl import element
 
 from pymor.algorithms.gram_schmidt import gram_schmidt
@@ -547,6 +547,35 @@ def assemble_system_with_ei(
     return lincomb, rhs_op, local_bases
 
 
+class DirichletLift(object):
+    def __init__(self, space, a_cpp, facets):
+        self.range = FenicsxVectorSpace(space)
+        self._a = a_cpp
+        self._x = df.la.create_petsc_vector(space.dofmap.index_map, space.dofmap.bs)
+        tdim = space.mesh.topology.dim
+        fdim = tdim - 1
+        self._dofs = df.fem.locate_dofs_topological(space, fdim, facets)
+        self._g = df.fem.Function(space)
+        self._bcs = [df.fem.dirichletbc(self._g, self._dofs)]
+        self._dof_indices = self._bcs[0]._cpp_object.dof_indices()[0]
+
+    def _update_dirichlet_data(self, values):
+        self._g.x.petsc_vec.zeroEntries()
+        self._g.x.array[self._dof_indices] = values
+        self._g.x.scatter_forward()
+
+    def assemble(self, values):
+        self._update_dirichlet_data(values)
+        bcs = self._bcs
+        self._x.zeroEntries()
+        apply_lifting(self._x, [self._a], bcs=[bcs])
+        self._x.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
+        set_bc(self._x, bcs)
+
+        return self.range.make_array([self._x])
+
+
+
 def discretize_oversampling_problem(example: BeamData, configuration: str, index: int):
     """Returns TransferProblem for fixed parameter Mu.
 
@@ -558,13 +587,15 @@ def discretize_oversampling_problem(example: BeamData, configuration: str, index
     """
 
     # use MPI.COMM_SELF for embarrassingly parallel workloads
-    oversamplingdomain_xdmf = example.oversampling_domain(
-        configuration, index
-    ).as_posix()
-    with XDMFFile(MPI.COMM_SELF, oversamplingdomain_xdmf, "r") as fh:
-        domain = fh.read_mesh(name="Grid")
+    domain, ct, ft = read_mesh(example.parent_domain(configuration), MPI.COMM_SELF, gdim=example.gdim)
 
-    omega = RectangularDomain(domain, cell_tags=None, facet_tags=None)
+    omega = RectangularDomain(domain, cell_tags=ct, facet_tags=ft)
+    # FIXME
+    # create_facet_tags will override existing tags!
+    # are those tags necessary?
+
+    # yes, for the neumann data.
+    # but otherwise not.
     omega.create_facet_tags(
         {"bottom": int(11), "left": int(12), "right": int(13), "top": int(14)}
     )
@@ -574,19 +605,25 @@ def discretize_oversampling_problem(example: BeamData, configuration: str, index
         assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
         assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
         assert omega.facet_tags.find(14).size == example.num_intervals * 3  # top
+        assert omega.facet_tags.find(15).size == example.num_intervals * 4  # void 1
+        assert omega.facet_tags.find(16).size == example.num_intervals * 4  # void 2
+        assert omega.facet_tags.find(17).size == example.num_intervals * 4  # void 3
 
     elif configuration == "left":
         assert omega.facet_tags.find(11).size == example.num_intervals * 2  # bottom
         assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
         assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
         assert omega.facet_tags.find(14).size == example.num_intervals * 2  # top
+        assert omega.facet_tags.find(15).size == example.num_intervals * 4  # void 1
+        assert omega.facet_tags.find(16).size == example.num_intervals * 4  # void 2
 
     elif configuration == "right":
         assert omega.facet_tags.find(11).size == example.num_intervals * 2  # bottom
         assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
         assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
         assert omega.facet_tags.find(14).size == example.num_intervals * 2  # top
-
+        assert omega.facet_tags.find(15).size == example.num_intervals * 4  # void 1
+        assert omega.facet_tags.find(16).size == example.num_intervals * 4  # void 2
     else:
         raise NotImplementedError
 
@@ -597,7 +634,7 @@ def discretize_oversampling_problem(example: BeamData, configuration: str, index
     # BeamProblem is only used to get stuff for transfer problem definition
     # here we do not need the actual physical meshes?
     beamproblem = BeamProblem(
-        example.coarse_grid("global"), example.global_parent_domain, example
+        example.coarse_grid("global"), example.parent_domain("global"), example
     )
     cell_index = beamproblem.config_to_cell(configuration)
     gamma_out = beamproblem.get_gamma_out(cell_index)
@@ -605,6 +642,8 @@ def discretize_oversampling_problem(example: BeamData, configuration: str, index
     kernel_set = beamproblem.get_kernel_set(cell_index)
 
     # ### Omega in
+
+    # TODO: read parent unit cell
     gdim = example.gdim
     target_subdomain, _, _ = read_mesh(
         example.target_subdomain(configuration, index), MPI.COMM_WORLD, gdim=gdim
