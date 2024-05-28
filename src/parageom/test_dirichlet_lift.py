@@ -3,6 +3,7 @@ import dolfinx as df
 import ufl
 from multi.boundary import plane_at
 import numpy as np
+from pymor.bindings.fenicsx import FenicsxVectorSpace
 
 
 def test():
@@ -20,7 +21,7 @@ def test():
     tdim = mesh.topology.dim
     facets = df.mesh.locate_entities_boundary(mesh, tdim-1, left)
 
-    lift = DirichletLift(V, acpp, facets)
+    lift = DirichletLift(FenicsxVectorSpace(V), acpp, facets)
 
     A = df.fem.assemble_matrix(acpp)
     mat = A.to_scipy()

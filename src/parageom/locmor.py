@@ -1,8 +1,9 @@
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Union, Any
 
 from collections import defaultdict, namedtuple
 
 import numpy as np
+import numpy.typing as npt
 from scipy.sparse import coo_array, csr_array
 from scipy.linalg import solve
 
@@ -548,31 +549,31 @@ def assemble_system_with_ei(
 
 
 class DirichletLift(object):
-    def __init__(self, space, a_cpp, facets):
-        self.range = FenicsxVectorSpace(space)
+    def __init__(self, space: FenicsxVectorSpace, a_cpp: Union[df.fem.Form, list[Any], Any], facets: npt.NDArray[np.int32]):
+        self.range = space
         self._a = a_cpp
-        self._x = df.la.create_petsc_vector(space.dofmap.index_map, space.dofmap.bs)
-        tdim = space.mesh.topology.dim
+        self._x = df.la.create_petsc_vector(space.V.dofmap.index_map, space.V.dofmap.bs) # type: ignore
+        tdim = space.V.mesh.topology.dim # type: ignore
         fdim = tdim - 1
-        self._dofs = df.fem.locate_dofs_topological(space, fdim, facets)
-        self._g = df.fem.Function(space)
-        self._bcs = [df.fem.dirichletbc(self._g, self._dofs)]
+        self._dofs = df.fem.locate_dofs_topological(space.V, fdim, facets) # type: ignore
+        self._g = df.fem.Function(space.V) # type: ignore
+        self._bcs = [df.fem.dirichletbc(self._g, self._dofs)] # type: ignore
         self._dof_indices = self._bcs[0]._cpp_object.dof_indices()[0]
 
     def _update_dirichlet_data(self, values):
-        self._g.x.petsc_vec.zeroEntries()
-        self._g.x.array[self._dof_indices] = values
-        self._g.x.scatter_forward()
+        self._g.x.petsc_vec.zeroEntries() # type: ignore
+        self._g.x.array[self._dof_indices] = values # type: ignore
+        self._g.x.scatter_forward() # type: ignore
 
     def assemble(self, values):
         self._update_dirichlet_data(values)
         bcs = self._bcs
         self._x.zeroEntries()
-        apply_lifting(self._x, [self._a], bcs=[bcs])
+        apply_lifting(self._x, [self._a], bcs=[bcs]) # type: ignore
         self._x.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
         set_bc(self._x, bcs)
 
-        return self.range.make_array([self._x])
+        return self.range.make_array([self._x]) # type: ignore
 
 
 
