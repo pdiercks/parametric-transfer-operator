@@ -16,9 +16,10 @@ from basix.ufl import element
 from pymor.algorithms.gram_schmidt import gram_schmidt
 from pymor.algorithms.projection import project
 from pymor.bindings.fenicsx import FenicsxMatrixOperator, FenicsxVectorSpace
-from pymor.operators.constructions import VectorOperator, LincombOperator
+from pymor.operators.constructions import VectorOperator, LincombOperator, FixedParameterOperator
 from pymor.operators.interface import Operator
 from pymor.operators.numpy import NumpyMatrixOperator
+from pymor.vectorarrays.interface import VectorArray
 from pymor.vectorarrays.numpy import NumpyVectorSpace
 from pymor.parameters.base import Parameters, ParameterSpace
 
@@ -28,14 +29,19 @@ from multi.dofmap import DofMap
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinearElasticityProblem, LinElaSubProblem, TransferProblem
 from multi.product import InnerProduct
+from multi.projection import orthogonal_part
 from multi.solver import build_nullspace
 from multi.io import read_mesh, select_modes
 from multi.interpolation import make_mapping
+from multi.sampling import create_random_values
+from multi.utils import LogMixin
 from .definitions import BeamData, BeamProblem
 from .matrix_based_operator import FenicsxMatrixBasedOperator
 
 
-EISubdomainOperatorWrapper = namedtuple("EISubdomainOperator", ["rop", "cb", "interpolation_matrix"])
+EISubdomainOperatorWrapper = namedtuple(
+    "EISubdomainOperator", ["rop", "cb", "interpolation_matrix"]
+)
 
 
 class COOMatrixOperator(Operator):
@@ -54,9 +60,18 @@ class COOMatrixOperator(Operator):
 
     linear = True
 
-    def __init__(self, data: Tuple[np.ndarray, np.ndarray, np.ndarray], indexptr: np.ndarray, num_cells: int, shape: Tuple[int, int], parameters: Parameters = {}, solver_options: Optional[dict] = None, name: Optional[str] = None):
+    def __init__(
+        self,
+        data: Tuple[np.ndarray, np.ndarray, np.ndarray],
+        indexptr: np.ndarray,
+        num_cells: int,
+        shape: Tuple[int, int],
+        parameters: Parameters = {},
+        solver_options: Optional[dict] = None,
+        name: Optional[str] = None,
+    ):
         assert all([d.shape == data[0].shape for d in data])
-        self.__auto_init(locals()) # type: ignore
+        self.__auto_init(locals())  # type: ignore
         self.source = NumpyVectorSpace(shape[1])
         self.range = NumpyVectorSpace(shape[0])
         self._data = data[0].copy()
@@ -64,20 +79,28 @@ class COOMatrixOperator(Operator):
     def assemble(self, mu=None):
         assert self.parameters.assert_compatible(mu)
 
-        data, rows, cols = self.data # type: ignore
-        indexptr = self.indexptr # type: ignore
-        num_cells = self.num_cells # type: ignore
+        data, rows, cols = self.data  # type: ignore
+        indexptr = self.indexptr  # type: ignore
+        num_cells = self.num_cells  # type: ignore
 
         new = self._data
         if self.parametric and mu is not None:
             m = mu.to_numpy()
-            new[:indexptr[0]] = data[:indexptr[0]] * m[0]
+            new[: indexptr[0]] = data[: indexptr[0]] * m[0]
             for i in range(1, num_cells):
-                new[indexptr[i-1]:indexptr[i]] = data[indexptr[i-1]:indexptr[i]] * m[i]
+                new[indexptr[i - 1] : indexptr[i]] = (
+                    data[indexptr[i - 1] : indexptr[i]] * m[i]
+                )
 
-        K = coo_array((new, (rows, cols)), shape=self.shape) # type: ignore
+        K = coo_array((new, (rows, cols)), shape=self.shape)  # type: ignore
         K.eliminate_zeros()
-        return NumpyMatrixOperator(K.tocsr(), self.source.id, self.range.id, self.solver_options, self.name + "_assembled")
+        return NumpyMatrixOperator(
+            K.tocsr(),
+            self.source.id,
+            self.range.id,
+            self.solver_options,
+            self.name + "_assembled",
+        )
 
     def apply(self, U, mu=None):
         return self.assemble(mu).apply(U)
@@ -92,7 +115,9 @@ class COOMatrixOperator(Operator):
         return self.assemble(mu).as_source_array()
 
     def apply_inverse(self, V, mu=None, initial_guess=None, least_squares=False):
-        return self.assemble(mu).apply_inverse(V, initial_guess=initial_guess, least_squares=least_squares)
+        return self.assemble(mu).apply_inverse(
+            V, initial_guess=initial_guess, least_squares=least_squares
+        )
 
 
 class GlobalParaGeomOperator(Operator):
@@ -155,9 +180,9 @@ class GlobalParaGeomOperator(Operator):
             _coeffs = solve(interpolation_matrix, A[rdofs, rdofs])
             λ = _coeffs.reshape(1, M)
 
-            subdomain_range = np.s_[indexptr[i-1]:indexptr[i]]
+            subdomain_range = np.s_[indexptr[i - 1] : indexptr[i]]
             if i == 0:
-                subdomain_range = np.s_[0:indexptr[i]]
+                subdomain_range = np.s_[0 : indexptr[i]]
             new[subdomain_range] = np.dot(λ, data[:, subdomain_range])
 
         K = coo_array((new, (self.rows, self.cols)), shape=self.shape)  # type: ignore
@@ -240,7 +265,7 @@ def assemble_system(
     mu,
     bases: list[np.ndarray],
     num_max_modes: np.ndarray,
-    parameters: Parameters
+    parameters: Parameters,
 ):
     """Assembles ``operator`` and ``rhs`` for localized ROM as ``StationaryModel``.
 
@@ -267,7 +292,9 @@ def assemble_system(
     # This also depends on number of modes and can only be defined after
     # distribution of dofs
     origin = dofmap.grid.locate_entities_boundary(0, point_at([0.0, 0.0, 0.0]))
-    bottom_right = dofmap.grid.locate_entities_boundary(0, point_at([example.length, 0.0, 0.0]))
+    bottom_right = dofmap.grid.locate_entities_boundary(
+        0, point_at([example.length, 0.0, 0.0])
+    )
     bc_dofs = []
     for vertex in origin:
         bc_dofs += dofmap.entity_dofs(0, vertex)
@@ -386,7 +413,7 @@ def assemble_system_with_ei(
     b: VectorOperator,
     bases: list[np.ndarray],
     num_max_modes: np.ndarray,
-    parameters: Parameters
+    parameters: Parameters,
 ):
     """Assembles ``operator`` and ``rhs`` for localized ROM as ``StationaryModel``.
 
@@ -549,31 +576,129 @@ def assemble_system_with_ei(
 
 
 class DirichletLift(object):
-    def __init__(self, space: FenicsxVectorSpace, a_cpp: Union[df.fem.Form, list[Any], Any], facets: npt.NDArray[np.int32]):
+    def __init__(
+        self,
+        space: FenicsxVectorSpace,
+        a_cpp: Union[df.fem.Form, list[Any], Any],
+        facets: npt.NDArray[np.int32],
+    ):
         self.range = space
         self._a = a_cpp
-        self._x = df.la.create_petsc_vector(space.V.dofmap.index_map, space.V.dofmap.bs) # type: ignore
-        tdim = space.V.mesh.topology.dim # type: ignore
+        self._x = df.la.create_petsc_vector(space.V.dofmap.index_map, space.V.dofmap.bs)  # type: ignore
+        tdim = space.V.mesh.topology.dim  # type: ignore
         fdim = tdim - 1
-        self._dofs = df.fem.locate_dofs_topological(space.V, fdim, facets) # type: ignore
-        self._g = df.fem.Function(space.V) # type: ignore
-        self._bcs = [df.fem.dirichletbc(self._g, self._dofs)] # type: ignore
-        self._dof_indices = self._bcs[0]._cpp_object.dof_indices()[0]
+        self._dofs = df.fem.locate_dofs_topological(space.V, fdim, facets)  # type: ignore
+        self._g = df.fem.Function(space.V)  # type: ignore
+        self._bcs = [df.fem.dirichletbc(self._g, self._dofs)]  # type: ignore
+        self.dofs = self._bcs[0]._cpp_object.dof_indices()[0]
 
     def _update_dirichlet_data(self, values):
-        self._g.x.petsc_vec.zeroEntries() # type: ignore
-        self._g.x.array[self._dof_indices] = values # type: ignore
-        self._g.x.scatter_forward() # type: ignore
+        self._g.x.petsc_vec.zeroEntries()  # type: ignore
+        self._g.x.array[self.dofs] = values  # type: ignore
+        self._g.x.scatter_forward()  # type: ignore
 
     def assemble(self, values):
         self._update_dirichlet_data(values)
         bcs = self._bcs
         self._x.zeroEntries()
-        apply_lifting(self._x, [self._a], bcs=[bcs]) # type: ignore
+        apply_lifting(self._x, [self._a], bcs=[bcs])  # type: ignore
         self._x.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
         set_bc(self._x, bcs)
 
-        return self.range.make_array([self._x]) # type: ignore
+        return self.range.make_array([self._x])  # type: ignore
+
+
+class ParametricTransferProblem(LogMixin):
+    def __init__(
+        self,
+        operator: FenicsxMatrixBasedOperator,
+        rhs: DirichletLift,
+        range_space: FenicsxVectorSpace,
+        source_product: Optional[Operator] = None,
+        range_product: Optional[Operator] = None,
+        kernel: Optional[VectorArray] = None,
+        padding: float = 1e-14,
+    ):
+        assert rhs.range is operator.range
+        self.operator = operator
+        self.rhs = rhs
+        self.source_product = source_product
+        self.range_product = range_product
+        self.kernel = kernel
+
+        self.source = operator.source  # type: ignore
+        self.range = range_space
+        self._u = df.fem.Function(self.source.V) # type: ignore
+        self._u_in = df.fem.Function(self.range.V)  # type: ignore
+        self._interp_data = df.fem.create_nonmatching_meshes_interpolation_data(
+            self.range.V.mesh,  # type: ignore
+            self.range.V.element,  # type: ignore
+            self.source.V.mesh,  # type: ignore
+            padding=padding,
+        )
+
+    def generate_random_boundary_data(
+        self, count: int, distribution: str, options: Optional[dict[str, Any]] = None
+    ) -> npt.NDArray:
+        """Generates random vectors of shape (count, num_dofs_Γ_out).
+
+        Args:
+            count: Number of random vectors.
+            distribution: The distribution used for sampling.
+            options: Arguments passed to sampling method of random number generator.
+
+        """
+
+        num_dofs = self.rhs.dofs.size
+        options = options or {}
+        values = create_random_values((count, num_dofs), distribution, **options)
+
+        return values
+
+    def assemble_operator(self, mu=None):
+        self.logger.info(f"Assembling operator for {mu=}.")
+        self.op = self.operator.assemble(mu) # type: ignore
+
+    def solve(self, boundary_values) -> VectorArray:
+        """Solve the transfer problem for given `boundary_values`.
+
+        args:
+            A: The assembled operator.
+            boundary_values: Values to be prescribed on Gamma out.
+        """
+        assert isinstance(self.op, FenicsxMatrixOperator)
+
+        # solution
+        u = self._u
+        u_vec = u.x.petsc_vec # type: ignore
+        u_in = self._u_in
+        U_in = self.range.zeros(0, reserve=len(boundary_values))
+
+        # I could also vectorize forming the DirichletLift
+        # However, the interpolation into the range space cannot be vectorized
+        # (unless U.dofs(range_dofs) is used. Computing range_dofs might be more error prone though)
+
+        # construct rhs from boundary data
+        for array in boundary_values:
+            Ag = self.rhs.assemble(array)
+            U = self.op.apply_inverse(Ag)
+
+            # fill function with values
+            u_vec.array[:] = U.to_numpy().flatten()
+            u.x.scatter_forward() # type: ignore
+
+            # ### restrict full solution to target subdomain
+            u_in.interpolate(u, nmm_interpolation_data=self._interp_data) # type: ignore
+            u_in.x.scatter_forward() # type: ignore
+            U_in.append(self.range.make_array([u_in.x.petsc_vec.copy()])) # type: ignore
+
+        if self.kernel is not None:
+            assert len(self.kernel) > 0 # type: ignore
+            return orthogonal_part(
+                U_in, self.kernel, product=self.range_product, orthonormal=True
+            )
+        else:
+            return U_in
 
 
 
@@ -588,7 +713,9 @@ def discretize_oversampling_problem(example: BeamData, configuration: str, index
     """
 
     # use MPI.COMM_SELF for embarrassingly parallel workloads
-    domain, ct, ft = read_mesh(example.parent_domain(configuration), MPI.COMM_SELF, gdim=example.gdim)
+    domain, ct, ft = read_mesh(
+        example.parent_domain(configuration), MPI.COMM_SELF, gdim=example.gdim
+    )
 
     omega = RectangularDomain(domain, cell_tags=ct, facet_tags=ft)
     # FIXME
