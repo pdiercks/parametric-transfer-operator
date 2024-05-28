@@ -7,10 +7,11 @@ import numpy as np
 from multi.io import read_mesh, BasesLoader, select_modes
 from multi.interpolation import make_mapping
 from multi.dofmap import DofMap
-from multi.projection import compute_absolute_proj_errors
+from multi.projection import project_array, relative_error, absolute_error
 from multi.product import InnerProduct
 from multi.solver import build_nullspace
 
+from pymor.algorithms.gram_schmidt import gram_schmidt
 from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxMatrixOperator
 
 
@@ -23,7 +24,7 @@ def main(args):
     # get FOM solution
     # check pointing not yt available, repeat steps from run_locrom.py
     # ### Discretize global FOM
-    global_parent_domain_path = example.global_parent_domain.as_posix()
+    global_parent_domain_path = example.parent_domain("global").as_posix()
     coarse_grid_path = example.coarse_grid("global").as_posix()
     # do not change interface tags; see src/parageom/preprocessing.py::create_parent_domain
     interface_tags = [i for i in range(15, 25)]
@@ -42,7 +43,7 @@ def main(args):
 
     # extract u for single cell
     beam_problem = BeamProblem(
-        example.coarse_grid("global"), example.global_parent_domain, example
+        example.coarse_grid("global"), example.parent_domain("global"), example
     )
     coarse_grid = beam_problem.coarse_grid
     delta_x = beam_problem.get_xmin_omega_in(args.cell)
@@ -77,41 +78,56 @@ def main(args):
 
     # ### wrap as pymor objects
     source = FenicsxVectorSpace(V)
-    local_basis = np.load("/home/pdiercks/projects/2023_04_opt_am_concrete/muto/work/parageom/realization_00/hapod/pod_modes/modes_normal_inner.npy")
+    local_basis = np.load("/home/pdiercks/projects/muto/work/parageom/realization_00/hapod/pod_modes/modes_normal_inner.npy")
     basis = source.from_numpy(local_basis)
+
+    inner_product = InnerProduct(V, "h1")
+    product_mat = inner_product.assemble_matrix()
+    product = FenicsxMatrixOperator(product_mat, V, V)
 
     # FIXME
     # for comparison with the basis from the hapod
     # I would need to either subtract the kernel or add the kernel to the basis functions
     nullspace = build_nullspace(V, gdim=2)
     full_basis = source.make_array(nullspace)
+    # orthogonalize nullspace
+    gram_schmidt(full_basis, product=product, atol=0, rtol=0, copy=False)
     full_basis.append(basis)
-    basis = full_basis
 
-    inner_product = InnerProduct(V, "h1")
-    product_mat = inner_product.assemble_matrix()
-    product = FenicsxMatrixOperator(product_mat, V, V)
+    orthonormal = np.allclose(full_basis.gramian(product), np.eye(len(full_basis)))
+    if orthonormal:
+        print("basis is orthonormal")
+    print(f"basis length: {len(full_basis)}")
 
     # compute projection error
     pspace = fom.parameters.space(example.mu_range)
-    test_set = []
+    # test_set = []
     # test_set.append(fom.parameters.parse([0.12 * example.unit_length for _ in range(10)]))
-    test_set.append(fom.parameters.parse([0.2 * example.unit_length for _ in range(10)]))
-    test_set.append(fom.parameters.parse([0.27 * example.unit_length for _ in range(10)]))
-    test_set.extend(pspace.sample_randomly(1))
-    mymu = np.ones(10) * 0.2
-    mymu[[3, 4, 5]] = np.array([0.125, 0.2216668, 0.105])
-    test_set.append(fom.parameters.parse(mymu))
+    # test_set.append(fom.parameters.parse([0.2 * example.unit_length for _ in range(10)]))
+    # test_set.append(fom.parameters.parse([0.27 * example.unit_length for _ in range(10)]))
+    # test_set.extend(pspace.sample_randomly(1))
+    # mymu = np.ones(10) * 0.2
+    # mymu[[3, 4, 5]] = np.array([0.125, 0.2216668, 0.105])
+    # test_set.append(fom.parameters.parse(mymu))
+    test_set = pspace.sample_randomly(10)
 
+    test_data = source.empty(reserve=len(test_set))
     for mu in test_set:
         U_fom = fom.solve(mu)
         u_local = U_fom.dofs(dofs)
         U = source.from_numpy(u_local)
-        error = compute_absolute_proj_errors(U, basis, product=product, orthonormal=False)
-        print(f"min error = {min(error)} for mu = {mu.to_numpy()[args.cell]} and cell {args.cell}")
+        test_data.append(U)
 
-    # confirm that current basis yields good results if mu=mu_bar
-    # but fails for other values of mu
+    rerrs = []
+    aerrs = []
+    for N in range(len(full_basis) + 1):
+        U_proj = project_array(test_data, full_basis[:N], product=product, orthonormal=orthonormal)
+        relerr = relative_error(test_data, U_proj, product=product)
+        abserr = absolute_error(test_data, U_proj, product=product)
+        rerrs.append(np.max(relerr))
+        aerrs.append(np.max(abserr))
+
+    breakpoint()
 
 
 if __name__ == "__main__":
