@@ -1,6 +1,3 @@
-import os
-from typing import Optional
-
 # from itertools import repeat
 from pathlib import Path
 
@@ -9,10 +6,12 @@ import numpy as np
 from scipy.sparse import csr_array
 from scipy.sparse.linalg import LinearOperator, eigsh
 from scipy.special import erfinv
-from time import perf_counter
 
+from petsc4py import PETSc
 from mpi4py import MPI
 import dolfinx as df
+import dolfinx.fem.petsc
+import ufl
 
 from pymor.bindings.fenicsx import (
     FenicsxVectorSpace,
@@ -25,22 +24,21 @@ from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
 from pymor.operators.interface import Operator
 from pymor.operators.numpy import NumpyMatrixOperator
-from pymor.operators.constructions import NumpyConversionOperator
 from pymor.tools.random import new_rng
+from pymor.parameters.base import ParameterSpace
 
 from multi.io import read_mesh
-from multi.problems import TransferProblem
-from multi.projection import orthogonal_part
 from multi.domain import RectangularDomain, StructuredQuadGrid
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinearElasticityProblem
+from multi.product import InnerProduct
+from multi.projection import orthogonal_part
+from multi.solver import build_nullspace
 
 
 def adaptive_rrf_normal(
     logger,
-    transfer_problem: TransferProblem,
-    source_product: Optional[Operator] = None,
-    range_product: Optional[Operator] = None,
+    transfer_problem,
     error_tol: float = 1e-4,
     failure_tolerance: float = 1e-15,
     num_testvecs: int = 20,
@@ -101,6 +99,8 @@ def adaptive_rrf_normal(
     tp = transfer_problem
     distribution = "normal"
 
+    source_product = tp.source_product
+    range_product = tp.range_product
     assert source_product is None or isinstance(source_product, Operator)
     assert range_product is None or isinstance(range_product, Operator)
 
@@ -130,7 +130,7 @@ def adaptive_rrf_normal(
 
     # NOTE tp.source is the full space, while the source product
     # is of lower dimension
-    num_source_dofs = len(tp._bc_dofs_gamma_out)
+    num_source_dofs = tp.rhs.dofs.size
     testfail = failure_tolerance / min(num_source_dofs, tp.range.dim)
     testlimit = (
         np.sqrt(2.0 * lambda_min) * erfinv(testfail ** (1.0 / num_testvecs)) * error_tol
@@ -156,156 +156,53 @@ def adaptive_rrf_normal(
     return B
 
 
-def approximate_range(args, example, transfer_problem, logfilename):
-    """Approximates range of the transfer operator.
-
-    Args:
-        args: Program args.
-        example: Example data class.
-        transfer_problem: The transfer problem whose's operator range is approximated.
-        logfilename: Logfile.
-
-    """
-    from .definitions import BeamProblem
-
-    distribution = args.distribution
-    configuration = args.configuration
-
-    logger = getLogger("range_approximation", level="INFO", filename=logfilename)
-
-    if distribution != "normal":
-        raise NotImplementedError
-
-    # Multiscale problem definition
-    beam_problem = BeamProblem(
-        example.coarse_grid("global"), example.global_parent_domain, example
-    )
-    cell_index = beam_problem.config_to_cell(configuration)
-    gamma_out = beam_problem.get_gamma_out(cell_index)
-    dirichlet = beam_problem.get_dirichlet(cell_index)
-
-    ttol = example.rrf_ttol
-    ftol = example.rrf_ftol
-    num_testvecs = example.rrf_num_testvecs
-    source_product = transfer_problem.source_product
-    range_product = transfer_problem.range_product
-
-    # TODO approximate range in context of new_rng (if number of realizations > 1)
-    basis = adaptive_rrf_normal(
-        logger,
-        transfer_problem,
-        source_product=source_product,
-        range_product=range_product,
-        error_tol=ttol,
-        failure_tolerance=ftol,
-        num_testvecs=num_testvecs,
-    )
-    logger.info(f"\nSpectral Basis length: {len(basis)}.")
-
-    # ### Add Solution of Neumann Problem
-    # Neumann problem
-    neumann_problem = transfer_problem.problem
-    neumann_problem.clear_bcs()
-    omega = neumann_problem.domain
-
-    # Add Neumann bc
-    traction_y = example.traction_y
-    loading = df.fem.Constant(
-        omega.grid, (df.default_scalar_type(0.0), df.default_scalar_type(-traction_y))
-    )
-    top_facets = int(14)  # see locmor.py l. 95
-    neumann_problem.add_neumann_bc(top_facets, loading)
-
-    # Add zero boundary conditions on gamma out
-    zero = df.fem.Constant(
-        omega.grid, (df.default_scalar_type(0.0), df.default_scalar_type(0.0))
-    )
-    neumann_problem.add_dirichlet_bc(zero, gamma_out, method="geometrical")
-
-    # Add homogeneous Dirichlet BCs if present
-    if dirichlet is not None:
-        neumann_problem.add_dirichlet_bc(**dirichlet)
-
-    # ### Solve
-    neumann_problem.setup_solver()
-    u_neumann = neumann_problem.solve()
-
-    # ### Restrict to target subdomain
-    u_in = df.fem.Function(transfer_problem.range.V)
-    u_in.interpolate(
-        u_neumann,
-        nmm_interpolation_data=df.fem.create_nonmatching_meshes_interpolation_data(
-            u_in.function_space.mesh,
-            u_in.function_space.element,
-            u_neumann.function_space.mesh,
-        ),
-    )
-
-    U_in = transfer_problem.range.make_array([u_in.vector])
-    if transfer_problem.kernel is None:
-        U_orth = U_in
-    else:
-        U_orth = orthogonal_part(
-            U_in,
-            transfer_problem.kernel,
-            product=transfer_problem.range_product,
-            orthonormal=True,
-        )
-
-    logger.info("Extension of basis by Neumann Mode ...")
-    basis_length = len(basis)
-    basis.append(U_orth)
-    gram_schmidt(
-        basis,
-        transfer_problem.range_product,
-        atol=0,
-        rtol=0,
-        offset=basis_length,
-        copy=False,
-    )
-
-    # ---- ensemble mean subtraction ----
-    # num_snapshots = len(fullsnapshots)
-    # snaps = fullsnapshots.copy()
-    # snaps.scal(1.0 / num_snapshots)
-    # ensemble_mean = sum(snaps)
-    # fullsnapshots.axpy(-1.0, ensemble_mean)
-
-    # ### Conversion to picklable objects
-    # passing data along processes requires picklable data
-    # fenics stuff is not picklable ...
-    # cop = NumpyConversionOperator(basis.space, direction="to_numpy") # type: ignore
-    # basis_numpy = cop.apply(basis)
-    # product_matrix = csr_array(transfer_problem.range_product.matrix.getValuesCSR()[::-1]) # type: ignore
-    # product_numpy = NumpyMatrixOperator(product_matrix, source_id=basis_numpy.space.id,
-    #                                     range_id=basis_numpy.space.id)
-    #
-
-    # maybe go back to conversion if this is actually run in parallel
-    return basis
-
-
 def main(args):
     from .tasks import example
-    from .locmor import discretize_oversampling_problem
+    from .definitions import BeamProblem
+    from .lhs import sample_lhs
     from .auxiliary_problem import GlobalAuxiliaryProblem
+    from .locmor import ParametricTransferProblem, DirichletLift
+    from .matrix_based_operator import (
+        FenicsxMatrixBasedOperator,
+        BCGeom,
+        BCTopo,
+        _create_dirichlet_bcs,
+    )
+    from .fom import ParaGeomLinEla
 
     method = Path(__file__).stem  # hapod
-    logfilename = example.log_edge_basis(
+    logfilename = example.log_basis_construction(
         args.nreal, method, args.distribution, args.configuration
     ).as_posix()
     set_defaults({"pymor.core.logger.getLogger.filename": logfilename})
-    logger = getLogger(method, level="INFO")
+    logger = getLogger(method, level="DEBUG")
 
+    # ### Generate training seed for each configuration
+    training_seeds = {}
+    for cfg, rndseed in zip(
+        example.configurations,
+        np.random.SeedSequence(example.training_set_seed).generate_state(
+            len(example.configurations)
+        ),
+    ):
+        training_seeds[cfg] = rndseed
+
+    parameter_space = ParameterSpace(
+        example.parameters[args.configuration], example.mu_range
+    )
+    parameter_name = list(example.parameters[args.configuration].keys())[0]
     ntrain = example.ntrain(args.configuration)
+    training_set = sample_lhs(
+        parameter_space,
+        name=parameter_name,
+        samples=ntrain,
+        criterion="center",
+        random_state=training_seeds[args.configuration],
+    )
     logger.info(
         "Starting range approximation of transfer operators"
-        f" for training set of size {ntrain}."
+        f" for training set of size {len(training_set)}."
     )
-
-    # FIXME
-    # remove task_training_set
-    # generate training set here instead of dodo.py
 
     # with concurrent.futures.ProcessPoolExecutor(
     #     max_workers=args.max_workers
@@ -318,16 +215,18 @@ def main(args):
     #         repeat(args.distribution),
     #     )
 
+    # ### Generate random seed for each specific mu in the training set
     realizations = np.load(example.realizations)
     this = realizations[args.nreal]
     seed_seqs_rrf = np.random.SeedSequence(this).generate_state(ntrain)
 
     # ### Oversampling Domain
-    domain, ct, ft = read_mesh(example.parent_domain(args.configuration), MPI.COMM_SELF, gdim=example.gdim)
-    omega = RectangularDomain(domain, cell_tags=ct, facet_tags=ft)
-    omega.create_facet_tags(
-        {"bottom": int(11), "left": int(12), "right": int(13), "top": int(14)}
+    domain, ct, ft = read_mesh(
+        example.parent_domain(args.configuration), MPI.COMM_SELF, gdim=example.gdim
     )
+    omega = RectangularDomain(domain, cell_tags=ct, facet_tags=ft)
+    ft_def = {"bottom": int(11), "left": int(12), "right": int(13), "top": int(14)}
+    omega.create_facet_tags(ft_def)
 
     aux_tags = None
     if args.configuration == "inner":
@@ -361,7 +260,9 @@ def main(args):
         raise NotImplementedError
 
     # ### Structured coarse grid
-    grid, _, _ = read_mesh(example.coarse_grid(args.configuration), MPI.COMM_SELF, gdim=example.gdim)
+    grid, _, _ = read_mesh(
+        example.coarse_grid(args.configuration), MPI.COMM_SELF, gdim=example.gdim
+    )
     coarse_grid = StructuredQuadGrid(grid)
 
     # ### Auxiliary Problem
@@ -370,56 +271,177 @@ def main(args):
     mat = LinearElasticMaterial(example.gdim, E=emod, NU=nu)
     V = df.fem.functionspace(omega.grid, ("P", example.geom_deg, (example.gdim,)))
     problem = LinearElasticityProblem(omega, V, phases=mat)
-    auxiliary_problem = GlobalAuxiliaryProblem(problem, aux_tags, example.parameters[args.configuration], coarse_grid)
+    auxiliary_problem = GlobalAuxiliaryProblem(
+        problem, aux_tags, example.parameters[args.configuration], coarse_grid
+    )
     d_trafo = df.fem.Function(V, name="d_trafo")
 
-    # ### Transfer Problem
-
-    # definition of FenicsxMatrixBasedOperator
-    # definition of rhs (Dirichlet Lift Operator?)
-    # range space (requires (correctly translated) target subdomain)
-    # gamma out?
-    # source product
-    # range product
-    # kernel
-
-    # no need to setup a LinElaSubProblem, because coarse/fine scale split is not used
-
-    # first sample
-    index = 0
-    tic = perf_counter()
-    transfer_problem = discretize_oversampling_problem(
-        example, args.configuration, index
+    # ### Beam Problem
+    beam_problem = BeamProblem(
+        example.coarse_grid("global"), example.parent_domain("global"), example
     )
-    # FIXME
-    # this might be problematic as in theory each range product
-    # is assembled on a different mesh (target subdomain)
-    range_product = transfer_problem.range_product
-    pid = os.getpid()
-    logger.debug(f"{pid=},\tDiscretized transfer problem in {perf_counter()-tic}.")
+    cell_index = beam_problem.config_to_cell(args.configuration)
+    gamma_out = beam_problem.get_gamma_out(cell_index)
+    hom_dirichlet = beam_problem.get_dirichlet(cell_index)
+    kernel_set = beam_problem.get_kernel_set(cell_index)
 
-    logger.info(
-        f"{pid=},\tApproximating range of T for {index=} using {args.distribution=}.\n"
+    # ### Target subdomain & Range space
+    xmin_omega_in = beam_problem.get_xmin_omega_in(cell_index)
+    logger.debug(f"{xmin_omega_in=}")
+    target_domain, _, _ = read_mesh(
+        example.parent_unit_cell, MPI.COMM_SELF, gdim=example.gdim
     )
-    ss = seed_seqs_rrf[index]
-    with new_rng(ss):
-        basis = approximate_range(args, example, transfer_problem, logfilename)
+    omega_in = RectangularDomain(target_domain)
+    omega_in.translate(xmin_omega_in)
+    logger.debug(f"{omega_in.xmin=}")
+    V_in = df.fem.functionspace(target_domain, V.ufl_element())
+    target_space = FenicsxVectorSpace(V_in)
 
-    snapshots = basis.space.empty()
-    snapshots.append(basis)
+    # create necessary connectivities
+    omega.grid.topology.create_connectivity(0, 2)
+    omega_in.grid.topology.create_connectivity(0, 2)
 
-    for index in range(1, ntrain):
-        transfer_problem = discretize_oversampling_problem(
-            example, args.configuration, index
-        )
-        ss = seed_seqs_rrf[index]
-        with new_rng(ss):
-            other = approximate_range(args, example, transfer_problem, logfilename)
-        # other not in snapshots.space
-        B = snapshots.space.from_numpy(other.to_numpy())
-        snapshots.append(B)
+    # ### Dirichlet BCs
+    # have to be defined twice (operator & range product)
+    zero = df.fem.Constant(V.mesh, (df.default_scalar_type(0.0),) * example.gdim)
+    bc_gamma_out = BCGeom(zero, gamma_out, V)
+    bcs_op = list()
+    bcs_op.append(bc_gamma_out)
+    bcs_range_product = []
+    if hom_dirichlet is not None:
+        sub = hom_dirichlet.get("sub", None)
+        if sub is not None:
+            # determine entities and define BCTopo
+            entities = df.mesh.locate_entities_boundary(
+                V.mesh, hom_dirichlet["entity_dim"], hom_dirichlet["boundary"]
+            )
+            bc = BCTopo(
+                hom_dirichlet["value"],
+                entities,
+                hom_dirichlet["entity_dim"],
+                V,
+                sub=sub,
+            )
+            bc_rp = BCTopo(
+                hom_dirichlet["value"],
+                entities,
+                hom_dirichlet["entity_dim"],
+                V_in,
+                sub=sub,
+            )
+        else:
+            bc = BCGeom(hom_dirichlet["value"], hom_dirichlet["boundary"], V)
+            bc_rp = BCGeom(hom_dirichlet["value"], hom_dirichlet["boundary"], V_in)
+        bcs_op.append(bc)
+        bcs_range_product.append(bc_rp)
+    bcs_op = tuple(bcs_op)
+    bcs_range_product = _create_dirichlet_bcs(tuple(bcs_range_product))
+    assert len(bcs_op) - 1 == len(bcs_range_product)
 
-    pod_modes, pod_svals = pod(snapshots, product=range_product, rtol=example.pod_rtol)  # type: ignore
+    # ### FenicsxMatrixBasedOperator
+    parageom = ParaGeomLinEla(
+            omega, V, E=example.youngs_modulus, NU=example.poisson_ratio, d=d_trafo # type: ignore
+    )  # type: ignore
+    params = example.parameters[args.configuration]
+
+    def param_setter(mu):
+        d_trafo.x.petsc_vec.zeroEntries()  # type: ignore
+        auxiliary_problem.solve(d_trafo, mu)  # type: ignore
+        d_trafo.x.scatter_forward()  # type: ignore
+
+    operator = FenicsxMatrixBasedOperator(
+        parageom.form_lhs, params, param_setter=param_setter, bcs=bcs_op
+    )
+
+    # ### DirichletLift
+    entities_gamma_out = df.mesh.locate_entities_boundary(
+        V.mesh, V.mesh.topology.dim - 1, gamma_out
+    )
+    rhs = DirichletLift(operator.range, operator.compiled_form, entities_gamma_out)  # type: ignore
+
+    # ### Range product operator
+    inner_product = InnerProduct(V_in, example.range_product, bcs=bcs_range_product)
+    pmat = inner_product.assemble_matrix()
+    range_product = FenicsxMatrixOperator(pmat, V_in, V_in)
+
+    # ### Source product operator
+    inner_source = InnerProduct(V, "l2", bcs=[])
+    source_mat = csr_array(inner_source.assemble_matrix().getValuesCSR()[::-1])  # type: ignore
+    source_product = NumpyMatrixOperator(source_mat[rhs.dofs, :][:, rhs.dofs])
+
+    # ### Rigid body modes
+    ns_vecs = build_nullspace(V_in, gdim=omega_in.grid.geometry.dim)
+    rigid_body_modes = []
+    for j in kernel_set:
+        dolfinx.fem.petsc.set_bc(ns_vecs[j], bcs_range_product)
+        rigid_body_modes.append(ns_vecs[j])
+    kernel = target_space.make_array(rigid_body_modes)  # type: ignore
+    with logger.block("Orthonormalizing kernel of A ..."):  # type: ignore
+        gram_schmidt(kernel, product=range_product, copy=False)
+
+    # #### Transfer Problem
+    transfer = ParametricTransferProblem(
+        operator,
+        rhs,
+        target_space,
+        source_product=source_product,
+        range_product=range_product,
+        kernel=kernel,
+    )
+
+    # ### Discretize Neumann Data
+    dA = ufl.Measure('ds', domain=omega.grid, subdomain_data=omega.facet_tags)
+    traction = df.fem.Constant(omega.grid, (df.default_scalar_type(0.0), df.default_scalar_type(-example.traction_y)))
+    v = ufl.TestFunction(V)
+    L = ufl.inner(v, traction) * dA(ft_def["top"])
+    Lcpp = df.fem.form(L)
+    f_ext = dolfinx.fem.petsc.create_vector(Lcpp) # type: ignore
+
+    with f_ext.localForm() as b_loc:
+        b_loc.set(0)
+    dolfinx.fem.petsc.assemble_vector(f_ext, Lcpp)
+
+    # Apply boundary conditions to the rhs
+    bcs_neumann = _create_dirichlet_bcs(bcs_op)
+    dolfinx.fem.petsc.apply_lifting(f_ext, [operator.compiled_form], bcs=[bcs_neumann])  # type: ignore
+    f_ext.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
+    dolfinx.fem.petsc.set_bc(f_ext, bcs_neumann)
+    FEXT = operator.range.make_array([f_ext]) # type: ignore
+
+    assert len(training_set) == len(seed_seqs_rrf)
+    snapshots = transfer.range.empty()
+
+    for mu, seed_seq in zip(training_set, seed_seqs_rrf):
+        with new_rng(seed_seq):
+            # FIXME: transfer.assemble_operator(mu) is called where? when?
+            transfer.assemble_operator(mu)
+            basis = adaptive_rrf_normal(
+                logger,
+                transfer,
+                error_tol=example.rrf_ttol,
+                failure_tolerance=example.rrf_ftol,
+                num_testvecs=example.rrf_num_testvecs,
+            )
+            logger.info(f"\nSpectral Basis length: {len(basis)}.")
+            logger.info("\nSolving for additional Neumann mode ...")
+
+            U_neumann = transfer.op.apply_inverse(FEXT)
+            u_vec = transfer._u.x.petsc_vec # type: ignore
+            u_vec.array[:] = U_neumann.to_numpy().flatten()
+            transfer._u.x.scatter_forward() # type: ignore
+
+            # ### restrict full solution to target subdomain
+            transfer._u_in.interpolate(transfer._u, nmm_interpolation_data=transfer._interp_data) # type: ignore
+            transfer._u_in.x.scatter_forward() # type: ignore
+            U_in_neumann = transfer.range.make_array([transfer._u_in.x.petsc_vec.copy()]) # type: ignore
+
+            # ### Remove kernel after restriction to target subdomain
+            U_orth = orthogonal_part(U_in_neumann, kernel, product=transfer.range_product, orthonormal=True)
+            basis.append(U_orth)
+
+        snapshots.append(basis) # type: ignore
+
+    pod_modes, pod_svals = pod(snapshots, product=transfer.range_product, l2_err=example.pod_l2_err)  # type: ignore
 
     viz = FenicsxVisualizer(pod_modes.space)
     viz.visualize(

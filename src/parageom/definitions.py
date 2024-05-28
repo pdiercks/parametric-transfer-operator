@@ -8,7 +8,7 @@ import numpy as np
 from mpi4py import MPI
 from dolfinx import default_scalar_type
 
-from multi.boundary import point_at, plane_at
+from multi.boundary import point_at, within_range
 from multi.problems import MultiscaleProblemDefinition
 
 from pymor.parameters.base import Parameters
@@ -43,21 +43,21 @@ class BeamData:
         rrf_ttol: Target tolerance range finder.
         rrf_ftol: Failure tolerance range finder.
         rrf_num_testvecs: Number of testvectors range finder.
-        pod_rtol: Relative tolerance for POD.
+        pod_l2_err: Bound POD L2 error by this value.
         run_mode: DEBUG or PRODUCTION mode. Affects mesh sizes, training set, realizations.
 
     """
 
     name: str = "parageom"
     gdim: int = 2
-    unit_length: float = 1. # [mm]
+    unit_length: float = 100.0  # [mm]
     nx: int = 10
     ny: int = 1
     geom_deg: int = 2
     fe_deg: int = 2
     poisson_ratio: float = 0.3
-    youngs_modulus: float = 20e3 # [MPa]
-    traction_y: float = 10.0 # [MPa]
+    youngs_modulus: float = 20e3  # [MPa]
+    traction_y: float = 10.0  # [MPa]
     parameters: dict = field(
         default_factory=lambda: {
             "subdomain": Parameters({"R": 1}),
@@ -73,10 +73,10 @@ class BeamData:
     distributions: tuple[str, ...] = ("normal",)
     methods: tuple[str, ...] = ("hapod",)
     range_product: str = "h1"
-    rrf_ttol: float = 5e-2
+    rrf_ttol: float = 10e-2
     rrf_ftol: float = 1e-15
     rrf_num_testvecs: int = 20
-    pod_rtol: float = 1e-5
+    pod_l2_err: float = 1e-2
     run_mode: str = "DEBUG"
 
     def __post_init__(self):
@@ -85,8 +85,8 @@ class BeamData:
         self.length: float = self.unit_length * self.nx
         self.height: float = self.unit_length * self.ny
         a = self.unit_length
-        self.mu_range: tuple[float, float] = (0.1 * a, 0.3 * a) # [mm]
-        self.mu_bar: float = 0.2 * a # [mm]
+        self.mu_range: tuple[float, float] = (0.1 * a, 0.3 * a)  # [mm]
+        self.mu_bar: float = 0.2 * a  # [mm]
 
         self.grids_path.mkdir(exist_ok=True, parents=True)
         self.figures_path.mkdir(exist_ok=True, parents=True)
@@ -121,8 +121,9 @@ class BeamData:
                 # self.method_folder(nr, name).mkdir(exist_ok=True, parents=True)
                 self.logs_path(nr, name).mkdir(exist_ok=True, parents=True)
                 self.bases_path(nr, name).mkdir(exist_ok=True, parents=True)
-            (self.method_folder(nr, "hapod") / "pod_modes").mkdir(exist_ok=True, parents=True)
-
+            (self.method_folder(nr, "hapod") / "pod_modes").mkdir(
+                exist_ok=True, parents=True
+            )
 
     @property
     def plotting_style(self) -> Path:
@@ -203,7 +204,7 @@ class BeamData:
     def ntrain(self, config: str) -> int:
         """Define size of training set"""
         if self.run_mode == "DEBUG":
-            map = {"left": 10, "inner": 10, "right": 10}
+            map = {"left": 10, "inner": 20, "right": 10}
             return map[config]
         elif self.run_mode == "PRODUCTION":
             map = {"left": 40, "inner": 60, "right": 40}
@@ -265,8 +266,8 @@ class BeamData:
         realizations = seed.generate_state(self.num_real)
         np.save(outpath, realizations)
 
-    def log_edge_basis(self, nr: int, method: str, distr: str, config: str) -> Path:
-        return self.logs_path(nr, method) / f"edge_basis_{distr}_{config}.log"
+    def log_basis_construction(self, nr: int, method: str, distr: str, config: str) -> Path:
+        return self.logs_path(nr, method) / f"basis_construction_{distr}_{config}.log"
 
     def log_run_locrom(self, nr: int, method: str, distr: str) -> Path:
         return self.logs_path(nr, method) / f"run_locrom_{distr}.log"
@@ -386,17 +387,27 @@ class BeamProblem(MultiscaleProblemDefinition):
     def get_gamma_out(self, cell_index: Optional[int] = None) -> Callable:
         data = self.data
         unit_length = data.unit_length
+        tol = 1e-4
 
+        y = data.height
         if cell_index is not None:
             assert cell_index in (0, 4, 9)
         if cell_index == 0:
-            gamma_out = plane_at(2 * unit_length, "x")
+            x = 2 * unit_length
+            start = [x, 0.0 + tol, 0.0]
+            end = [x, y - tol, 0.0]
+            gamma_out = within_range(start, end)
         elif cell_index == 4:
-            left = plane_at(3 * unit_length, "x")
-            right = plane_at(6 * unit_length, "x")
-            gamma_out = lambda x: np.logical_or(left(x), right(x))
+            x_left = 3 * unit_length
+            x_right = 6 * unit_length
+            left = within_range([x_left, 0.0 + tol, 0.0], [x_left, y - tol, 0.0])
+            right = within_range([x_right, 0.0 + tol, 0.0], [x_right, y - tol, 0.0])
+
+            def gamma_out(x):
+                return np.logical_or(left(x), right(x))
         elif cell_index == 9:
-            gamma_out = plane_at(8 * unit_length, "x")
+            x = 8 * unit_length
+            gamma_out = within_range([x, 0.0 + tol, 0.0], [x, y - tol, 0.0])
         else:
             raise NotImplementedError
         return gamma_out

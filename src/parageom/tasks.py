@@ -61,41 +61,6 @@ def task_parent_unit_cell():
     }
 
 
-def task_training_sets():
-    """ParaGeom: Create training sets"""
-    from .lhs import sample_lhs
-    import numpy as np
-    from pymor.parameters.base import ParameterSpace
-    from pymor.core.pickle import dump
-
-    def create_training_set(config, seed, targets):
-        parameter_space = ParameterSpace(example.parameters[config], example.mu_range)
-        name = list(example.parameters[config].keys())[0]
-        num_samples = example.ntrain(config)
-        train = sample_lhs(
-            parameter_space,
-            name=name,
-            samples=num_samples,
-            criterion="center",
-            random_state=seed,
-        )
-        with open(targets[0], "wb") as fh:
-            dump({"training_set": train, "seed": seed}, fh)
-
-    seed = example.training_set_seed
-    random_seeds = np.random.SeedSequence(seed).generate_state(len(CONFIGS))
-
-    for config, seed in zip(CONFIGS, random_seeds):
-        yield {
-            "name": config,
-            "file_dep": [],
-            "actions": [(create_training_set, [config, seed])],
-            "targets": [example.training_set(config)],
-            "clean": True,
-            "uptodate": [run_once],
-        }
-
-
 def task_coarse_grid():
     """ParaGeom: Create structured coarse grids"""
     module = "src.parageom.preprocessing"
@@ -128,40 +93,36 @@ def task_preproc():
     """ParaGeom: All tasks related to preprocessing"""
     return {
             "actions": None,
-            "task_dep": ["parent_domain", "coarse_grid", "training_sets", "parent_unit_cell"]
+            "task_dep": ["parent_domain", "coarse_grid", "parent_unit_cell"]
             }
 
 
-# def task_hapod():
-#     """ParaGeom: Construct edge basis via HAPOD"""
-#     module = "src.parageom.hapod"
-#     nworkers = 4  # number of workers in pool
-#     distr = example.distributions[0]
-#     for nreal in range(example.num_real):
-#         for config in CONFIGS:
-#             deps = [SRC / "hapod.py"]
-#             # global grids needed for BeamProblem initialization
-#             deps.append(example.coarse_grid("global"))
-#             deps.append(example.global_parent_domain)
-#             targets = []
-#             for k in range(example.ntrain(config)):
-#                 deps.append(example.oversampling_domain(config, k))
-#                 targets.extend(with_h5(
-#                         example.hapod_snapshots(nreal, distr, config, k)
-#                         ))
-#             targets.append(example.log_edge_basis(nreal, "hapod", distr, config))
-#             targets.append(example.rrf_bases_length(nreal, "hapod", distr, config))
-#             targets.append(example.fine_scale_edge_modes_npz(nreal, "hapod", distr, config))
-#             targets.append(example.hapod_singular_values_npz(nreal, distr, config))
-#             targets.append(example.hapod_pod_data(nreal, distr, config))
-#             yield {
-#                 "name": config+":"+str(nreal),
-#                 "file_dep": deps,
-#                 "actions": [
-#                     "python3 -m {} {} {} {} --max_workers {}".format(
-#                         module, distr, config, nreal, nworkers
-#                     )
-#                 ],
-#                 "targets": targets,
-#                 "clean": True,
-#             }
+def task_hapod():
+    """ParaGeom: Construct basis via HAPOD"""
+    module = "src.parageom.hapod"
+    nworkers = 4  # number of workers in pool
+    distr = example.distributions[0]
+    for nreal in range(example.num_real):
+        for config in CONFIGS:
+            deps = [SRC / "hapod.py"]
+            # global grids needed for BeamProblem initialization
+            deps.append(example.coarse_grid("global"))
+            deps.append(example.parent_domain("global"))
+            deps.append(example.coarse_grid(config))
+            deps.append(example.parent_domain(config))
+            targets = []
+            targets.append(example.log_basis_construction(nreal, "hapod", distr, config))
+            targets.append(example.hapod_modes_npy(nreal, distr, config))
+            targets.extend(with_h5(example.hapod_modes_xdmf(nreal, distr, config)))
+            targets.append(example.hapod_singular_values(nreal, distr, config))
+            yield {
+                "name": config+":"+str(nreal),
+                "file_dep": deps,
+                "actions": [
+                    "python3 -m {} {} {} {} --max_workers {}".format(
+                        module, distr, config, nreal, nworkers
+                    )
+                ],
+                "targets": targets,
+                "clean": True,
+            }
