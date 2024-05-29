@@ -222,7 +222,7 @@ def main(args):
 
     # ### Oversampling Domain
     domain, ct, ft = read_mesh(
-        example.parent_domain(args.configuration), MPI.COMM_SELF, gdim=example.gdim
+            example.parent_domain(args.configuration), MPI.COMM_SELF, kwargs={"gdim": example.gdim}
     )
     omega = RectangularDomain(domain, cell_tags=ct, facet_tags=ft)
     ft_def = {"bottom": int(11), "left": int(12), "right": int(13), "top": int(14)}
@@ -261,7 +261,7 @@ def main(args):
 
     # ### Structured coarse grid
     grid, _, _ = read_mesh(
-        example.coarse_grid(args.configuration), MPI.COMM_SELF, gdim=example.gdim
+            example.coarse_grid(args.configuration), MPI.COMM_SELF, kwargs={"gdim":example.gdim}
     )
     coarse_grid = StructuredQuadGrid(grid)
 
@@ -289,7 +289,7 @@ def main(args):
     xmin_omega_in = beam_problem.get_xmin_omega_in(cell_index)
     logger.debug(f"{xmin_omega_in=}")
     target_domain, _, _ = read_mesh(
-        example.parent_unit_cell, MPI.COMM_SELF, gdim=example.gdim
+            example.parent_unit_cell, MPI.COMM_SELF, kwargs={"gdim":example.gdim}
     )
     omega_in = RectangularDomain(target_domain)
     omega_in.translate(xmin_omega_in)
