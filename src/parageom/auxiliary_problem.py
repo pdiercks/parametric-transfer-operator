@@ -266,7 +266,7 @@ def discretize_auxiliary_problem(fine_grid: str, degree: int, facet_tags: Union[
         aux = AuxiliaryProblem(problem, facet_tags, param)
     elif isinstance(facet_tags, list):
         assert coarse_grid is not None
-        grid, _, _ = read_mesh(Path(coarse_grid), MPI.COMM_SELF, gdim=gdim)
+        grid, _, _ = read_mesh(Path(coarse_grid), MPI.COMM_SELF, kwargs={"gdim":gdim})
         sgrid = StructuredQuadGrid(grid)
         aux = GlobalAuxiliaryProblem(problem, facet_tags, param, sgrid)
     return aux
