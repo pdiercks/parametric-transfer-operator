@@ -2,11 +2,11 @@
 
 from mpi4py import MPI
 import dolfinx as df
+import dolfinx.fem.petsc
 import numpy as np
 
-from multi.io import read_mesh, BasesLoader, select_modes
+from multi.io import read_mesh
 from multi.interpolation import make_mapping
-from multi.dofmap import DofMap
 from multi.projection import project_array, relative_error, absolute_error
 from multi.product import InnerProduct
 from multi.solver import build_nullspace
@@ -20,9 +20,10 @@ def main(args):
     from .definitions import BeamProblem
     from .auxiliary_problem import discretize_auxiliary_problem
     from .fom import discretize_fom
+    from .matrix_based_operator import _create_dirichlet_bcs, BCGeom, BCTopo
 
-    # get FOM solution
-    # check pointing not yt available, repeat steps from run_locrom.py
+    cell_index = example.config_to_cell(args.config)
+
     # ### Discretize global FOM
     global_parent_domain_path = example.parent_domain("global").as_posix()
     coarse_grid_path = example.coarse_grid("global").as_posix()
@@ -38,77 +39,76 @@ def main(args):
     trafo_d_gl = df.fem.Function(global_auxp.problem.V, name="d_trafo")
     fom = discretize_fom(example, global_auxp, trafo_d_gl)
 
-    # U_ref = fom.solve(mu_ref)
-    # U = fom.solve(mu)
-
     # extract u for single cell
     beam_problem = BeamProblem(
         example.coarse_grid("global"), example.parent_domain("global"), example
     )
-    coarse_grid = beam_problem.coarse_grid
-    delta_x = beam_problem.get_xmin_omega_in(args.cell)
+    delta_x = beam_problem.get_xmin_omega_in(cell_index)
 
-    unit_cell, _, _ = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, gdim=2)
+    unit_cell, _, _ = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, kwargs={"gdim":2})
     x_geom = unit_cell.geometry.x
     x_geom += delta_x
     V = df.fem.functionspace(unit_cell, fom.solution_space.V.ufl_element())
 
     dofs = make_mapping(V, fom.solution_space.V)
 
-    # read reduced basis from file
-    # nreal = 0
-    # method = "hapod"
-    # distr = "normal"
-    # bases_folder = example.bases_path(nreal, method, distr)
-    # num_cells = example.nx * example.ny
-    # bases_loader = BasesLoader(bases_folder, num_cells)
-    # bases, num_max_modes = bases_loader.read_bases()
-    #
-    # dofmap = DofMap(coarse_grid)
-    # dofs_per_vertex = 2
-    # dofs_per_face = 0
-    # num_modes = 12
-    #
-    # dofs_per_edge = num_max_modes.copy()
-    # dofs_per_edge[num_max_modes > num_modes] = num_modes
-    # dofmap.distribute_dofs(dofs_per_vertex, dofs_per_edge, dofs_per_face)
-    # local_basis = select_modes(
-    #     bases[args.cell], num_max_modes[args.cell], dofs_per_edge[args.cell]
-    # )
-
     # ### wrap as pymor objects
     source = FenicsxVectorSpace(V)
-    local_basis = np.load("/home/pdiercks/projects/muto/work/parageom/realization_00/hapod/pod_modes/modes_normal_inner.npy")
+    basis_path = None
+    if args.method == "hapod":
+        basis_path = example.hapod_modes_npy(0, args.distr, args.config)
+    elif args.method == "heuristic":
+        basis_path = example.heuristic_modes_npy(0, args.distr, args.config)
+    else:
+        raise NotImplementedError
+    local_basis = np.load(basis_path)
     basis = source.from_numpy(local_basis)
 
-    inner_product = InnerProduct(V, "h1")
-    product_mat = inner_product.assemble_matrix()
-    product = FenicsxMatrixOperator(product_mat, V, V)
+    # ### Discretize range product (depends on configuration)
+    hom_dirichlet = beam_problem.get_dirichlet(cell_index)
+    bcs_range_product = []
+    if hom_dirichlet is not None:
+        sub = hom_dirichlet.get("sub", None)
+        if sub is not None:
+            # determine entities and define BCTopo
+            entities = df.mesh.locate_entities_boundary(
+                V.mesh, hom_dirichlet["entity_dim"], hom_dirichlet["boundary"]
+            )
+            bc_rp = BCTopo(
+                hom_dirichlet["value"],
+                entities,
+                hom_dirichlet["entity_dim"],
+                V,
+                sub=sub,
+            )
+        else:
+            bc_rp = BCGeom(hom_dirichlet["value"], hom_dirichlet["boundary"], V)
+        bcs_range_product.append(bc_rp)
+    bcs_range_product = _create_dirichlet_bcs(tuple(bcs_range_product))
 
-    # FIXME
-    # for comparison with the basis from the hapod
-    # I would need to either subtract the kernel or add the kernel to the basis functions
-    nullspace = build_nullspace(V, gdim=2)
-    full_basis = source.make_array(nullspace)
-    # orthogonalize nullspace
-    gram_schmidt(full_basis, product=product, atol=0, rtol=0, copy=False)
+    inner_product = InnerProduct(V, example.range_product, bcs=bcs_range_product)
+    pmat = inner_product.assemble_matrix()
+    range_product = FenicsxMatrixOperator(pmat, V, V)
+
+    # ### Add kernel (depends on configuration)
+    kernel_set = beam_problem.get_kernel_set(cell_index)
+    # ### Rigid body modes
+    ns_vecs = build_nullspace(V, gdim=example.gdim)
+    rigid_body_modes = []
+    for j in kernel_set:
+        dolfinx.fem.petsc.set_bc(ns_vecs[j], bcs_range_product)
+        rigid_body_modes.append(ns_vecs[j])
+    full_basis = source.make_array(rigid_body_modes)  # type: ignore
+    gram_schmidt(full_basis, product=range_product, atol=0, rtol=0, copy=False)
     full_basis.append(basis)
 
-    orthonormal = np.allclose(full_basis.gramian(product), np.eye(len(full_basis)))
+    orthonormal = np.allclose(full_basis.gramian(range_product), np.eye(len(full_basis)))
     if orthonormal:
         print("basis is orthonormal")
     print(f"basis length: {len(full_basis)}")
 
     # compute projection error
     pspace = fom.parameters.space(example.mu_range)
-    # test_set = []
-    # test_set.append(fom.parameters.parse([0.12 * example.unit_length for _ in range(10)]))
-    # test_set.append(fom.parameters.parse([0.2 * example.unit_length for _ in range(10)]))
-    # test_set.append(fom.parameters.parse([0.27 * example.unit_length for _ in range(10)]))
-    # test_set.extend(pspace.sample_randomly(1))
-    # mymu = np.ones(10) * 0.2
-    # mymu[[3, 4, 5]] = np.array([0.125, 0.2216668, 0.105])
-    # test_set.append(fom.parameters.parse(mymu))
     test_set = pspace.sample_randomly(10)
 
     test_data = source.empty(reserve=len(test_set))
@@ -121,13 +121,14 @@ def main(args):
     rerrs = []
     aerrs = []
     for N in range(len(full_basis) + 1):
-        U_proj = project_array(test_data, full_basis[:N], product=product, orthonormal=orthonormal)
-        relerr = relative_error(test_data, U_proj, product=product)
-        abserr = absolute_error(test_data, U_proj, product=product)
+        U_proj = project_array(test_data, full_basis[:N], product=range_product, orthonormal=orthonormal)
+        relerr = relative_error(test_data, U_proj, product=range_product)
+        abserr = absolute_error(test_data, U_proj, product=range_product)
         rerrs.append(np.max(relerr))
         aerrs.append(np.max(abserr))
 
-    breakpoint()
+    if args.output is not None:
+        np.save(args.output, np.array(aerrs))
 
 
 if __name__ == "__main__":
@@ -135,6 +136,9 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("cell", type=int, help="The coarse grid cell to use.")
+    parser.add_argument("method", type=str, help="Method used for basis construction.")
+    parser.add_argument("distr", type=str, help="Distribution used for random sampling.")
+    parser.add_argument("config", type=str, help="Configuration / Archetype.")
+    parser.add_argument("--output", type=str, help="Write absolute projection error to file.")
     args = parser.parse_args(sys.argv[1:])
     main(args)
