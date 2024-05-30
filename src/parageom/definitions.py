@@ -68,10 +68,11 @@ class BeamData:
         }
     )
     training_set_seed: int = 767667058
+    testing_set_seed: int = 545445836
     validation_set_seed: int = 986718877
     configurations: tuple[str, str, str] = ("left", "inner", "right")
     distributions: tuple[str, ...] = ("normal",)
-    methods: tuple[str, ...] = ("hapod",)
+    methods: tuple[str, ...] = ("hapod", "heuristic")
     range_product: str = "h1"
     rrf_ttol: float = 10e-2
     rrf_ftol: float = 1e-15
@@ -122,6 +123,9 @@ class BeamData:
                 self.logs_path(nr, name).mkdir(exist_ok=True, parents=True)
                 self.bases_path(nr, name).mkdir(exist_ok=True, parents=True)
             (self.method_folder(nr, "hapod") / "pod_modes").mkdir(
+                exist_ok=True, parents=True
+            )
+            (self.method_folder(nr, "heuristic") / "modes").mkdir(
                 exist_ok=True, parents=True
             )
 
@@ -204,7 +208,7 @@ class BeamData:
     def ntrain(self, config: str) -> int:
         """Define size of training set"""
         if self.run_mode == "DEBUG":
-            map = {"left": 10, "inner": 20, "right": 10}
+            map = {"left": 40, "inner": 60, "right": 40}
             return map[config]
         elif self.run_mode == "PRODUCTION":
             map = {"left": 40, "inner": 60, "right": 40}
@@ -266,25 +270,41 @@ class BeamData:
         realizations = seed.generate_state(self.num_real)
         np.save(outpath, realizations)
 
-    def log_basis_construction(self, nr: int, method: str, distr: str, config: str) -> Path:
+    def log_basis_construction(
+        self, nr: int, method: str, distr: str, config: str
+    ) -> Path:
         return self.logs_path(nr, method) / f"basis_construction_{distr}_{config}.log"
 
     def log_run_locrom(self, nr: int, method: str, distr: str) -> Path:
         return self.logs_path(nr, method) / f"run_locrom_{distr}.log"
 
     def hapod_singular_values(self, nr: int, distr: str, conf: str) -> Path:
-        """singular values of POD"""
+        """singular values of final POD"""
         return self.method_folder(nr, "hapod") / f"singular_values_{distr}_{conf}.npy"
 
     def hapod_modes_xdmf(self, nr: int, distr: str, config: str) -> Path:
-        """displacement snapshots to be used for EI"""
+        """modes of the final POD"""
         dir = self.method_folder(nr, "hapod") / "pod_modes"
         return dir / f"modes_{distr}_{config}.xdmf"
 
+    def heuristic_modes_xdmf(self, nr: int, distr: str, config: str) -> Path:
+        """modes computed by heuristic range finder"""
+        dir = self.method_folder(nr, "heuristic") / "modes"
+        return dir / f"modes_{distr}_{config}.xdmf"
+
     def hapod_modes_npy(self, nr: int, distr: str, config: str) -> Path:
-        """displacement snapshots to be used for EI"""
+        """modes of the final POD"""
         dir = self.method_folder(nr, "hapod") / "pod_modes"
         return dir / f"modes_{distr}_{config}.npy"
+
+    def heuristic_modes_npy(self, nr: int, distr: str, config: str) -> Path:
+        """modes computed by heuristic range finder"""
+        dir = self.method_folder(nr, "heuristic") / "modes"
+        return dir / f"modes_{distr}_{config}.npy"
+
+    def projerr(self, nr: int, method: str, distr: str, config: str) -> Path:
+        dir = self.method_folder(nr, method)
+        return dir / f"projerr_{distr}_{config}.npy"
 
 
 class BeamProblem(MultiscaleProblemDefinition):

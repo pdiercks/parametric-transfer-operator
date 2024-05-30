@@ -1,3 +1,4 @@
+import sys
 # from itertools import repeat
 from pathlib import Path
 
@@ -312,19 +313,22 @@ def main(args):
         sub = hom_dirichlet.get("sub", None)
         if sub is not None:
             # determine entities and define BCTopo
-            entities = df.mesh.locate_entities_boundary(
+            entities_omega = df.mesh.locate_entities_boundary(
                 V.mesh, hom_dirichlet["entity_dim"], hom_dirichlet["boundary"]
             )
+            entities_omega_in = df.mesh.locate_entities_boundary(
+                    V_in.mesh, hom_dirichlet["entity_dim"], hom_dirichlet["boundary"]
+                    )
             bc = BCTopo(
                 hom_dirichlet["value"],
-                entities,
+                entities_omega,
                 hom_dirichlet["entity_dim"],
                 V,
                 sub=sub,
             )
             bc_rp = BCTopo(
                 hom_dirichlet["value"],
-                entities,
+                entities_omega_in,
                 hom_dirichlet["entity_dim"],
                 V_in,
                 sub=sub,
@@ -370,7 +374,8 @@ def main(args):
     source_product = NumpyMatrixOperator(source_mat[rhs.dofs, :][:, rhs.dofs])
 
     # ### Rigid body modes
-    ns_vecs = build_nullspace(V_in, gdim=omega_in.grid.geometry.dim)
+    ns_vecs = build_nullspace(V_in, gdim=example.gdim)
+    assert len(ns_vecs) == 3
     rigid_body_modes = []
     for j in kernel_set:
         dolfinx.fem.petsc.set_bc(ns_vecs[j], bcs_range_product)
@@ -378,6 +383,7 @@ def main(args):
     kernel = target_space.make_array(rigid_body_modes)  # type: ignore
     with logger.block("Orthonormalizing kernel of A ..."):  # type: ignore
         gram_schmidt(kernel, product=range_product, copy=False)
+    assert np.allclose(kernel.gramian(range_product), np.eye(len(kernel)))
 
     # #### Transfer Problem
     transfer = ParametricTransferProblem(
@@ -387,6 +393,7 @@ def main(args):
         source_product=source_product,
         range_product=range_product,
         kernel=kernel,
+        padding=1e-6,
     )
 
     # ### Discretize Neumann Data
@@ -413,7 +420,6 @@ def main(args):
 
     for mu, seed_seq in zip(training_set, seed_seqs_rrf):
         with new_rng(seed_seq):
-            # FIXME: transfer.assemble_operator(mu) is called where? when?
             transfer.assemble_operator(mu)
             basis = adaptive_rrf_normal(
                 logger,
