@@ -91,14 +91,16 @@ def heuristic_range_finder(
     logger.info(f"{testlimit=}")
 
     logger.debug(f"Computing test set of size {len(testing_set) * num_testvecs}.")
-    M = tp.range.empty() # global test set
+    M = tp.range.empty()  # global test set
     for mu in testing_set:
         tp.assemble_operator(mu)
-        R = tp.generate_random_boundary_data(count=num_testvecs, distribution=distribution)
+        R = tp.generate_random_boundary_data(
+            count=num_testvecs, distribution=distribution
+        )
         M.append(tp.solve(R))
 
-    rng = get_rng() # current RNG
-    training_samples = [] # parameter values used in the training
+    rng = get_rng()  # current RNG
+    training_samples = []  # parameter values used in the training
     B = tp.range.empty()
     maxnorm = np.inf
     num_iter = 0
@@ -188,12 +190,12 @@ def main(args):
     # range of the same number of different transfer operators is approximated
     # in both variants.
     testing_set = sample_lhs(
-            parameter_space,
-            name=parameter_name,
-            samples=ntrain,
-            criterion="center",
-            random_state=testing_seeds[args.configuration]
-            )
+        parameter_space,
+        name=parameter_name,
+        samples=ntrain,
+        criterion="center",
+        random_state=testing_seeds[args.configuration],
+    )
     logger.info(
         "Starting range approximation of transfer operators"
         f" for training set of size {len(training_set)}."
@@ -207,7 +209,9 @@ def main(args):
 
     # ### Oversampling Domain
     domain, ct, ft = read_mesh(
-            example.parent_domain(args.configuration), MPI.COMM_SELF, kwargs={"gdim": example.gdim}
+        example.parent_domain(args.configuration),
+        MPI.COMM_SELF,
+        kwargs={"gdim": example.gdim},
     )
     omega = RectangularDomain(domain, cell_tags=ct, facet_tags=ft)
     ft_def = {"bottom": int(11), "left": int(12), "right": int(13), "top": int(14)}
@@ -246,7 +250,9 @@ def main(args):
 
     # ### Structured coarse grid
     grid, _, _ = read_mesh(
-            example.coarse_grid(args.configuration), MPI.COMM_SELF, kwargs={"gdim":example.gdim}
+        example.coarse_grid(args.configuration),
+        MPI.COMM_SELF,
+        kwargs={"gdim": example.gdim},
     )
     coarse_grid = StructuredQuadGrid(grid)
 
@@ -274,7 +280,7 @@ def main(args):
     xmin_omega_in = beam_problem.get_xmin_omega_in(cell_index)
     logger.debug(f"{xmin_omega_in=}")
     target_domain, _, _ = read_mesh(
-            example.parent_unit_cell, MPI.COMM_SELF, kwargs={"gdim":example.gdim}
+        example.parent_unit_cell, MPI.COMM_SELF, kwargs={"gdim": example.gdim}
     )
     omega_in = RectangularDomain(target_domain)
     omega_in.translate(xmin_omega_in)
@@ -294,32 +300,27 @@ def main(args):
     bcs_op.append(bc_gamma_out)
     bcs_range_product = []
     if hom_dirichlet is not None:
-        sub = hom_dirichlet.get("sub", None)
-        if sub is not None:
-            # determine entities and define BCTopo
-            entities_omega = df.mesh.locate_entities_boundary(
-                V.mesh, hom_dirichlet["entity_dim"], hom_dirichlet["boundary"]
-            )
-            entities_omega_in = df.mesh.locate_entities_boundary(
-                    V_in.mesh, hom_dirichlet["entity_dim"], hom_dirichlet["boundary"]
-                    )
-            bc = BCTopo(
-                hom_dirichlet["value"],
-                entities_omega,
-                hom_dirichlet["entity_dim"],
-                V,
-                sub=sub,
-            )
-            bc_rp = BCTopo(
-                hom_dirichlet["value"],
-                entities_omega_in,
-                hom_dirichlet["entity_dim"],
-                V_in,
-                sub=sub,
-            )
-        else:
-            bc = BCGeom(hom_dirichlet["value"], hom_dirichlet["boundary"], V)
-            bc_rp = BCGeom(hom_dirichlet["value"], hom_dirichlet["boundary"], V_in)
+        # determine entities and define BCTopo
+        entities_omega = df.mesh.locate_entities_boundary(
+            V.mesh, hom_dirichlet["entity_dim"], hom_dirichlet["boundary"]
+        )
+        entities_omega_in = df.mesh.locate_entities_boundary(
+            V_in.mesh, hom_dirichlet["entity_dim"], hom_dirichlet["boundary"]
+        )
+        bc = BCTopo(
+            df.fem.Constant(V.mesh, hom_dirichlet["value"]),
+            entities_omega,
+            hom_dirichlet["entity_dim"],
+            V,
+            sub=hom_dirichlet["sub"],
+        )
+        bc_rp = BCTopo(
+            df.fem.Constant(V_in.mesh, hom_dirichlet["value"]),
+            entities_omega_in,
+            hom_dirichlet["entity_dim"],
+            V_in,
+            sub=hom_dirichlet["sub"],
+        )
         bcs_op.append(bc)
         bcs_range_product.append(bc_rp)
     bcs_op = tuple(bcs_op)
@@ -328,7 +329,11 @@ def main(args):
 
     # ### FenicsxMatrixBasedOperator
     parageom = ParaGeomLinEla(
-            omega, V, E=example.youngs_modulus, NU=example.poisson_ratio, d=d_trafo # type: ignore
+        omega,
+        V,
+        E=example.youngs_modulus,
+        NU=example.poisson_ratio,
+        d=d_trafo,  # type: ignore
     )  # type: ignore
     params = example.parameters[args.configuration]
 
@@ -381,12 +386,15 @@ def main(args):
     )
 
     # ### Discretize Neumann Data
-    dA = ufl.Measure('ds', domain=omega.grid, subdomain_data=omega.facet_tags)
-    traction = df.fem.Constant(omega.grid, (df.default_scalar_type(0.0), df.default_scalar_type(-example.traction_y)))
+    dA = ufl.Measure("ds", domain=omega.grid, subdomain_data=omega.facet_tags)
+    traction = df.fem.Constant(
+        omega.grid,
+        (df.default_scalar_type(0.0), df.default_scalar_type(-example.traction_y)),
+    )
     v = ufl.TestFunction(V)
     L = ufl.inner(v, traction) * dA(ft_def["top"])
     Lcpp = df.fem.form(L)
-    f_ext = dolfinx.fem.petsc.create_vector(Lcpp) # type: ignore
+    f_ext = dolfinx.fem.petsc.create_vector(Lcpp)  # type: ignore
 
     with f_ext.localForm() as b_loc:
         b_loc.set(0)
@@ -397,13 +405,21 @@ def main(args):
     dolfinx.fem.petsc.apply_lifting(f_ext, [operator.compiled_form], bcs=[bcs_neumann])  # type: ignore
     f_ext.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
     dolfinx.fem.petsc.set_bc(f_ext, bcs_neumann)
-    FEXT = operator.range.make_array([f_ext]) # type: ignore
+    FEXT = operator.range.make_array([f_ext])  # type: ignore
 
     # ### Heuristic range approximation
     training_set_length = len(training_set)
     logger.debug(f"{seed_seqs_rrf[0]=}")
     with new_rng(seed_seqs_rrf[0]):
-        spectral_basis, training_samples = heuristic_range_finder(logger, transfer, training_set, testing_set, error_tol=example.rrf_ttol, failure_tolerance=example.rrf_ftol, num_testvecs=example.rrf_num_testvecs)
+        spectral_basis, training_samples = heuristic_range_finder(
+            logger,
+            transfer,
+            training_set,
+            testing_set,
+            error_tol=example.rrf_ttol,
+            failure_tolerance=example.rrf_ftol,
+            num_testvecs=example.rrf_num_testvecs,
+        )
     assert len(training_set) + len(training_samples) == training_set_length
 
     # ### Compute Neumann Modes
@@ -411,27 +427,47 @@ def main(args):
     for mu in training_samples:
         transfer.assemble_operator(mu)
         U_neumann = transfer.op.apply_inverse(FEXT)
-        u_vec = transfer._u.x.petsc_vec # type: ignore
+        u_vec = transfer._u.x.petsc_vec  # type: ignore
         u_vec.array[:] = U_neumann.to_numpy().flatten()
-        transfer._u.x.scatter_forward() # type: ignore
+        transfer._u.x.scatter_forward()  # type: ignore
 
         # ### restrict full solution to target subdomain
-        transfer._u_in.interpolate(transfer._u, nmm_interpolation_data=transfer._interp_data) # type: ignore
-        transfer._u_in.x.scatter_forward() # type: ignore
-        U_in_neumann = transfer.range.make_array([transfer._u_in.x.petsc_vec.copy()]) # type: ignore
+        transfer._u_in.interpolate(
+            transfer._u, nmm_interpolation_data=transfer._interp_data
+        )  # type: ignore
+        transfer._u_in.x.scatter_forward()  # type: ignore
+        U_in_neumann = transfer.range.make_array([transfer._u_in.x.petsc_vec.copy()])  # type: ignore
 
         # ### Remove kernel after restriction to target subdomain
-        U_orth = orthogonal_part(U_in_neumann, kernel, product=transfer.range_product, orthonormal=True)
+        U_orth = orthogonal_part(
+            U_in_neumann, kernel, product=transfer.range_product, orthonormal=True
+        )
         neumann_snapshots.append(U_orth)
 
-    assert np.allclose(spectral_basis.gramian(transfer.range_product), np.eye(len(spectral_basis)))
+    assert np.allclose(
+        spectral_basis.gramian(transfer.range_product), np.eye(len(spectral_basis))
+    )
     logger.info("Extending spectral basis by Neumann snapshots ...")
-    U_proj_err = neumann_snapshots - spectral_basis.lincomb(neumann_snapshots.inner(spectral_basis, transfer.range_product))
-    neumann_modes = pod(U_proj_err, modes=len(neumann_snapshots), product=transfer.range_product, l2_err=example.pod_l2_err, orth_tol=np.inf)[0]
+    U_proj_err = neumann_snapshots - spectral_basis.lincomb(
+        neumann_snapshots.inner(spectral_basis, transfer.range_product)
+    )
+    neumann_modes = pod(
+        U_proj_err,
+        modes=len(neumann_snapshots),
+        product=transfer.range_product,
+        l2_err=example.pod_l2_err,
+        orth_tol=np.inf,
+    )[0]
 
     basis_length = len(spectral_basis)
     spectral_basis.append(neumann_modes)
-    gram_schmidt(spectral_basis, offset=basis_length, product=transfer.range_product, copy=False, check=False)
+    gram_schmidt(
+        spectral_basis,
+        offset=basis_length,
+        product=transfer.range_product,
+        copy=False,
+        check=False,
+    )
 
     logger.info(f"Spectral basis size: {basis_length}.")
     logger.info(f"Neumann modes: {len(neumann_modes)}.")

@@ -66,21 +66,17 @@ def main(args):
     hom_dirichlet = beam_problem.get_dirichlet(cell_index)
     bcs_range_product = []
     if hom_dirichlet is not None:
-        sub = hom_dirichlet.get("sub", None)
-        if sub is not None:
-            # determine entities and define BCTopo
-            entities = df.mesh.locate_entities_boundary(
-                V.mesh, hom_dirichlet["entity_dim"], hom_dirichlet["boundary"]
-            )
-            bc_rp = BCTopo(
-                hom_dirichlet["value"],
-                entities,
-                hom_dirichlet["entity_dim"],
-                V,
-                sub=sub,
-            )
-        else:
-            bc_rp = BCGeom(hom_dirichlet["value"], hom_dirichlet["boundary"], V)
+        # determine entities and define BCTopo
+        entities = df.mesh.locate_entities_boundary(
+            V.mesh, hom_dirichlet["entity_dim"], hom_dirichlet["boundary"]
+        )
+        bc_rp = BCTopo(
+            df.fem.Constant(V.mesh, hom_dirichlet["value"]),
+            entities,
+            hom_dirichlet["entity_dim"],
+            V,
+            sub=hom_dirichlet["sub"],
+        )
         bcs_range_product.append(bc_rp)
     bcs_range_product = _create_dirichlet_bcs(tuple(bcs_range_product))
 
@@ -102,9 +98,8 @@ def main(args):
     full_basis.append(basis)
 
     orthonormal = np.allclose(full_basis.gramian(range_product), np.eye(len(full_basis)))
-    if orthonormal:
-        print("basis is orthonormal")
-    print(f"basis length: {len(full_basis)}")
+    if not orthonormal:
+        raise ValueError("Basis is not orthonormal wrt range product.")
 
     # compute projection error
     pspace = fom.parameters.space(example.mu_range)

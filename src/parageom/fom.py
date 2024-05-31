@@ -6,7 +6,7 @@ import dolfinx as df
 from multi.domain import Domain, RectangularDomain
 from multi.problems import LinearProblem
 from multi.materials import LinearElasticMaterial
-from multi.boundary import plane_at, point_at
+from multi.boundary import plane_at
 from multi.preprocessing import create_meshtags
 from multi.product import InnerProduct
 
@@ -138,8 +138,9 @@ def discretize_subdomain_operators(example):
 
 def discretize_fom(example, auxiliary_problem, trafo_disp):
     """Discretize FOM with Pull Back"""
+    from .definitions import BeamProblem
     from .fom import ParaGeomLinEla
-    from .matrix_based_operator import FenicsxMatrixBasedOperator, BCGeom, BCTopo
+    from .matrix_based_operator import FenicsxMatrixBasedOperator, BCGeom, BCTopo, _create_dirichlet_bcs
 
     domain = auxiliary_problem.problem.domain.grid
     tdim = domain.topology.dim
@@ -154,25 +155,19 @@ def discretize_fom(example, auxiliary_problem, trafo_disp):
     V = trafo_disp.function_space
     problem = ParaGeomLinEla(omega, V, E=EMOD, NU=POISSON, d=trafo_disp)
 
-    # Dirichlet BCs
-    origin = point_at(omega.xmin)
-    bottom_right_locator = point_at([omega.xmax[0], omega.xmin[1], 0.0])
-    bottom_right = df.mesh.locate_entities_boundary(domain, 0, bottom_right_locator)
-    u_origin = df.fem.Constant(domain, (df.default_scalar_type(0.0),) * omega.gdim)
-    u_bottom_right = df.fem.Constant(domain, df.default_scalar_type(0.0))
+    # Beam Problem
+    beam_problem = BeamProblem(example.coarse_grid("global"), example.parent_domain("global"), example)
+    # dirichlet bcs are defined globally
+    dirichlet_left = beam_problem.get_dirichlet(0)
+    dirichlet_right = beam_problem.get_dirichlet(9)
 
-    bc_origin = BCGeom(u_origin, origin, V)
-    bc_bottom_right = BCTopo(u_bottom_right, bottom_right, 0, V, sub=1)
-    problem.add_dirichlet_bc(
-        value=bc_origin.value, boundary=bc_origin.locator, method="geometrical"
-    )
-    problem.add_dirichlet_bc(
-        value=bc_bottom_right.value,
-        boundary=bc_bottom_right.entities,
-        sub=1,
-        method="topological",
-        entity_dim=bc_bottom_right.entity_dim,
-    )
+    # Dirichlet BCs
+    entities_left = df.mesh.locate_entities_boundary(domain, fdim, dirichlet_left["boundary"])
+    entities_right = df.mesh.locate_entities_boundary(domain, fdim, dirichlet_right["boundary"])
+
+    bc_left = BCTopo(df.fem.Constant(V.mesh, dirichlet_left["value"]), entities_left, fdim, V, sub=dirichlet_left["sub"])
+    bc_right = BCTopo(df.fem.Constant(V.mesh, dirichlet_right["value"]), entities_right, fdim, V, sub=dirichlet_right["sub"])
+    bcs = _create_dirichlet_bcs((bc_left, bc_right))
 
     # Neumann BCs
     TY = -example.traction_y
@@ -182,8 +177,7 @@ def discretize_fom(example, auxiliary_problem, trafo_disp):
     problem.add_neumann_bc(top_marker, traction)
 
     problem.setup_solver()
-    dirichlet = problem.get_dirichlet_bcs()
-    problem.assemble_vector(bcs=dirichlet)
+    problem.assemble_vector(bcs=bcs)
 
     # ### wrap as pymor model
     def param_setter(mu):
@@ -198,7 +192,7 @@ def discretize_fom(example, auxiliary_problem, trafo_disp):
         problem.form_lhs,
         params,
         param_setter=param_setter,
-        bcs=(bc_origin, bc_bottom_right),
+        bcs=(bc_left, bc_right),
         name="ParaGeom",
     )
 
@@ -208,7 +202,7 @@ def discretize_fom(example, auxiliary_problem, trafo_disp):
     rhs = VectorOperator(operator.range.make_array([problem.b.copy()]))  # type: ignore
 
     # ### Inner product
-    inner_product = InnerProduct(V, product="h1-semi", bcs=dirichlet)
+    inner_product = InnerProduct(V, product="h1-semi", bcs=bcs)
     product_mat = inner_product.assemble_matrix()
     product_name = "h1_0_semi"
     h1_product = FenicsxMatrixOperator(product_mat, V, V, name=product_name)

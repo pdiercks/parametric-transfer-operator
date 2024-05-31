@@ -1,7 +1,7 @@
 import numpy as np
 
 from mpi4py import MPI
-from dolfinx import fem, default_scalar_type
+import dolfinx as df
 from dolfinx.io import gmshio
 from dolfinx.io.utils import XDMFFile
 
@@ -12,11 +12,13 @@ from multi.materials import LinearElasticMaterial
 from multi.problems import LinearElasticityProblem
 from multi.product import InnerProduct
 
-from pymor.bindings.fenicsx import FenicsxMatrixOperator, FenicsxVectorSpace
+from pymor.bindings.fenicsx import FenicsxMatrixOperator
 from multi.projection import relative_error, absolute_error
 
 
 def compute_reference_solution(example, mshfile, degree, d):
+    from .definitions import BeamProblem
+    from .matrix_based_operator import BCTopo, _create_dirichlet_bcs
     # translate parent domain
     domain = gmshio.read_from_msh(
         mshfile, MPI.COMM_WORLD, gdim=2
@@ -41,21 +43,29 @@ def compute_reference_solution(example, mshfile, degree, d):
     EMOD = example.youngs_modulus
     POISSON = example.poisson_ratio
     material = LinearElasticMaterial(gdim=omega.gdim, E=EMOD, NU=POISSON)
-    V = fem.functionspace(domain, ("P", degree, (omega.gdim,)))
+    V = df.fem.functionspace(domain, ("P", degree, (omega.gdim,)))
     problem = LinearElasticityProblem(omega, V, phases=material)
 
     # Dirichlet BCs
-    origin = point_at(omega.xmin)
-    bottom_right = point_at([omega.xmax[0], omega.xmin[1], 0.])
-    u_origin = fem.Constant(domain, (default_scalar_type(0.0),) * omega.gdim)
-    u_bottom_right = fem.Constant(domain, default_scalar_type(0.0))
-    problem.add_dirichlet_bc(u_origin, origin, method="geometrical")
-    problem.add_dirichlet_bc(u_bottom_right, bottom_right, sub=1, method="geometrical", entity_dim=0)
+    beam_problem = BeamProblem(example.coarse_grid("global"), example.parent_domain("global"), example)
+    # dirichlet bcs are defined globally
+    dirichlet_left = beam_problem.get_dirichlet(0)
+    dirichlet_right = beam_problem.get_dirichlet(9)
+
+    # Dirichlet BCs
+    entities_left = df.mesh.locate_entities_boundary(domain, fdim, dirichlet_left["boundary"])
+    entities_right = df.mesh.locate_entities_boundary(domain, fdim, dirichlet_right["boundary"])
+
+    bc_left = BCTopo(df.fem.Constant(V.mesh, dirichlet_left["value"]), entities_left, fdim, V, sub=dirichlet_left["sub"])
+    bc_right = BCTopo(df.fem.Constant(V.mesh, dirichlet_right["value"]), entities_right, fdim, V, sub=dirichlet_right["sub"])
+    bcs = _create_dirichlet_bcs((bc_left, bc_right))
+    for bc in bcs:
+        problem.add_dirichlet_bc(bc)
 
     # Neumann BCs
     TY = -example.traction_y
-    traction = fem.Constant(
-        domain, (default_scalar_type(0.0), default_scalar_type(TY))
+    traction = df.fem.Constant(
+        domain, (df.default_scalar_type(0.0), df.default_scalar_type(TY))
     )
     problem.add_neumann_bc(top_marker, traction)
 
@@ -71,7 +81,7 @@ def main():
     from .fom import discretize_fom
 
     coarse_grid_path = example.coarse_grid("global").as_posix()
-    parent_domain_path = example.global_parent_domain.as_posix()
+    parent_domain_path = example.parent_domain("global").as_posix()
     degree = example.geom_deg
 
     interface_tags = [i for i in range(15, 25)] # FIXME better define in Example data class
@@ -80,7 +90,7 @@ def main():
     )
     parameter_space = aux.parameters.space(example.mu_range)
     mu = parameter_space.sample_randomly(1)[0]
-    d = fem.Function(aux.problem.V, name="d_trafo")
+    d = df.fem.Function(aux.problem.V, name="d_trafo")
     fom = discretize_fom(example, aux, d)
     U = fom.solve(mu)
 

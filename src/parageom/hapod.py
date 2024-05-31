@@ -1,4 +1,5 @@
 import sys
+
 # from itertools import repeat
 from pathlib import Path
 
@@ -223,7 +224,9 @@ def main(args):
 
     # ### Oversampling Domain
     domain, ct, ft = read_mesh(
-            example.parent_domain(args.configuration), MPI.COMM_SELF, kwargs={"gdim": example.gdim}
+        example.parent_domain(args.configuration),
+        MPI.COMM_SELF,
+        kwargs={"gdim": example.gdim},
     )
     omega = RectangularDomain(domain, cell_tags=ct, facet_tags=ft)
     ft_def = {"bottom": int(11), "left": int(12), "right": int(13), "top": int(14)}
@@ -262,7 +265,9 @@ def main(args):
 
     # ### Structured coarse grid
     grid, _, _ = read_mesh(
-            example.coarse_grid(args.configuration), MPI.COMM_SELF, kwargs={"gdim":example.gdim}
+        example.coarse_grid(args.configuration),
+        MPI.COMM_SELF,
+        kwargs={"gdim": example.gdim},
     )
     coarse_grid = StructuredQuadGrid(grid)
 
@@ -290,7 +295,7 @@ def main(args):
     xmin_omega_in = beam_problem.get_xmin_omega_in(cell_index)
     logger.debug(f"{xmin_omega_in=}")
     target_domain, _, _ = read_mesh(
-            example.parent_unit_cell, MPI.COMM_SELF, kwargs={"gdim":example.gdim}
+        example.parent_unit_cell, MPI.COMM_SELF, kwargs={"gdim": example.gdim}
     )
     omega_in = RectangularDomain(target_domain)
     omega_in.translate(xmin_omega_in)
@@ -310,32 +315,27 @@ def main(args):
     bcs_op.append(bc_gamma_out)
     bcs_range_product = []
     if hom_dirichlet is not None:
-        sub = hom_dirichlet.get("sub", None)
-        if sub is not None:
-            # determine entities and define BCTopo
-            entities_omega = df.mesh.locate_entities_boundary(
-                V.mesh, hom_dirichlet["entity_dim"], hom_dirichlet["boundary"]
-            )
-            entities_omega_in = df.mesh.locate_entities_boundary(
-                    V_in.mesh, hom_dirichlet["entity_dim"], hom_dirichlet["boundary"]
-                    )
-            bc = BCTopo(
-                hom_dirichlet["value"],
-                entities_omega,
-                hom_dirichlet["entity_dim"],
-                V,
-                sub=sub,
-            )
-            bc_rp = BCTopo(
-                hom_dirichlet["value"],
-                entities_omega_in,
-                hom_dirichlet["entity_dim"],
-                V_in,
-                sub=sub,
-            )
-        else:
-            bc = BCGeom(hom_dirichlet["value"], hom_dirichlet["boundary"], V)
-            bc_rp = BCGeom(hom_dirichlet["value"], hom_dirichlet["boundary"], V_in)
+        # determine entities and define BCTopo
+        entities_omega = df.mesh.locate_entities_boundary(
+            V.mesh, hom_dirichlet["entity_dim"], hom_dirichlet["boundary"]
+        )
+        entities_omega_in = df.mesh.locate_entities_boundary(
+            V_in.mesh, hom_dirichlet["entity_dim"], hom_dirichlet["boundary"]
+        )
+        bc = BCTopo(
+            df.fem.Constant(V.mesh, hom_dirichlet["value"]),
+            entities_omega,
+            hom_dirichlet["entity_dim"],
+            V,
+            sub=hom_dirichlet["sub"],
+        )
+        bc_rp = BCTopo(
+            df.fem.Constant(V_in.mesh, hom_dirichlet["value"]),
+            entities_omega_in,
+            hom_dirichlet["entity_dim"],
+            V_in,
+            sub=hom_dirichlet["sub"],
+        )
         bcs_op.append(bc)
         bcs_range_product.append(bc_rp)
     bcs_op = tuple(bcs_op)
@@ -344,7 +344,11 @@ def main(args):
 
     # ### FenicsxMatrixBasedOperator
     parageom = ParaGeomLinEla(
-            omega, V, E=example.youngs_modulus, NU=example.poisson_ratio, d=d_trafo # type: ignore
+        omega,
+        V,
+        E=example.youngs_modulus,
+        NU=example.poisson_ratio,
+        d=d_trafo,  # type: ignore
     )  # type: ignore
     params = example.parameters[args.configuration]
 
@@ -397,12 +401,15 @@ def main(args):
     )
 
     # ### Discretize Neumann Data
-    dA = ufl.Measure('ds', domain=omega.grid, subdomain_data=omega.facet_tags)
-    traction = df.fem.Constant(omega.grid, (df.default_scalar_type(0.0), df.default_scalar_type(-example.traction_y)))
+    dA = ufl.Measure("ds", domain=omega.grid, subdomain_data=omega.facet_tags)
+    traction = df.fem.Constant(
+        omega.grid,
+        (df.default_scalar_type(0.0), df.default_scalar_type(-example.traction_y)),
+    )
     v = ufl.TestFunction(V)
     L = ufl.inner(v, traction) * dA(ft_def["top"])
     Lcpp = df.fem.form(L)
-    f_ext = dolfinx.fem.petsc.create_vector(Lcpp) # type: ignore
+    f_ext = dolfinx.fem.petsc.create_vector(Lcpp)  # type: ignore
 
     with f_ext.localForm() as b_loc:
         b_loc.set(0)
@@ -413,7 +420,7 @@ def main(args):
     dolfinx.fem.petsc.apply_lifting(f_ext, [operator.compiled_form], bcs=[bcs_neumann])  # type: ignore
     f_ext.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
     dolfinx.fem.petsc.set_bc(f_ext, bcs_neumann)
-    FEXT = operator.range.make_array([f_ext]) # type: ignore
+    FEXT = operator.range.make_array([f_ext])  # type: ignore
 
     assert len(training_set) == len(seed_seqs_rrf)
     snapshots = transfer.range.empty()
@@ -432,22 +439,30 @@ def main(args):
             logger.info("\nSolving for additional Neumann mode ...")
 
             U_neumann = transfer.op.apply_inverse(FEXT)
-            u_vec = transfer._u.x.petsc_vec # type: ignore
+            u_vec = transfer._u.x.petsc_vec  # type: ignore
             u_vec.array[:] = U_neumann.to_numpy().flatten()
-            transfer._u.x.scatter_forward() # type: ignore
+            transfer._u.x.scatter_forward()  # type: ignore
 
             # ### restrict full solution to target subdomain
-            transfer._u_in.interpolate(transfer._u, nmm_interpolation_data=transfer._interp_data) # type: ignore
-            transfer._u_in.x.scatter_forward() # type: ignore
-            U_in_neumann = transfer.range.make_array([transfer._u_in.x.petsc_vec.copy()]) # type: ignore
+            transfer._u_in.interpolate(
+                transfer._u, nmm_interpolation_data=transfer._interp_data
+            )  # type: ignore
+            transfer._u_in.x.scatter_forward()  # type: ignore
+            U_in_neumann = transfer.range.make_array(
+                [transfer._u_in.x.petsc_vec.copy()]
+            )  # type: ignore
 
             # ### Remove kernel after restriction to target subdomain
-            U_orth = orthogonal_part(U_in_neumann, kernel, product=transfer.range_product, orthonormal=True)
+            U_orth = orthogonal_part(
+                U_in_neumann, kernel, product=transfer.range_product, orthonormal=True
+            )
             basis.append(U_orth)
 
-        snapshots.append(basis) # type: ignore
+        snapshots.append(basis)  # type: ignore
 
-    pod_modes, pod_svals = pod(snapshots, product=transfer.range_product, l2_err=example.pod_l2_err)  # type: ignore
+    pod_modes, pod_svals = pod(
+        snapshots, product=transfer.range_product, l2_err=example.pod_l2_err
+    )  # type: ignore
 
     viz = FenicsxVisualizer(pod_modes.space)
     viz.visualize(

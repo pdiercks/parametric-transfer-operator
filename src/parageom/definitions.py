@@ -50,13 +50,13 @@ class BeamData:
 
     name: str = "parageom"
     gdim: int = 2
-    unit_length: float = 100.0  # [mm]
+    unit_length: float = 10.0  # [mm]
     nx: int = 10
     ny: int = 1
     geom_deg: int = 2
     fe_deg: int = 2
     poisson_ratio: float = 0.3
-    youngs_modulus: float = 20e3  # [MPa]
+    youngs_modulus: float = 2e3  # [MPa]
     traction_y: float = 10.0  # [MPa]
     parameters: dict = field(
         default_factory=lambda: {
@@ -348,12 +348,21 @@ class BeamProblem(MultiscaleProblemDefinition):
 
     @property
     def boundaries(self):
+        # NOTE
+        # this only defines markers
+        # code needs to use df.mesh.locate_entities_boundary
+
         x = self.coarse_grid.grid.geometry.x
+        data = self.data
+        a = data.unit_length
         xmin = np.amin(x, axis=0)
         xmax = np.amax(x, axis=0)
+
         return {
-            "origin": (int(101), point_at([xmin[0], xmin[1], xmin[2]])),
-            "bottom_right": (int(102), point_at([xmax[0], xmin[1], xmin[2]])),
+            "support_left": (int(101), within_range([xmin[0], xmin[1], xmin[2]], [a/2, xmin[1], xmin[2]])),
+            "support_right": (int(102), within_range([xmax[0] - a/2, xmin[1], xmin[2]], [xmax[0], xmin[1], xmin[2]])),
+            # "origin": (int(101), point_at([xmin[0], xmin[1], xmin[2]])),
+            # "bottom_right": (int(102), point_at([xmax[0], xmin[1], xmin[2]])),
         }
 
     def get_xmin_omega_in(self, cell_index: int) -> np.ndarray:
@@ -364,23 +373,27 @@ class BeamProblem(MultiscaleProblemDefinition):
         return coord[0]
 
     def get_dirichlet(self, cell_index: Optional[int] = None) -> Union[dict, None]:
-        _, origin = self.boundaries["origin"]
-        _, bottom_right = self.boundaries["bottom_right"]
+        _, left = self.boundaries["support_left"]
+        _, right = self.boundaries["support_right"]
+
+        # NOTE
+        # this only defines markers using `within_range`
+        # code needs to use df.mesh.locate_entities_boundary
+
         if cell_index is not None:
             assert cell_index in (0, 4, 9)
         if cell_index == 0:
-            u_origin = np.array([0.0, 0.0], dtype=default_scalar_type)
-            dirichlet = {"value": u_origin, "boundary": origin, "method": "geometrical"}
+            u_origin = (default_scalar_type(0.0), default_scalar_type(0.0))
+            dirichlet = {"value": u_origin, "boundary": left, "entity_dim": 1, "sub": None}
         elif cell_index == 4:
             dirichlet = None
         elif cell_index == 9:
             u_bottom_right = default_scalar_type(0.0)
             dirichlet = {
                 "value": u_bottom_right,
-                "boundary": bottom_right,
+                "boundary": right,
+                "entity_dim": 1,
                 "sub": 1,
-                "entity_dim": 0,
-                "method": "geometrical",
             }
         else:
             raise NotImplementedError
@@ -408,6 +421,10 @@ class BeamProblem(MultiscaleProblemDefinition):
         data = self.data
         unit_length = data.unit_length
         tol = 1e-4
+
+        # NOTE
+        # this only defines the marker
+        # code needs to use df.mesh.locate_entities_boundary
 
         y = data.height
         if cell_index is not None:
