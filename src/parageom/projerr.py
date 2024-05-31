@@ -19,7 +19,7 @@ def main(args):
     from .definitions import BeamProblem
     from .auxiliary_problem import discretize_auxiliary_problem
     from .fom import discretize_fom
-    from .matrix_based_operator import _create_dirichlet_bcs, BCGeom, BCTopo
+    from .matrix_based_operator import _create_dirichlet_bcs, BCTopo
 
     cell_index = example.config_to_cell(args.config)
 

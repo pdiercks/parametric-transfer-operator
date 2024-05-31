@@ -448,11 +448,11 @@ def main(args):
         spectral_basis.gramian(transfer.range_product), np.eye(len(spectral_basis))
     )
     logger.info("Extending spectral basis by Neumann snapshots ...")
-    U_proj_err = neumann_snapshots - spectral_basis.lincomb(
-        neumann_snapshots.inner(spectral_basis, transfer.range_product)
-    )
+    # U_proj_err = neumann_snapshots - spectral_basis.lincomb(
+    #     neumann_snapshots.inner(spectral_basis, transfer.range_product)
+    # )
     neumann_modes = pod(
-        U_proj_err,
+        neumann_snapshots,
         modes=len(neumann_snapshots),
         product=transfer.range_product,
         l2_err=example.pod_l2_err,
@@ -468,6 +468,8 @@ def main(args):
         copy=False,
         check=False,
     )
+    assert np.allclose(spectral_basis.gramian(transfer.range_product),
+                       np.eye(len(spectral_basis)))
 
     logger.info(f"Spectral basis size: {basis_length}.")
     logger.info(f"Neumann modes: {len(neumann_modes)}/{len(training_samples)}.")

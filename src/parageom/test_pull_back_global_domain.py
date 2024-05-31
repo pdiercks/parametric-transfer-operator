@@ -5,7 +5,7 @@ import dolfinx as df
 from dolfinx.io import gmshio
 from dolfinx.io.utils import XDMFFile
 
-from multi.boundary import plane_at, point_at
+from multi.boundary import plane_at
 from multi.preprocessing import create_meshtags
 from multi.domain import RectangularDomain
 from multi.materials import LinearElasticMaterial
