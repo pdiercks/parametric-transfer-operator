@@ -50,13 +50,13 @@ class BeamData:
 
     name: str = "parageom"
     gdim: int = 2
-    unit_length: float = 10.0  # [mm]
+    unit_length: float = 100.0  # [mm]
     nx: int = 10
     ny: int = 1
     geom_deg: int = 2
     fe_deg: int = 2
     poisson_ratio: float = 0.3
-    youngs_modulus: float = 2e3  # [MPa]
+    youngs_modulus: float = 20e3  # [MPa]
     traction_y: float = 10.0  # [MPa]
     parameters: dict = field(
         default_factory=lambda: {

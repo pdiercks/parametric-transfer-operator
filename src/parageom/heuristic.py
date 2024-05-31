@@ -470,7 +470,7 @@ def main(args):
     )
 
     logger.info(f"Spectral basis size: {basis_length}.")
-    logger.info(f"Neumann modes: {len(neumann_modes)}.")
+    logger.info(f"Neumann modes: {len(neumann_modes)}/{len(training_samples)}.")
     logger.info(f"Final basis length: {len(spectral_basis)}.")
 
     viz = FenicsxVisualizer(spectral_basis.space)
