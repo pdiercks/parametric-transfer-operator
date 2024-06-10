@@ -346,7 +346,7 @@ def main(args):
     parageom = ParaGeomLinEla(
         omega,
         V,
-        E=example.youngs_modulus,
+        E=1.,
         NU=example.poisson_ratio,
         d=d_trafo,  # type: ignore
     )  # type: ignore
@@ -402,9 +402,10 @@ def main(args):
 
     # ### Discretize Neumann Data
     dA = ufl.Measure("ds", domain=omega.grid, subdomain_data=omega.facet_tags)
+    t_y = -example.traction_y / example.youngs_modulus
     traction = df.fem.Constant(
         omega.grid,
-        (df.default_scalar_type(0.0), df.default_scalar_type(-example.traction_y)),
+        (df.default_scalar_type(0.0), df.default_scalar_type(t_y)),
     )
     v = ufl.TestFunction(V)
     L = ufl.inner(v, traction) * dA(ft_def["top"])
@@ -461,7 +462,7 @@ def main(args):
         snapshots.append(basis)  # type: ignore
 
     pod_modes, pod_svals = pod(
-        snapshots, product=transfer.range_product, l2_err=example.pod_l2_err
+        snapshots, product=transfer.range_product, rtol=example.pod_rtol
     )  # type: ignore
 
     viz = FenicsxVisualizer(pod_modes.space)

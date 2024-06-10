@@ -2,6 +2,7 @@ import typing
 import ufl
 
 import dolfinx as df
+import numpy as np
 
 from multi.domain import Domain, RectangularDomain
 from multi.problems import LinearProblem
@@ -140,7 +141,7 @@ def discretize_fom(example, auxiliary_problem, trafo_disp):
     """Discretize FOM with Pull Back"""
     from .definitions import BeamProblem
     from .fom import ParaGeomLinEla
-    from .matrix_based_operator import FenicsxMatrixBasedOperator, BCGeom, BCTopo, _create_dirichlet_bcs
+    from .matrix_based_operator import FenicsxMatrixBasedOperator, BCTopo, _create_dirichlet_bcs
 
     domain = auxiliary_problem.problem.domain.grid
     tdim = domain.topology.dim
@@ -153,24 +154,25 @@ def discretize_fom(example, auxiliary_problem, trafo_disp):
     EMOD = example.youngs_modulus
     POISSON = example.poisson_ratio
     V = trafo_disp.function_space
-    problem = ParaGeomLinEla(omega, V, E=EMOD, NU=POISSON, d=trafo_disp)
+    problem = ParaGeomLinEla(omega, V, E=1., NU=POISSON, d=trafo_disp)
 
     # Beam Problem
     beam_problem = BeamProblem(example.coarse_grid("global"), example.parent_domain("global"), example)
     # dirichlet bcs are defined globally
     dirichlet_left = beam_problem.get_dirichlet(0)
     dirichlet_right = beam_problem.get_dirichlet(9)
+    assert dirichlet_left is not None
+    assert dirichlet_right is not None
 
     # Dirichlet BCs
     entities_left = df.mesh.locate_entities_boundary(domain, fdim, dirichlet_left["boundary"])
-    entities_right = df.mesh.locate_entities_boundary(domain, fdim, dirichlet_right["boundary"])
-
     bc_left = BCTopo(df.fem.Constant(V.mesh, dirichlet_left["value"]), entities_left, fdim, V, sub=dirichlet_left["sub"])
+    entities_right = df.mesh.locate_entities_boundary(domain, fdim, dirichlet_right["boundary"])
     bc_right = BCTopo(df.fem.Constant(V.mesh, dirichlet_right["value"]), entities_right, fdim, V, sub=dirichlet_right["sub"])
     bcs = _create_dirichlet_bcs((bc_left, bc_right))
 
     # Neumann BCs
-    TY = -example.traction_y
+    TY = -example.traction_y / EMOD
     traction = df.fem.Constant(
         domain, (df.default_scalar_type(0.0), df.default_scalar_type(TY))
     )
@@ -217,3 +219,32 @@ def discretize_fom(example, auxiliary_problem, trafo_disp):
         operator, rhs, products={product_name: h1_product}, visualizer=viz, name="FOM"
     )
     return fom
+
+
+if __name__ == "__main__":
+    from .tasks import example
+    from .auxiliary_problem import discretize_auxiliary_problem
+
+    coarse_grid_path = example.coarse_grid("global").as_posix()
+    parent_domain_path = example.parent_domain("global").as_posix()
+    degree = example.geom_deg
+    interface_tags = [i for i in range(15, 25)] # FIXME better define in Example data class
+    auxp = discretize_auxiliary_problem(
+        parent_domain_path, degree, interface_tags, example.parameters["global"], coarse_grid=coarse_grid_path
+    )
+    d = df.fem.Function(auxp.problem.V, name="d_trafo")
+    fom = discretize_fom(example, auxp, d)
+    parameter_space = auxp.parameters.space(example.mu_range)
+    mu = parameter_space.parameters.parse([0.2 * example.unit_length for _ in range(10)])
+    U = fom.solve(mu)
+    # check that u_max is of the order of unit length a
+    total_load = np.sum(fom.rhs.as_range_array().to_numpy())
+    umax = U.amax()[1]
+    print(f"{umax=}")
+    print(f"umax / a = {umax/example.unit_length}")
+    fom.visualize(U, filename="fom_mu_bar.xdmf")
+    breakpoint()
+
+    # choose E and traction such that
+    # u = \hat{u} * L, with \hat{u} being the dimensionless displacement
+    # and L=10a being the length of the structure

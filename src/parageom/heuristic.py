@@ -43,12 +43,13 @@ def heuristic_range_finder(
     failure_tolerance: float = 1e-15,
     num_testvecs: int = 20,
     lambda_min=None,
-    **sampling_options,
+    sampling_options=None,
 ):
     """Heuristic range approximation."""
 
     tp = transfer_problem
     distribution = "normal"
+    sampling_options = sampling_options or {}
 
     source_product = tp.source_product
     range_product = tp.range_product
@@ -95,7 +96,7 @@ def heuristic_range_finder(
     for mu in testing_set:
         tp.assemble_operator(mu)
         R = tp.generate_random_boundary_data(
-            count=num_testvecs, distribution=distribution
+            count=num_testvecs, distribution=distribution, options=sampling_options
         )
         M.append(tp.solve(R))
 
@@ -112,7 +113,7 @@ def heuristic_range_finder(
         mu = training_set.pop(mu_ind)
         training_samples.append(mu)
         tp.assemble_operator(mu)
-        v = tp.generate_random_boundary_data(1, distribution, **sampling_options)
+        v = tp.generate_random_boundary_data(1, distribution, options=sampling_options)
 
         B.append(tp.solve(v))
         gram_schmidt(B, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
@@ -331,7 +332,7 @@ def main(args):
     parageom = ParaGeomLinEla(
         omega,
         V,
-        E=example.youngs_modulus,
+        E=1.,
         NU=example.poisson_ratio,
         d=d_trafo,  # type: ignore
     )  # type: ignore
@@ -387,9 +388,10 @@ def main(args):
 
     # ### Discretize Neumann Data
     dA = ufl.Measure("ds", domain=omega.grid, subdomain_data=omega.facet_tags)
+    t_y = -example.traction_y / example.youngs_modulus
     traction = df.fem.Constant(
         omega.grid,
-        (df.default_scalar_type(0.0), df.default_scalar_type(-example.traction_y)),
+        (df.default_scalar_type(0.0), df.default_scalar_type(t_y)),
     )
     v = ufl.TestFunction(V)
     L = ufl.inner(v, traction) * dA(ft_def["top"])
@@ -419,6 +421,7 @@ def main(args):
             error_tol=example.rrf_ttol,
             failure_tolerance=example.rrf_ftol,
             num_testvecs=example.rrf_num_testvecs,
+            sampling_options={"scale":0.1},
         )
     assert len(training_set) + len(training_samples) == training_set_length
 
@@ -455,7 +458,7 @@ def main(args):
         neumann_snapshots,
         modes=len(neumann_snapshots),
         product=transfer.range_product,
-        l2_err=example.pod_l2_err,
+        rtol=example.pod_rtol,
         orth_tol=np.inf,
     )[0]
 

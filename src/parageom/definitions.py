@@ -1,4 +1,4 @@
-from typing import Optional, Callable, Union
+from typing import Optional, Callable
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
@@ -8,7 +8,7 @@ import numpy as np
 from mpi4py import MPI
 from dolfinx import default_scalar_type
 
-from multi.boundary import point_at, within_range
+from multi.boundary import within_range
 from multi.problems import MultiscaleProblemDefinition
 
 from pymor.parameters.base import Parameters
@@ -50,14 +50,15 @@ class BeamData:
 
     name: str = "parageom"
     gdim: int = 2
-    unit_length: float = 100.0  # [mm]
+    unit_length: float = 1.0  # [mm]
     nx: int = 10
     ny: int = 1
     geom_deg: int = 2
     fe_deg: int = 2
-    poisson_ratio: float = 0.3
+    poisson_ratio: float = 0.2
+    # youngs_modulus: float = 1.0
     youngs_modulus: float = 20e3  # [MPa]
-    traction_y: float = 10.0  # [MPa]
+    traction_y: float = 5. # [MPa]
     parameters: dict = field(
         default_factory=lambda: {
             "subdomain": Parameters({"R": 1}),
@@ -78,6 +79,7 @@ class BeamData:
     rrf_ftol: float = 1e-15
     rrf_num_testvecs: int = 20
     pod_l2_err: float = 1e-2
+    pod_rtol: float = 1e-5
     run_mode: str = "DEBUG"
 
     def __post_init__(self):
@@ -88,6 +90,8 @@ class BeamData:
         a = self.unit_length
         self.mu_range: tuple[float, float] = (0.1 * a, 0.3 * a)  # [mm]
         self.mu_bar: float = 0.2 * a  # [mm]
+        # scaling = self.length / self.height
+        # self.traction_y = 2.5e-06 * self.youngs_modulus * a * scaling # [N / mm]
 
         self.grids_path.mkdir(exist_ok=True, parents=True)
         self.figures_path.mkdir(exist_ok=True, parents=True)
@@ -361,8 +365,6 @@ class BeamProblem(MultiscaleProblemDefinition):
         return {
             "support_left": (int(101), within_range([xmin[0], xmin[1], xmin[2]], [a/2, xmin[1], xmin[2]])),
             "support_right": (int(102), within_range([xmax[0] - a/2, xmin[1], xmin[2]], [xmax[0], xmin[1], xmin[2]])),
-            # "origin": (int(101), point_at([xmin[0], xmin[1], xmin[2]])),
-            # "bottom_right": (int(102), point_at([xmax[0], xmin[1], xmin[2]])),
         }
 
     def get_xmin_omega_in(self, cell_index: int) -> np.ndarray:
@@ -372,7 +374,7 @@ class BeamProblem(MultiscaleProblemDefinition):
         coord = grid.get_entity_coordinates(0, verts)
         return coord[0]
 
-    def get_dirichlet(self, cell_index: Optional[int] = None) -> Union[dict, None]:
+    def get_dirichlet(self, cell_index: Optional[int] = None) -> Optional[dict]:
         _, left = self.boundaries["support_left"]
         _, right = self.boundaries["support_right"]
 
