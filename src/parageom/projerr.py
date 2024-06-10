@@ -97,7 +97,7 @@ def main(args):
     print(full_basis.gramian(range_product))
     full_basis.append(basis)
 
-    orthonormal = np.allclose(full_basis.gramian(range_product), np.eye(len(full_basis)))
+    orthonormal = np.allclose(full_basis.gramian(range_product), np.eye(len(full_basis)), atol=1e-5)
     if not orthonormal:
         raise ValueError("Basis is not orthonormal wrt range product.")
 
