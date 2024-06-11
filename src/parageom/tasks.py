@@ -209,3 +209,29 @@ def task_fig_projerr():
                     "targets": targets,
                     "clean": True,
                     }
+
+
+def task_gfem():
+    """ParaGeom: Build GFEM approximation"""
+    module = "src.parageom.gfem"
+    distr = example.distributions[0]
+    for nreal in range(example.num_real):
+        for method in example.methods:
+            deps = [SRC / "gfem.py"]
+            deps.append(example.coarse_grid("global"))
+            deps.append(example.parent_unit_cell)
+            for cfg in CONFIGS:
+                if method == "hapod":
+                    deps.append(example.hapod_modes_npy(nreal, distr, cfg))
+                elif method == "heuristic":
+                    deps.append(example.heuristic_modes_npy(nreal, distr, cfg))
+            targets = []
+            for cell in range(example.nx * example.ny):
+                targets.append(example.local_basis_npy(nreal, method, distr, cell))
+            yield {
+                    "name": method + ":" + str(nreal),
+                    "file_dep": deps,
+                    "actions": ["python3 -m {} {} {} {}".format(module, nreal, method, distr)],
+                    "targets": targets,
+                    "clean": True,
+                    }
