@@ -224,10 +224,10 @@ class BeamData:
         config = map.get(cell, "inner")
         return config
 
-    def local_basis_npz(self, nr: int, name: str, distr: str, cell: int) -> Path:
+    def local_basis_npy(self, nr: int, name: str, distr: str, cell: int) -> Path:
         """final basis for loc rom assembly"""
         dir = self.bases_path(nr, name, distr)
-        return dir / f"basis_{cell:02}.npz"
+        return dir / f"basis_{cell:02}.npy"
 
     # def loc_rom_error(self, distr: str, name: str) -> Path:
     #     """loc ROM error relative to FOM"""
@@ -277,6 +277,9 @@ class BeamData:
         self, nr: int, method: str, distr: str, config: str
     ) -> Path:
         return self.logs_path(nr, method) / f"basis_construction_{distr}_{config}.log"
+
+    def log_gfem(self, nr: int, method: str, distr: str) -> Path:
+        return self.logs_path(nr, method) / f"gfem_{distr}.log"
 
     def log_run_locrom(self, nr: int, method: str, distr: str) -> Path:
         return self.logs_path(nr, method) / f"run_locrom_{distr}.log"
