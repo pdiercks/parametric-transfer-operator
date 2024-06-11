@@ -13,11 +13,12 @@ def main(cli):
         ax = fig.subplots()
         for method in example.methods:
             infile = example.projerr(cli.nreal, method, distr, cli.config)
-            err = np.load(infile)
+            data = np.load(infile)
+            err = data[:, 1] # relative error
             ax.semilogy(np.arange(err.size), err, label=method)
         ax.legend(loc="best")
         ax.set_xlabel("Number of basis functions")
-        ax.set_ylabel("Absolute projection error")
+        ax.set_ylabel("Relative projection error")
     
 
 

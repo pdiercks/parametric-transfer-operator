@@ -103,7 +103,7 @@ def main(args):
 
     # compute projection error
     pspace = fom.parameters.space(example.mu_range)
-    test_set = pspace.sample_randomly(10)
+    test_set = pspace.sample_randomly(30)
 
     u = df.fem.Function(fom.solution_space.V)
     uvec = u.x.petsc_vec
@@ -140,9 +140,11 @@ def main(args):
         aerrs.append(np.max(abserr))
 
     print(min(aerrs))
+    a = np.array(aerrs)
+    b = np.array(rerrs)
 
     if args.output is not None:
-        np.save(args.output, np.array(aerrs))
+        np.save(args.output, np.vstack((a, b)).T)
 
 
 if __name__ == "__main__":
@@ -153,6 +155,6 @@ if __name__ == "__main__":
     parser.add_argument("method", type=str, help="Method used for basis construction.")
     parser.add_argument("distr", type=str, help="Distribution used for random sampling.")
     parser.add_argument("config", type=str, help="Configuration / Archetype.")
-    parser.add_argument("--output", type=str, help="Write absolute projection error to file.")
+    parser.add_argument("--output", type=str, help="Write absolute and relative projection error to file.")
     args = parser.parse_args(sys.argv[1:])
     main(args)

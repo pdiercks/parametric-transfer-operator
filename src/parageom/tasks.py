@@ -189,3 +189,23 @@ def task_projerr():
                         "targets": targets,
                         "clean": True
                         }
+
+
+def task_fig_projerr():
+    """ParaGeom: Plot projection error"""
+    module = "src.parageom.plot_projerr"
+    distr = example.distributions[0]
+    for nreal in range(example.num_real):
+        for config in CONFIGS:
+            deps = [SRC / "plot_projerr.py"]
+            deps.append(example.projerr(nreal, "hapod", distr, config))
+            deps.append(example.projerr(nreal, "heuristic", distr, config))
+            targets = []
+            targets.append(example.fig_projerr(config))
+            yield {
+                    "name": config + ":" + str(nreal),
+                    "file_dep": deps,
+                    "actions": ["python3 -m {} {} {} %(targets)s".format(module, nreal, config)],
+                    "targets": targets,
+                    "clean": True,
+                    }
