@@ -45,7 +45,7 @@ def adaptive_rrf_normal(
     failure_tolerance: float = 1e-15,
     num_testvecs: int = 20,
     lambda_min=None,
-    **sampling_options,
+    sampling_options=None,
 ):
     r"""Adaptive randomized range approximation of `A`.
     This is an implementation of Algorithm 1 in [BS18]_.
@@ -100,6 +100,7 @@ def adaptive_rrf_normal(
 
     tp = transfer_problem
     distribution = "normal"
+    sampling_options = sampling_options or {}
 
     source_product = tp.source_product
     range_product = tp.range_product
@@ -141,13 +142,13 @@ def adaptive_rrf_normal(
     logger.info(f"{lambda_min=}")
     logger.info(f"{testlimit=}")
 
-    R = tp.generate_random_boundary_data(count=num_testvecs, distribution=distribution)
+    R = tp.generate_random_boundary_data(count=num_testvecs, distribution=distribution, options=sampling_options)
     M = tp.solve(R)
     B = tp.range.empty()
     maxnorm = np.inf
     while maxnorm > testlimit:
         basis_length = len(B)
-        v = tp.generate_random_boundary_data(1, distribution, **sampling_options)
+        v = tp.generate_random_boundary_data(1, distribution, options=sampling_options)
 
         B.append(tp.solve(v))
         gram_schmidt(B, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
@@ -425,6 +426,7 @@ def main(args):
 
     assert len(training_set) == len(seed_seqs_rrf)
     snapshots = transfer.range.empty()
+    spectral_basis_sizes = list()
 
     for mu, seed_seq in zip(training_set, seed_seqs_rrf):
         with new_rng(seed_seq):
@@ -435,9 +437,11 @@ def main(args):
                 error_tol=example.rrf_ttol,
                 failure_tolerance=example.rrf_ftol,
                 num_testvecs=example.rrf_num_testvecs,
+                sampling_options={"scale": 0.1},
             )
             logger.info(f"\nSpectral Basis length: {len(basis)}.")
             logger.info("\nSolving for additional Neumann mode ...")
+            spectral_basis_sizes.append(len(basis))
 
             U_neumann = transfer.op.apply_inverse(FEXT)
             u_vec = transfer._u.x.petsc_vec  # type: ignore
@@ -461,6 +465,7 @@ def main(args):
 
         snapshots.append(basis)  # type: ignore
 
+    logger.info(f"Average length of spectral basis: {np.average(spectral_basis_sizes)}.")
     pod_modes, pod_svals = pod(
         snapshots, product=transfer.range_product, rtol=example.pod_rtol
     )  # type: ignore

@@ -56,7 +56,6 @@ class BeamData:
     geom_deg: int = 2
     fe_deg: int = 2
     poisson_ratio: float = 0.2
-    # youngs_modulus: float = 1.0
     youngs_modulus: float = 20e3  # [MPa]
     traction_y: float = 5. # [MPa]
     parameters: dict = field(
@@ -76,7 +75,7 @@ class BeamData:
     methods: tuple[str, ...] = ("hapod", "heuristic")
     range_product: str = "h1"
     rrf_ttol: float = 10e-2
-    rrf_ftol: float = 1e-15
+    rrf_ftol: float = 1e-10
     rrf_num_testvecs: int = 20
     pod_l2_err: float = 1e-2
     pod_rtol: float = 1e-5
@@ -90,8 +89,6 @@ class BeamData:
         a = self.unit_length
         self.mu_range: tuple[float, float] = (0.1 * a, 0.3 * a)  # [mm]
         self.mu_bar: float = 0.2 * a  # [mm]
-        # scaling = self.length / self.height
-        # self.traction_y = 2.5e-06 * self.youngs_modulus * a * scaling # [N / mm]
 
         self.grids_path.mkdir(exist_ok=True, parents=True)
         self.figures_path.mkdir(exist_ok=True, parents=True)
@@ -260,6 +257,8 @@ class BeamData:
     # @property
     # def fig_rom_opt(self) -> Path:
     #     return self.figures_path / "fig_rom_opt.pdf"
+    def fig_projerr(self, config: str) -> Path:
+        return self.figures_path / f"fig_projerr_{config}.pdf"
 
     @property
     def realizations(self) -> Path:
