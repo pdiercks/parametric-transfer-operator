@@ -235,6 +235,17 @@ def main(args):
 
     aux_tags = None
     if args.configuration == "inner":
+        assert omega.facet_tags.find(11).size == example.num_intervals * 4  # bottom
+        assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
+        assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
+        assert omega.facet_tags.find(14).size == example.num_intervals * 4  # top
+        assert omega.facet_tags.find(15).size == example.num_intervals * 4  # void 1
+        assert omega.facet_tags.find(16).size == example.num_intervals * 4  # void 2
+        assert omega.facet_tags.find(17).size == example.num_intervals * 4  # void 3
+        assert omega.facet_tags.find(18).size == example.num_intervals * 4  # void 4
+        aux_tags = [15, 16, 17, 18]
+
+    elif args.configuration == "left":
         assert omega.facet_tags.find(11).size == example.num_intervals * 3  # bottom
         assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
         assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
@@ -244,23 +255,15 @@ def main(args):
         assert omega.facet_tags.find(17).size == example.num_intervals * 4  # void 3
         aux_tags = [15, 16, 17]
 
-    elif args.configuration == "left":
-        assert omega.facet_tags.find(11).size == example.num_intervals * 2  # bottom
-        assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
-        assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
-        assert omega.facet_tags.find(14).size == example.num_intervals * 2  # top
-        assert omega.facet_tags.find(15).size == example.num_intervals * 4  # void 1
-        assert omega.facet_tags.find(16).size == example.num_intervals * 4  # void 2
-        aux_tags = [15, 16]
-
     elif args.configuration == "right":
-        assert omega.facet_tags.find(11).size == example.num_intervals * 2  # bottom
+        assert omega.facet_tags.find(11).size == example.num_intervals * 3  # bottom
         assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
         assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
-        assert omega.facet_tags.find(14).size == example.num_intervals * 2  # top
+        assert omega.facet_tags.find(14).size == example.num_intervals * 3  # top
         assert omega.facet_tags.find(15).size == example.num_intervals * 4  # void 1
         assert omega.facet_tags.find(16).size == example.num_intervals * 4  # void 2
-        aux_tags = [15, 16]
+        assert omega.facet_tags.find(17).size == example.num_intervals * 4  # void 3
+        aux_tags = [15, 16, 17]
     else:
         raise NotImplementedError
 
@@ -287,16 +290,18 @@ def main(args):
     beam_problem = BeamProblem(
         example.coarse_grid("global"), example.parent_domain("global"), example
     )
-    cell_index = beam_problem.config_to_cell(args.configuration)
+    cell_index = beam_problem.config_to_omega_in(args.configuration)[0]
+    # target subdomain needs to be translated by lower left corner point
+    assert cell_index in (0, 4, 8)
     gamma_out = beam_problem.get_gamma_out(cell_index)
     hom_dirichlet = beam_problem.get_dirichlet(cell_index)
     kernel_set = beam_problem.get_kernel_set(cell_index)
 
     # ### Target subdomain & Range space
-    xmin_omega_in = beam_problem.get_xmin_omega_in(cell_index)
+    xmin_omega_in = beam_problem.get_xmin(cell_index)
     logger.debug(f"{xmin_omega_in=}")
     target_domain, _, _ = read_mesh(
-        example.parent_unit_cell, MPI.COMM_SELF, kwargs={"gdim": example.gdim}
+        example.target_subdomain, MPI.COMM_SELF, kwargs={"gdim": example.gdim}
     )
     omega_in = RectangularDomain(target_domain)
     omega_in.translate(xmin_omega_in)
@@ -398,7 +403,7 @@ def main(args):
         source_product=source_product,
         range_product=range_product,
         kernel=kernel,
-        padding=1e-6,
+        padding=1e-8,
     )
 
     # ### Discretize Neumann Data
@@ -444,24 +449,33 @@ def main(args):
             spectral_basis_sizes.append(len(basis))
 
             U_neumann = transfer.op.apply_inverse(FEXT)
-            u_vec = transfer._u.x.petsc_vec  # type: ignore
-            u_vec.array[:] = U_neumann.to_numpy().flatten()
-            transfer._u.x.scatter_forward()  # type: ignore
+            # u_vec = transfer._u.x.petsc_vec  # type: ignore
+            # u_vec.array[:] = U_neumann.to_numpy().flatten()
+            # transfer._u.x.scatter_forward()  # type: ignore
 
             # ### restrict full solution to target subdomain
-            transfer._u_in.interpolate(
-                transfer._u, nmm_interpolation_data=transfer._interp_data
-            )  # type: ignore
-            transfer._u_in.x.scatter_forward()  # type: ignore
-            U_in_neumann = transfer.range.make_array(
-                [transfer._u_in.x.petsc_vec.copy()]
-            )  # type: ignore
+            # transfer._u_in.interpolate(
+            #     transfer._u, nmm_interpolation_data=transfer._interp_data
+            # )  # type: ignore
+            # transfer._u_in.x.scatter_forward()  # type: ignore
+            # U_in_neumann = transfer.range.make_array(
+            #     [transfer._u_in.x.petsc_vec.copy()]
+            # )  # type: ignore
+            U_in_neumann = transfer.range.from_numpy(
+                    U_neumann.dofs(transfer._restriction))
 
             # ### Remove kernel after restriction to target subdomain
             U_orth = orthogonal_part(
                 U_in_neumann, kernel, product=transfer.range_product, orthonormal=True
             )
+            basis_length = len(basis)
             basis.append(U_orth)
+            gram_schmidt(basis, transfer.range_product, atol=0, rtol=0, offset=basis_length, copy=False)
+
+            # debugging
+            # viz = FenicsxVisualizer(transfer.range)
+            # viz.visualize(basis, filename="debug_hapod.xdmf")
+            # breakpoint()
 
         snapshots.append(basis)  # type: ignore
 

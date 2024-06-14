@@ -24,6 +24,7 @@ from pymor.operators.interface import Operator
 from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.tools.random import new_rng, get_rng
 from pymor.parameters.base import ParameterSpace
+from pymor.reductors.basic import extend_basis
 
 from multi.io import read_mesh
 from multi.domain import RectangularDomain, StructuredQuadGrid
@@ -220,6 +221,17 @@ def main(args):
 
     aux_tags = None
     if args.configuration == "inner":
+        assert omega.facet_tags.find(11).size == example.num_intervals * 4  # bottom
+        assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
+        assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
+        assert omega.facet_tags.find(14).size == example.num_intervals * 4  # top
+        assert omega.facet_tags.find(15).size == example.num_intervals * 4  # void 1
+        assert omega.facet_tags.find(16).size == example.num_intervals * 4  # void 2
+        assert omega.facet_tags.find(17).size == example.num_intervals * 4  # void 3
+        assert omega.facet_tags.find(18).size == example.num_intervals * 4  # void 4
+        aux_tags = [15, 16, 17, 18]
+
+    elif args.configuration == "left":
         assert omega.facet_tags.find(11).size == example.num_intervals * 3  # bottom
         assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
         assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
@@ -229,23 +241,15 @@ def main(args):
         assert omega.facet_tags.find(17).size == example.num_intervals * 4  # void 3
         aux_tags = [15, 16, 17]
 
-    elif args.configuration == "left":
-        assert omega.facet_tags.find(11).size == example.num_intervals * 2  # bottom
-        assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
-        assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
-        assert omega.facet_tags.find(14).size == example.num_intervals * 2  # top
-        assert omega.facet_tags.find(15).size == example.num_intervals * 4  # void 1
-        assert omega.facet_tags.find(16).size == example.num_intervals * 4  # void 2
-        aux_tags = [15, 16]
-
     elif args.configuration == "right":
-        assert omega.facet_tags.find(11).size == example.num_intervals * 2  # bottom
+        assert omega.facet_tags.find(11).size == example.num_intervals * 3  # bottom
         assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
         assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
-        assert omega.facet_tags.find(14).size == example.num_intervals * 2  # top
+        assert omega.facet_tags.find(14).size == example.num_intervals * 3  # top
         assert omega.facet_tags.find(15).size == example.num_intervals * 4  # void 1
         assert omega.facet_tags.find(16).size == example.num_intervals * 4  # void 2
-        aux_tags = [15, 16]
+        assert omega.facet_tags.find(17).size == example.num_intervals * 4  # void 3
+        aux_tags = [15, 16, 17]
     else:
         raise NotImplementedError
 
@@ -272,16 +276,17 @@ def main(args):
     beam_problem = BeamProblem(
         example.coarse_grid("global"), example.parent_domain("global"), example
     )
-    cell_index = beam_problem.config_to_cell(args.configuration)
+    cell_index = beam_problem.config_to_omega_in(args.configuration)[0]
+    assert cell_index in (0, 4, 8)
     gamma_out = beam_problem.get_gamma_out(cell_index)
     hom_dirichlet = beam_problem.get_dirichlet(cell_index)
     kernel_set = beam_problem.get_kernel_set(cell_index)
 
     # ### Target subdomain & Range space
-    xmin_omega_in = beam_problem.get_xmin_omega_in(cell_index)
+    xmin_omega_in = beam_problem.get_xmin(cell_index)
     logger.debug(f"{xmin_omega_in=}")
     target_domain, _, _ = read_mesh(
-        example.parent_unit_cell, MPI.COMM_SELF, kwargs={"gdim": example.gdim}
+        example.target_subdomain, MPI.COMM_SELF, kwargs={"gdim": example.gdim}
     )
     omega_in = RectangularDomain(target_domain)
     omega_in.translate(xmin_omega_in)
@@ -383,7 +388,7 @@ def main(args):
         source_product=source_product,
         range_product=range_product,
         kernel=kernel,
-        padding=1e-6,
+        padding=1e-8,
     )
 
     # ### Discretize Neumann Data
@@ -430,16 +435,17 @@ def main(args):
     for mu in training_samples:
         transfer.assemble_operator(mu)
         U_neumann = transfer.op.apply_inverse(FEXT)
-        u_vec = transfer._u.x.petsc_vec  # type: ignore
-        u_vec.array[:] = U_neumann.to_numpy().flatten()
-        transfer._u.x.scatter_forward()  # type: ignore
+        # u_vec = transfer._u.x.petsc_vec  # type: ignore
+        # u_vec.array[:] = U_neumann.to_numpy().flatten()
+        # transfer._u.x.scatter_forward()  # type: ignore
 
         # ### restrict full solution to target subdomain
-        transfer._u_in.interpolate(
-            transfer._u, nmm_interpolation_data=transfer._interp_data
-        )  # type: ignore
-        transfer._u_in.x.scatter_forward()  # type: ignore
-        U_in_neumann = transfer.range.make_array([transfer._u_in.x.petsc_vec.copy()])  # type: ignore
+        # transfer._u_in.interpolate(
+        #     transfer._u, nmm_interpolation_data=transfer._interp_data
+        # )  # type: ignore
+        # transfer._u_in.x.scatter_forward()  # type: ignore
+        # U_in_neumann = transfer.range.make_array([transfer._u_in.x.petsc_vec.copy()])  # type: ignore
+        U_in_neumann = transfer.range.from_numpy(U_neumann.dofs(transfer._restriction))
 
         # ### Remove kernel after restriction to target subdomain
         U_orth = orthogonal_part(
@@ -450,32 +456,35 @@ def main(args):
     assert np.allclose(
         spectral_basis.gramian(transfer.range_product), np.eye(len(spectral_basis))
     )
-    logger.info("Extending spectral basis by Neumann snapshots via POD ...")
-    N_proj_err = neumann_snapshots - spectral_basis.lincomb(
-        neumann_snapshots.inner(spectral_basis, transfer.range_product)
-    )
-    neumann_modes, neumann_svals = pod(
-        N_proj_err,
-        modes=len(neumann_snapshots),
-        product=transfer.range_product,
-        rtol=example.pod_rtol,
-        orth_tol=np.inf,
-    )
-
+    logger.info("Extending spectral basis by Neumann snapshots via GS ...")
     basis_length = len(spectral_basis)
-    spectral_basis.append(neumann_modes)
-    gram_schmidt(
-        spectral_basis,
-        offset=basis_length,
-        product=transfer.range_product,
-        copy=False,
-        check=False,
-    )
+    n_neumann = len(neumann_snapshots)
+    extend_basis(neumann_snapshots, spectral_basis, product=transfer.range_product, method="gram_schmidt")
+    # gram_schmidt(neumann_snapshots, transfer.range_product, atol=0, rtol=0, copy=False)
+    # N_proj_err = neumann_snapshots - spectral_basis.lincomb(
+    #     neumann_snapshots.inner(spectral_basis, transfer.range_product)
+    # )
+    # neumann_modes, neumann_svals = pod(
+    #     N_proj_err,
+    #     modes=len(neumann_snapshots),
+    #     product=transfer.range_product,
+    #     rtol=example.pod_rtol,
+    #     orth_tol=np.inf,
+    # )
+    #
+    # spectral_basis.append(neumann_modes)
+    # gram_schmidt(
+    #     spectral_basis,
+    #     product=transfer.range_product,
+    #     offset=basis_length,
+    #     check=False,
+    #     copy=False,
+    # )
     assert np.allclose(spectral_basis.gramian(transfer.range_product),
                        np.eye(len(spectral_basis)))
 
     logger.info(f"Spectral basis size: {basis_length}.")
-    logger.info(f"Neumann modes: {len(neumann_modes)}/{len(training_samples)}.")
+    logger.info(f"Neumann modes: {n_neumann}.")
     logger.info(f"Final basis length: {len(spectral_basis)}.")
 
     viz = FenicsxVisualizer(spectral_basis.space)
