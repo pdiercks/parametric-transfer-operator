@@ -34,7 +34,10 @@ class BeamData:
         youngs_modulus: The Young's modulus (reference value) of the material.
         mu_range: The value range of each parameter component.
         mu_bar: Reference parameter value (Radius of parent domain).
-        training_set_seed: Seed to generate seeds for each configuration.
+        training_set_seed: Seed to generate seeds for training sets for each configuration (HAPOD, HRRF).
+        testing_set_seed: Seed to generate seeds for testing sets for each configuration (HRRF).
+        validation_set_seed: Seeding for the validation set (run_locrom.py).
+        projerr_seed: Seeding for the testing set to compute the projection error.
         parameters: Dict of dict mapping parameter name to parameter dimension for each configuration etc.
         configurations: The configurations, i.e. oversampling problems.
         distributions: The distributions used in the randomized range finder.
@@ -57,19 +60,20 @@ class BeamData:
     fe_deg: int = 2
     poisson_ratio: float = 0.2
     youngs_modulus: float = 20e3  # [MPa]
-    traction_y: float = 5. # [MPa]
+    traction_y: float = 5.0  # [MPa]
     parameters: dict = field(
         default_factory=lambda: {
             "subdomain": Parameters({"R": 1}),
             "global": Parameters({"R": 10}),
-            "left": Parameters({"R": 2}),
-            "right": Parameters({"R": 2}),
-            "inner": Parameters({"R": 3}),
+            "left": Parameters({"R": 3}),
+            "right": Parameters({"R": 3}),
+            "inner": Parameters({"R": 4}),
         }
     )
     training_set_seed: int = 767667058
     testing_set_seed: int = 545445836
     validation_set_seed: int = 986718877
+    projerr_seed: int = 923719053
     configurations: tuple[str, str, str] = ("left", "inner", "right")
     distributions: tuple[str, ...] = ("normal",)
     methods: tuple[str, ...] = ("hapod", "heuristic")
@@ -98,7 +102,7 @@ class BeamData:
         # naming convention: oversampling_{index}.msh
         # store the training set, such that via {index} the
         # parameter value can be determined
-        for config in list(self.configurations) + ["global"]:
+        for config in list(self.configurations) + ["global", "target"]:
             p = self.grids_path / config
             p.mkdir(exist_ok=True, parents=True)
 
@@ -174,11 +178,11 @@ class BeamData:
 
     def coarse_grid(self, config: str) -> Path:
         """Global coarse grid"""
-        assert config in list(self.configurations) + ["global"]
+        assert config in list(self.configurations) + ["global", "target"]
         return self.grids_path / config / "coarse_grid.msh"
 
     def parent_domain(self, config: str) -> Path:
-        assert config in list(self.configurations) + ["global"]
+        assert config in list(self.configurations) + ["global", "target"]
         return self.grids_path / config / "parent_domain.msh"
 
     @property
@@ -209,7 +213,7 @@ class BeamData:
     def ntrain(self, config: str) -> int:
         """Define size of training set"""
         if self.run_mode == "DEBUG":
-            map = {"left": 40, "inner": 60, "right": 40}
+            map = {"left": 20, "inner": 40, "right": 20}
             return map[config]
         elif self.run_mode == "PRODUCTION":
             map = {"left": 40, "inner": 60, "right": 40}
@@ -278,6 +282,9 @@ class BeamData:
     ) -> Path:
         return self.logs_path(nr, method) / f"basis_construction_{distr}_{config}.log"
 
+    def log_projerr(self, nr: int, method: str, distr: str, config: str) -> Path:
+        return self.logs_path(nr, method) / f"projerr_{distr}_{config}.log"
+
     def log_gfem(self, nr: int, method: str, distr: str) -> Path:
         return self.logs_path(nr, method) / f"gfem_{distr}.log"
 
@@ -312,6 +319,10 @@ class BeamData:
         dir = self.method_folder(nr, method)
         return dir / f"projerr_{distr}_{config}.npy"
 
+    @property
+    def target_subdomain(self) -> Path:
+        return self.parent_domain("target")
+
 
 class BeamProblem(MultiscaleProblemDefinition):
     gdim = 2
@@ -323,9 +334,9 @@ class BeamProblem(MultiscaleProblemDefinition):
         self.setup_fine_grid(MPI.COMM_WORLD, gdim=self.gdim)
         self.build_edge_basis_config(self.cell_sets)
 
-    def config_to_cell(self, config: str) -> int:
-        """Maps config to global cell index."""
-        map = {"inner": 4, "left": 0, "right": 9}
+    def config_to_omega_in(self, config: str) -> list[int]:
+        """Maps config to cell index/indices of oversampling domain that correspond to omega in."""
+        map = {"left": [0, 1], "right": [8, 9], "inner": [4, 5]}
         return map[config]
 
     @property
@@ -346,7 +357,7 @@ class BeamProblem(MultiscaleProblemDefinition):
         """Returns cell sets that define oversampling domains"""
         # see preprocessing.py
         cells = {
-            "inner": set([3, 4, 5]),
+            "inner": set([3, 4, 5, 6]),
             "left": set([0, 1]),
             "right": set([8, 9]),
         }
@@ -365,12 +376,20 @@ class BeamProblem(MultiscaleProblemDefinition):
         xmax = np.amax(x, axis=0)
 
         return {
-            "support_left": (int(101), within_range([xmin[0], xmin[1], xmin[2]], [a/2, xmin[1], xmin[2]])),
-            "support_right": (int(102), within_range([xmax[0] - a/2, xmin[1], xmin[2]], [xmax[0], xmin[1], xmin[2]])),
+            "support_left": (
+                int(101),
+                within_range([xmin[0], xmin[1], xmin[2]], [a / 2, xmin[1], xmin[2]]),
+            ),
+            "support_right": (
+                int(102),
+                within_range(
+                    [xmax[0] - a / 2, xmin[1], xmin[2]], [xmax[0], xmin[1], xmin[2]]
+                ),
+            ),
         }
 
-    def get_xmin_omega_in(self, cell_index: int) -> np.ndarray:
-        """Returns coordinate xmin of target subdomain"""
+    def get_xmin(self, cell_index: int) -> np.ndarray:
+        """Returns coordinate xmin of given cell."""
         grid = self.coarse_grid
         verts = grid.get_entities(0, cell_index)
         coord = grid.get_entity_coordinates(0, verts)
@@ -384,14 +403,17 @@ class BeamProblem(MultiscaleProblemDefinition):
         # this only defines markers using `within_range`
         # code needs to use df.mesh.locate_entities_boundary
 
-        if cell_index is not None:
-            assert cell_index in (0, 4, 9)
-        if cell_index == 0:
+        if cell_index in (0, 1):
             u_origin = (default_scalar_type(0.0), default_scalar_type(0.0))
-            dirichlet = {"value": u_origin, "boundary": left, "entity_dim": 1, "sub": None}
-        elif cell_index == 4:
+            dirichlet = {
+                "value": u_origin,
+                "boundary": left,
+                "entity_dim": 1,
+                "sub": None,
+            }
+        elif cell_index in (4, 5):
             dirichlet = None
-        elif cell_index == 9:
+        elif cell_index in (8, 9):
             u_bottom_right = default_scalar_type(0.0)
             dirichlet = {
                 "value": u_bottom_right,
@@ -403,23 +425,24 @@ class BeamProblem(MultiscaleProblemDefinition):
             raise NotImplementedError
         return dirichlet
 
-    def get_neumann(self, cell_index: Optional[int] = None):
+    def get_neumann(self, cell_index: Optional[int] = None) -> Optional[dict]:
         # is the same for all oversampling problems
-        return None
+        assert cell_index is None
+        return cell_index
 
     def get_kernel_set(self, cell_index: int) -> tuple[int, ...]:
         """return indices of rigid body modes to be used"""
-        if cell_index is not None:
-            assert cell_index in (0, 4, 9)
-        if cell_index == 0:
+        if cell_index in (0, 1):
             # left, only rotation is free
             return (2,)
-        elif cell_index == 4:
+        elif cell_index in (4, 5):
             # inner, use all rigid body modes
             return (0, 1, 2)
-        elif cell_index == 9:
+        elif cell_index in (8, 9):
             # right, only trans y is constrained
             return (0, 2)
+        else:
+            raise NotImplementedError
 
     def get_gamma_out(self, cell_index: Optional[int] = None) -> Callable:
         data = self.data
@@ -431,14 +454,12 @@ class BeamProblem(MultiscaleProblemDefinition):
         # code needs to use df.mesh.locate_entities_boundary
 
         y = data.height
-        if cell_index is not None:
-            assert cell_index in (0, 4, 9)
-        if cell_index == 0:
-            x = 2 * unit_length
+        if cell_index in (0, 1):
+            x = 3 * unit_length
             start = [x, 0.0 + tol, 0.0]
             end = [x, y - tol, 0.0]
             gamma_out = within_range(start, end)
-        elif cell_index == 4:
+        elif cell_index in (4, 5):
             x_left = 3 * unit_length
             x_right = 6 * unit_length
             left = within_range([x_left, 0.0 + tol, 0.0], [x_left, y - tol, 0.0])
@@ -446,8 +467,8 @@ class BeamProblem(MultiscaleProblemDefinition):
 
             def gamma_out(x):
                 return np.logical_or(left(x), right(x))
-        elif cell_index == 9:
-            x = 8 * unit_length
+        elif cell_index in (8, 9):
+            x = 7 * unit_length
             gamma_out = within_range([x, 0.0 + tol, 0.0], [x, y - tol, 0.0])
         else:
             raise NotImplementedError
@@ -455,7 +476,9 @@ class BeamProblem(MultiscaleProblemDefinition):
 
 
 if __name__ == "__main__":
-    data = BeamData(name="beam")
+    data = BeamData(name="parageom")
     # realizations = np.load(data.realizations)
     # print(realizations)
-    # problem = BeamProblem(data.coarse_grid.as_posix(), data.fine_grid.as_posix())
+    problem = BeamProblem(
+        data.coarse_grid("global"), data.parent_domain("global"), data
+    )

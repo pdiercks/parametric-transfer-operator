@@ -65,7 +65,7 @@ def task_coarse_grid():
     """ParaGeom: Create structured coarse grids"""
     module = "src.parageom.preprocessing"
 
-    for config in list(CONFIGS) + ["global"]:
+    for config in list(CONFIGS) + ["global", "target"]:
         yield {
             "name": config,
             "file_dep": [],
@@ -80,16 +80,16 @@ def task_coarse_grid():
         }
 
 
-def task_parent_domain():
+def task_fine_grid():
     """ParaGeom: Create parent domain mesh"""
     module = "src.parageom.preprocessing"
-    for config in list(CONFIGS) + ["global"]:
+    for config in list(CONFIGS) + ["global", "target"]:
         yield {
             "name": config,
             "file_dep": [example.coarse_grid(config), example.parent_unit_cell],
             "actions": [
                 "python3 -m {} {} {} --output %(targets)s".format(
-                    module, config, "parent"
+                    module, config, "fine"
                 )
             ],
             "targets": [example.parent_domain(config)],
@@ -101,7 +101,7 @@ def task_preproc():
     """ParaGeom: All tasks related to preprocessing"""
     return {
         "actions": None,
-        "task_dep": ["parent_domain", "coarse_grid", "parent_unit_cell"],
+        "task_dep": ["coarse_grid", "fine_grid", "parent_unit_cell"],
     }
 
 
@@ -116,6 +116,8 @@ def task_hapod():
             # global grids needed for BeamProblem initialization
             deps.append(example.coarse_grid("global"))
             deps.append(example.parent_domain("global"))
+            deps.append(example.coarse_grid("target"))
+            deps.append(example.parent_domain("target"))
             deps.append(example.coarse_grid(config))
             deps.append(example.parent_domain(config))
             targets = []
@@ -148,6 +150,8 @@ def task_heuristic():
             # global grids needed for BeamProblem initialization
             deps.append(example.coarse_grid("global"))
             deps.append(example.parent_domain("global"))
+            deps.append(example.coarse_grid("target"))
+            deps.append(example.parent_domain("target"))
             deps.append(example.coarse_grid(config))
             deps.append(example.parent_domain(config))
             targets = []
@@ -185,7 +189,7 @@ def task_projerr():
                 yield {
                         "name": method + ":" + config + ":" + str(nreal),
                         "file_dep": deps,
-                        "actions": ["python3 -m {} {} {} {} --output %(targets)s".format(module, method, distr, config)],
+                        "actions": ["python3 -m {} {} {} {} {} --output %(targets)s".format(module, nreal, method, distr, config)],
                         "targets": targets,
                         "clean": True
                         }

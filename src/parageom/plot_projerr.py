@@ -14,7 +14,7 @@ def main(cli):
         for method in example.methods:
             infile = example.projerr(cli.nreal, method, distr, cli.config)
             data = np.load(infile)
-            err = data[:, 1] # relative error
+            err = data[:, 0] # relative error
             ax.semilogy(np.arange(err.size), err, label=method)
         ax.legend(loc="best")
         ax.set_xlabel("Number of basis functions")
