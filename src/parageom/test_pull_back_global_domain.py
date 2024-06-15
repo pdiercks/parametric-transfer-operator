@@ -7,17 +7,18 @@ from dolfinx.io.utils import XDMFFile
 
 from multi.boundary import plane_at
 from multi.preprocessing import create_meshtags
-from multi.domain import RectangularDomain
+from multi.domain import RectangularDomain, StructuredQuadGrid
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinearElasticityProblem
 from multi.product import InnerProduct
+from multi.io import read_mesh
 
 from pymor.bindings.fenicsx import FenicsxMatrixOperator
 from multi.projection import relative_error, absolute_error
+from .definitions import BeamData
 
 
-def compute_reference_solution(example, mshfile, degree, d):
-    from .definitions import BeamProblem
+def compute_reference_solution(example: BeamData, mshfile, degree, d):
     from .matrix_based_operator import BCTopo, _create_dirichlet_bcs
     # translate parent domain
     domain = gmshio.read_from_msh(
@@ -47,10 +48,16 @@ def compute_reference_solution(example, mshfile, degree, d):
     problem = LinearElasticityProblem(omega, V, phases=material)
 
     # Dirichlet BCs
-    beam_problem = BeamProblem(example.coarse_grid("global"), example.parent_domain("global"), example)
-    # dirichlet bcs are defined globally
-    dirichlet_left = beam_problem.get_dirichlet(0)
-    dirichlet_right = beam_problem.get_dirichlet(9)
+    grid, _, _ = read_mesh(
+        example.coarse_grid("global"),
+        MPI.COMM_SELF,
+        kwargs={"gdim": example.gdim},
+    )
+    coarse_grid = StructuredQuadGrid(grid)
+    dirichlet_left = example.get_dirichlet(coarse_grid.grid, 0)
+    dirichlet_right = example.get_dirichlet(coarse_grid.grid, 9)
+    assert dirichlet_left is not None
+    assert dirichlet_right is not None
 
     # Dirichlet BCs
     entities_left = df.mesh.locate_entities_boundary(domain, fdim, dirichlet_left["boundary"])

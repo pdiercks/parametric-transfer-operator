@@ -1,16 +1,13 @@
-from typing import Optional, Callable
+"""ParaGeom example definitions."""
+
 from dataclasses import dataclass
 from dataclasses import field
 from pathlib import Path
+from typing import Callable, Optional
 
-import numpy as np
-
-from mpi4py import MPI
-from dolfinx import default_scalar_type
-
+import dolfinx as df
 from multi.boundary import within_range
-from multi.problems import MultiscaleProblemDefinition
-
+import numpy as np
 from pymor.parameters.base import Parameters
 
 ROOT = Path(__file__).parents[2]
@@ -25,7 +22,8 @@ class BeamData:
     Args:
         name: The name of the example.
         gdim: The geometric dimension of the problem.
-        unit_length: Unit length of the unit cell (subdomain).
+        l_char: Characteristic length chosen to be the unit cell (subdomain) length.
+        unit_length: Dimensionless unit length used to define computational domain(s).
         nx: Number of coarse grid cells (subdomains) in x.
         ny: Number of coarse grid cells (subdomains) in y.
         geom_deg: Degree for geometry interpolation.
@@ -53,7 +51,8 @@ class BeamData:
 
     name: str = "parageom"
     gdim: int = 2
-    unit_length: float = 1.0  # [mm]
+    l_char: float = 100.0  # [mm], characteristic length = unit length
+    unit_length: float = 1.0  # dimensionless unit length
     nx: int = 10
     ny: int = 1
     geom_deg: int = 2
@@ -323,22 +322,12 @@ class BeamData:
     def target_subdomain(self) -> Path:
         return self.parent_domain("target")
 
-
-class BeamProblem(MultiscaleProblemDefinition):
-    gdim = 2
-
-    def __init__(self, coarse_grid: Path, fine_grid: Path, data: BeamData):
-        super().__init__(coarse_grid, fine_grid)
-        self.data = data
-        self.setup_coarse_grid(MPI.COMM_WORLD, gdim=self.gdim)
-        self.setup_fine_grid(MPI.COMM_WORLD, gdim=self.gdim)
-        self.build_edge_basis_config(self.cell_sets)
-
     def config_to_omega_in(self, config: str) -> list[int]:
         """Maps config to cell index/indices of oversampling domain that correspond to omega in."""
         map = {"left": [0, 1], "right": [8, 9], "inner": [4, 5]}
         return map[config]
 
+    # FIXME: not needed for GFEM, but I may use edge functions as well.
     @property
     def cell_sets(self):
         """Returns cell sets for definition of edge basis configuration"""
@@ -353,6 +342,7 @@ class BeamProblem(MultiscaleProblemDefinition):
         return cell_sets
 
     @property
+    # FIXME: is this used anywhere?
     def cell_sets_oversampling(self):
         """Returns cell sets that define oversampling domains"""
         # see preprocessing.py
@@ -363,15 +353,19 @@ class BeamProblem(MultiscaleProblemDefinition):
         }
         return cells
 
-    @property
-    def boundaries(self):
-        # NOTE
-        # this only defines markers
-        # code needs to use df.mesh.locate_entities_boundary
+    def boundaries(self, domain: df.mesh.Mesh):
+        """Returns Dirichlet boundaries of the global domain.
 
-        x = self.coarse_grid.grid.geometry.x
-        data = self.data
-        a = data.unit_length
+        Args:
+            domain: The global domain.
+
+        Note:
+            This only defines markers and should be used with `df.mesh.locate_entities_boundary`.
+
+        """
+
+        x = domain.geometry.x
+        a = self.unit_length
         xmin = np.amin(x, axis=0)
         xmax = np.amax(x, axis=0)
 
@@ -388,23 +382,19 @@ class BeamProblem(MultiscaleProblemDefinition):
             ),
         }
 
-    def get_xmin(self, cell_index: int) -> np.ndarray:
-        """Returns coordinate xmin of given cell."""
-        grid = self.coarse_grid
-        verts = grid.get_entities(0, cell_index)
-        coord = grid.get_entity_coordinates(0, verts)
-        return coord[0]
-
-    def get_dirichlet(self, cell_index: Optional[int] = None) -> Optional[dict]:
-        _, left = self.boundaries["support_left"]
-        _, right = self.boundaries["support_right"]
+    def get_dirichlet(
+        self, domain: df.mesh.Mesh, cell_index: Optional[int] = None
+    ) -> Optional[dict]:
+        boundaries = self.boundaries(domain)
+        _, left = boundaries["support_left"]
+        _, right = boundaries["support_right"]
 
         # NOTE
         # this only defines markers using `within_range`
         # code needs to use df.mesh.locate_entities_boundary
 
         if cell_index in (0, 1):
-            u_origin = (default_scalar_type(0.0), default_scalar_type(0.0))
+            u_origin = (df.default_scalar_type(0.0), df.default_scalar_type(0.0))
             dirichlet = {
                 "value": u_origin,
                 "boundary": left,
@@ -414,7 +404,7 @@ class BeamProblem(MultiscaleProblemDefinition):
         elif cell_index in (4, 5):
             dirichlet = None
         elif cell_index in (8, 9):
-            u_bottom_right = default_scalar_type(0.0)
+            u_bottom_right = df.default_scalar_type(0.0)
             dirichlet = {
                 "value": u_bottom_right,
                 "boundary": right,
@@ -425,10 +415,9 @@ class BeamProblem(MultiscaleProblemDefinition):
             raise NotImplementedError
         return dirichlet
 
-    def get_neumann(self, cell_index: Optional[int] = None) -> Optional[dict]:
-        # is the same for all oversampling problems
-        assert cell_index is None
-        return cell_index
+    @property
+    def get_neumann(self) -> None:
+        return None
 
     def get_kernel_set(self, cell_index: int) -> tuple[int, ...]:
         """return indices of rigid body modes to be used"""
@@ -445,15 +434,14 @@ class BeamProblem(MultiscaleProblemDefinition):
             raise NotImplementedError
 
     def get_gamma_out(self, cell_index: Optional[int] = None) -> Callable:
-        data = self.data
-        unit_length = data.unit_length
+        unit_length = self.unit_length
+        y = self.height
         tol = 1e-4
 
         # NOTE
         # this only defines the marker
         # code needs to use df.mesh.locate_entities_boundary
 
-        y = data.height
         if cell_index in (0, 1):
             x = 3 * unit_length
             start = [x, 0.0 + tol, 0.0]
@@ -473,12 +461,3 @@ class BeamProblem(MultiscaleProblemDefinition):
         else:
             raise NotImplementedError
         return gamma_out
-
-
-if __name__ == "__main__":
-    data = BeamData(name="parageom")
-    # realizations = np.load(data.realizations)
-    # print(realizations)
-    problem = BeamProblem(
-        data.coarse_grid("global"), data.parent_domain("global"), data
-    )
