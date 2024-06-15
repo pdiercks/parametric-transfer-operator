@@ -2,11 +2,13 @@
 
 import numpy as np
 
-from multi.projection import project_array, orthogonal_part
+from multi.projection import project_array
 
+from pymor.algorithms.pod import pod
 from pymor.core.logger import getLogger
 from pymor.core.defaults import set_defaults
 from pymor.tools.random import new_rng
+from pymor.parameters.base import ParameterSpace
 
 
 def main(args):
@@ -20,20 +22,99 @@ def main(args):
     set_defaults({"pymor.core.logger.getLogger.filename": logfilename})
     logger = getLogger("projerr", level="INFO")
 
-    transfer, f_ext = discretize_transfer_problem(example, args.config)
+    transfer, _ = discretize_transfer_problem(example, args.config)
+
+    ntrain = example.ntrain(args.config)
+    realizations = np.load(example.realizations)
+    this = realizations[args.nreal]
+    seed_seqs_rrf = np.random.SeedSequence(this).generate_state(ntrain)
+
+    # ### Generate training and testing seed for each configuration
+    training_seeds = {}
+    for cfg, rndseed in zip(
+        example.configurations,
+        np.random.SeedSequence(example.training_set_seed).generate_state(
+            len(example.configurations)
+        ),
+    ):
+        training_seeds[cfg] = rndseed
+    testing_seeds = {}
+    for cfg, rndseed in zip(
+        example.configurations,
+        np.random.SeedSequence(example.testing_set_seed).generate_state(
+            len(example.configurations)
+        ),
+    ):
+        testing_seeds[cfg] = rndseed
+
+    parameter_space = ParameterSpace(
+        example.parameters[args.config], example.mu_range
+    )
+    parameter_name = list(example.parameters[args.config].keys())[0]
+    training_set = sample_lhs(
+        parameter_space,
+        name=parameter_name,
+        samples=ntrain,
+        criterion="center",
+        random_state=training_seeds[args.config],
+    )
+    testing_set = sample_lhs(
+        parameter_space,
+        name=parameter_name,
+        samples=ntrain,
+        criterion="center",
+        random_state=testing_seeds[args.config],
+    )
 
     # ### Read basis and wrap as pymor object
-    basis_path = None
+    logger.info(f"Computing spectral basis with method {args.method} ...")
+    basis = None
     if args.method == "hapod":
-        basis_path = example.hapod_modes_npy(args.nreal, args.distr, args.config)
+        from .hapod import adaptive_rrf_normal
+
+        snapshots = transfer.range.empty()
+        spectral_basis_sizes = list()
+        for mu, seed_seq in zip(training_set, seed_seqs_rrf):
+            with new_rng(seed_seq):
+                transfer.assemble_operator(mu)
+                rb = adaptive_rrf_normal(
+                    logger,
+                    transfer,
+                    error_tol=example.rrf_ttol,
+                    failure_tolerance=example.rrf_ftol,
+                    num_testvecs=example.rrf_num_testvecs,
+                    sampling_options={"scale": 0.1},
+                )
+                logger.info(f"\nSpectral Basis length: {len(rb)}.")
+                spectral_basis_sizes.append(len(rb))
+                snapshots.append(rb)
+        logger.info(
+            f"Average length of spectral basis: {np.average(spectral_basis_sizes)}."
+        )
+        # basis = pod(snapshots, product=transfer.range_product, rtol=example.pod_rtol)[0]  # type: ignore
+        basis = pod(snapshots, product=transfer.range_product, atol=0.1)
+
     elif args.method == "heuristic":
-        basis_path = example.heuristic_modes_npy(args.nreal, args.distr, args.config)
+        from .heuristic import heuristic_range_finder
+
+        with new_rng(seed_seqs_rrf[0]):
+            spectral_basis, _ = heuristic_range_finder(
+                logger,
+                transfer,
+                training_set,
+                testing_set,
+                error_tol=example.rrf_ttol,
+                failure_tolerance=example.rrf_ftol,
+                num_testvecs=example.rrf_num_testvecs,
+                sampling_options={"scale": 0.1},
+            )
+        basis = spectral_basis
     else:
         raise NotImplementedError
-    local_basis = np.load(basis_path)
-    basis = transfer.range.from_numpy(local_basis)
 
-    orthonormal = np.allclose(basis.gramian(transfer.range_product), np.eye(len(basis)), atol=1e-5)
+    orthonormal = np.allclose(
+        basis.gramian(transfer.range_product), np.eye(len(basis)), atol=1e-5
+    )
     if not orthonormal:
         raise ValueError("Basis is not orthonormal wrt range product.")
 
@@ -41,15 +122,15 @@ def main(args):
     # make sure that this is always the same set of parameters
     # and also same set of boundary data
     # but different from μ and g used in the training
-    parameter_space = transfer.operator.parameters.space(example.mu_range)
-    parameter_name = list(example.parameters[args.config].keys())[0]
-    test_set = sample_lhs(
-        parameter_space,
-        name=parameter_name,
-        samples=30,
-        criterion="center",
-        random_state=example.projerr_seed
-    )
+    # purely random testing would be better ??
+    # test_set = sample_lhs(
+    #     parameter_space,
+    #     name=parameter_name,
+    #     samples=30,
+    #     criterion="center",
+    #     random_state=example.projerr_seed,
+    # )
+    test_set = parameter_space.sample_randomly(50)
 
     test_data = transfer.range.empty(reserve=len(test_set))
 
@@ -57,21 +138,25 @@ def main(args):
     with new_rng(example.projerr_seed):
         for mu in test_set:
             transfer.assemble_operator(mu)
-            g = transfer.generate_random_boundary_data(1, "normal", {"scale": 0.1})
+            g = transfer.generate_random_boundary_data(1, args.distr, {"scale": 0.1})
             test_data.append(transfer.solve(g))
-            # neumann = transfer.op.apply_inverse(f_ext)
-            # neumann_in = transfer.range.from_numpy(neumann.dofs(transfer._restriction))
-            # test_data.append(orthogonal_part(neumann_in, transfer.kernel, product=None, orthonormal=True))
 
     aerrs = []
     rerrs = []
-    u_norm = test_data.norm(transfer.range_product) # norm of each test vector
+    u_norm = test_data.norm(transfer.range_product)  # norm of each test vector
 
-    logger.info("Computing relative projection error ...")
+    logger.info("Computing projection error ...")
     for N in range(len(basis) + 1):
-        U_proj = project_array(test_data, basis[:N], product=transfer.range_product, orthonormal=orthonormal)
-        err = (test_data - U_proj).norm(transfer.range_product) # absolute projection error
-        if np.all(err == 0.):
+        U_proj = project_array(
+            test_data,
+            basis[:N],
+            product=transfer.range_product,
+            orthonormal=orthonormal,
+        )
+        err = (test_data - U_proj).norm(
+            transfer.range_product
+        )  # absolute projection error
+        if np.all(err == 0.0):
             # ensure to return 0 here even when the norm of U is zero
             rel_err = err
         else:
@@ -82,7 +167,7 @@ def main(args):
     rerr = np.array(rerrs)
     aerr = np.array(aerrs)
     if args.output is not None:
-        np.save(args.output, np.vstack((rerr, aerr)).T)
+        np.savez(args.output, rerr=rerr, aerr=aerr)
 
 
 if __name__ == "__main__":
@@ -90,10 +175,16 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("nreal", type=str, help="The n-th realization.")
+    parser.add_argument("nreal", type=int, help="The n-th realization.")
     parser.add_argument("method", type=str, help="Method used for basis construction.")
-    parser.add_argument("distr", type=str, help="Distribution used for random sampling.")
+    parser.add_argument(
+        "distr", type=str, help="Distribution used for random sampling."
+    )
     parser.add_argument("config", type=str, help="Configuration / Archetype.")
-    parser.add_argument("--output", type=str, help="Write absolute and relative projection error to file.")
+    parser.add_argument(
+        "--output",
+        type=str,
+        help="Write absolute and relative projection error to file.",
+    )
     args = parser.parse_args(sys.argv[1:])
     main(args)

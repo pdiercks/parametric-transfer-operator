@@ -211,7 +211,7 @@ class BeamData:
     def ntrain(self, config: str) -> int:
         """Define size of training set"""
         if self.run_mode == "DEBUG":
-            map = {"left": 20, "inner": 40, "right": 20}
+            map = {"left": 60, "inner": 80, "right": 60}
             return map[config]
         elif self.run_mode == "PRODUCTION":
             map = {"left": 40, "inner": 60, "right": 40}
@@ -315,7 +315,7 @@ class BeamData:
 
     def projerr(self, nr: int, method: str, distr: str, config: str) -> Path:
         dir = self.method_folder(nr, method)
-        return dir / f"projerr_{distr}_{config}.npy"
+        return dir / f"projerr_{distr}_{config}.npz"
 
     @property
     def target_subdomain(self) -> Path:

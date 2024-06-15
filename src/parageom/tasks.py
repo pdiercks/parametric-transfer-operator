@@ -179,9 +179,9 @@ def task_projerr():
                 deps = [SRC / "projerr.py"]
                 deps.append(example.coarse_grid("global"))
                 deps.append(example.parent_domain("global"))
+                deps.append(example.coarse_grid(config))
+                deps.append(example.parent_domain(config))
                 deps.append(example.parent_unit_cell)
-                deps.append(example.hapod_modes_npy(nreal, distr, config))
-                deps.append(example.heuristic_modes_npy(nreal, distr, config))
                 targets = []
                 targets.append(example.projerr(nreal, method, distr, config))
                 targets.append(example.log_projerr(nreal, method, distr, config))

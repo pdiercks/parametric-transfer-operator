@@ -8,7 +8,6 @@ from pymor.bindings.fenicsx import (
     FenicsxVisualizer
 )
 from pymor.algorithms.gram_schmidt import gram_schmidt
-from pymor.algorithms.pod import pod
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
 from pymor.operators.interface import Operator
