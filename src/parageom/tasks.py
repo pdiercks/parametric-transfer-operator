@@ -184,10 +184,11 @@ def task_projerr():
                 deps.append(example.heuristic_modes_npy(nreal, distr, config))
                 targets = []
                 targets.append(example.projerr(nreal, method, distr, config))
+                targets.append(example.log_projerr(nreal, method, distr, config))
                 yield {
                         "name": method + ":" + config + ":" + str(nreal),
                         "file_dep": deps,
-                        "actions": ["python3 -m {} {} {} {} {} --output %(targets)s".format(module, nreal, method, distr, config)],
+                        "actions": ["python3 -m {} {} {} {} {} --output {}".format(module, nreal, method, distr, config, targets[0])],
                         "targets": targets,
                         "clean": True
                         }

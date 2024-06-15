@@ -229,11 +229,16 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
     # problem goes out of scope and problem.b is deleted
     rhs = VectorOperator(operator.range.make_array([problem.b.copy()]))  # type: ignore
 
-    # ### Inner product
+    # ### Inner products
     inner_product = InnerProduct(V, product="h1-semi", bcs=bcs)
     product_mat = inner_product.assemble_matrix()
     product_name = "h1_0_semi"
     h1_product = FenicsxMatrixOperator(product_mat, V, V, name=product_name)
+
+    l2_inner = InnerProduct(V, product="l2", bcs=bcs)
+    product_mat = l2_inner.assemble_matrix()
+    product_l2 = "l2"
+    l2_product = FenicsxMatrixOperator(product_mat, V, V, name=product_l2)
 
     u = ufl.TrialFunction(V)
     v = ufl.TestFunction(V)
@@ -246,6 +251,14 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
     A.assemble()
     scaled_h1_product = FenicsxMatrixOperator(A, V, V, name="scaled_h1_0_semi")
 
+    scaled_l2 = l_char * ufl.inner(u, v) * ufl.dx
+    l2_cpp = df.fem.form(scaled_l2)
+    P = dolfinx.fem.petsc.create_matrix(l2_cpp)
+    P.zeroEntries()
+    dolfinx.fem.petsc.assemble_matrix(P, l2_cpp, bcs=bcs)
+    P.assemble()
+    scaled_l2_product = FenicsxMatrixOperator(P, V, V, name="scaled_l2")
+
     # ### Visualizer
     viz = FenicsxVisualizer(FenicsxVectorSpace(V))
 
@@ -255,7 +268,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
     fom = StationaryModel(
         operator,
         rhs,
-        products={product_name: h1_product, "scaled_h1_0_semi": scaled_h1_product},
+        products={product_name: h1_product, product_l2: l2_product, "scaled_h1_0_semi": scaled_h1_product, "scaled_l2": scaled_l2_product},
         visualizer=viz,
         name="FOM",
     )
@@ -290,14 +303,18 @@ if __name__ == "__main__":
     # with characteristic length l_char = 100. mm (unit length)
 
     Unorm = U.norm(fom.scaled_h1_0_semi_product)
+    Unorm_l2 = U.norm(fom.scaled_l2_product)
 
     D = U.copy()
     l_char = 100.
     D.scal(l_char)
     Dnorm = D.norm(fom.h1_0_semi_product)
+    Dnorm_l2 = D.norm(fom.l2_product)
 
     # check norm of displacement field
+    assert np.isclose(D.norm(), U.norm() * l_char)
     assert np.isclose(Dnorm, Unorm)
+    assert np.isclose(Dnorm_l2, Unorm_l2)
 
     # check load
     total_load = np.sum(fom.rhs.as_range_array().to_numpy())  # type: ignore

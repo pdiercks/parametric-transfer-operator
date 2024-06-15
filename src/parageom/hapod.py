@@ -228,7 +228,7 @@ def main(args):
             U_orth = orthogonal_part(
                 U_in_neumann,
                 transfer.kernel,
-                product=transfer.range_product,
+                product=None,
                 orthonormal=True,
             )
             basis_length = len(basis)
@@ -241,11 +241,6 @@ def main(args):
                 offset=basis_length,
                 copy=False,
             )
-
-            # debugging
-            # viz = FenicsxVisualizer(transfer.range)
-            # viz.visualize(basis, filename="debug_hapod.xdmf")
-            # breakpoint()
 
         snapshots.append(basis)  # type: ignore
 

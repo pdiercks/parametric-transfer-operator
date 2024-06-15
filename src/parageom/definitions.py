@@ -76,7 +76,6 @@ class BeamData:
     configurations: tuple[str, str, str] = ("left", "inner", "right")
     distributions: tuple[str, ...] = ("normal",)
     methods: tuple[str, ...] = ("hapod", "heuristic")
-    range_product: str = "h1"
     rrf_ttol: float = 10e-2
     rrf_ftol: float = 1e-10
     rrf_num_testvecs: int = 20
@@ -322,10 +321,15 @@ class BeamData:
     def target_subdomain(self) -> Path:
         return self.parent_domain("target")
 
-    def config_to_omega_in(self, config: str) -> list[int]:
-        """Maps config to cell index/indices of oversampling domain that correspond to omega in."""
-        map = {"left": [0, 1], "right": [8, 9], "inner": [4, 5]}
-        return map[config]
+    def config_to_omega_in(self, config: str, local=True) -> list[int]:
+        """Maps config to cell local index/indices of oversampling domain that correspond to omega in."""
+        global_indices = {"left": [0, 1], "right": [8, 9], "inner": [4, 5]}
+        # FIXME: this is not the case maybe?
+        local_indices = {"left": [0, 1], "right": [1, 2], "inner": [1, 2]}
+        if local:
+            return local_indices[config]
+        else:
+            return global_indices[config]
 
     # FIXME: not needed for GFEM, but I may use edge functions as well.
     @property
@@ -383,7 +387,7 @@ class BeamData:
         }
 
     def get_dirichlet(
-        self, domain: df.mesh.Mesh, cell_index: Optional[int] = None
+            self, domain: df.mesh.Mesh, config: str
     ) -> Optional[dict]:
         boundaries = self.boundaries(domain)
         _, left = boundaries["support_left"]
@@ -393,7 +397,7 @@ class BeamData:
         # this only defines markers using `within_range`
         # code needs to use df.mesh.locate_entities_boundary
 
-        if cell_index in (0, 1):
+        if config == "left":
             u_origin = (df.default_scalar_type(0.0), df.default_scalar_type(0.0))
             dirichlet = {
                 "value": u_origin,
@@ -401,9 +405,9 @@ class BeamData:
                 "entity_dim": 1,
                 "sub": None,
             }
-        elif cell_index in (4, 5):
+        elif config == "inner":
             dirichlet = None
-        elif cell_index in (8, 9):
+        elif config == "right":
             u_bottom_right = df.default_scalar_type(0.0)
             dirichlet = {
                 "value": u_bottom_right,
@@ -449,7 +453,7 @@ class BeamData:
             gamma_out = within_range(start, end)
         elif cell_index in (4, 5):
             x_left = 3 * unit_length
-            x_right = 6 * unit_length
+            x_right = 7 * unit_length
             left = within_range([x_left, 0.0 + tol, 0.0], [x_left, y - tol, 0.0])
             right = within_range([x_right, 0.0 + tol, 0.0], [x_right, y - tol, 0.0])
 

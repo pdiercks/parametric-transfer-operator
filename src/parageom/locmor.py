@@ -704,7 +704,7 @@ class ParametricTransferProblem(LogMixin):
         if self.kernel is not None:
             assert len(self.kernel) > 0 # type: ignore
             return orthogonal_part(
-                U_in, self.kernel, product=self.range_product, orthonormal=True
+                U_in, self.kernel, product=None, orthonormal=True
             )
         else:
             return U_in
@@ -722,11 +722,14 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
     from .matrix_based_operator import FenicsxMatrixBasedOperator, BCGeom, BCTopo, _create_dirichlet_bcs
 
     # TODO: logger?
+    global_coarse_domain, _, _ = read_mesh(example.coarse_grid("global"), MPI.COMM_WORLD,
+                                           kwargs={"gdim": example.gdim})
+    global_coarse_grid = StructuredQuadGrid(global_coarse_domain)
 
     # ### Structured coarse grid of the oversampling domain
     coarse_domain, _, _ = read_mesh(
         example.coarse_grid(configuration),
-        MPI.COMM_SELF,
+        MPI.COMM_WORLD,
         kwargs={"gdim": example.gdim},
     )
     coarse_grid = StructuredQuadGrid(coarse_domain)
@@ -734,7 +737,7 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
     # ### Fine scale grid of the oversampling domain Ω
     domain, ct, ft = read_mesh(
         example.parent_domain(configuration),
-        MPI.COMM_SELF,
+        MPI.COMM_WORLD,
         kwargs={"gdim": example.gdim},
     )
     omega = RectangularDomain(domain, cell_tags=ct, facet_tags=ft)
@@ -775,14 +778,14 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
         raise NotImplementedError
 
     # ### Target subdomain Ω_in
-    cell_index = example.config_to_omega_in(configuration)[0]
-    assert cell_index in (0, 4, 8)
+    local_cell_index = example.config_to_omega_in(configuration, local=True)[0]
+    assert local_cell_index in (0, 1)
     # get xmin to translate target subdomain by lower left corner point
-    cell_vertices = coarse_grid.get_entities(0, cell_index)
+    cell_vertices = coarse_grid.get_entities(0, local_cell_index)
     x_cell_verts = coarse_grid.get_entity_coordinates(0, cell_vertices)
     xmin_omega_in = x_cell_verts[0]
     target_domain, _, _ = read_mesh(
-        example.target_subdomain, MPI.COMM_SELF, kwargs={"gdim": example.gdim}
+        example.target_subdomain, MPI.COMM_WORLD, kwargs={"gdim": example.gdim}
     )
     omega_in = RectangularDomain(target_domain)
     omega_in.translate(xmin_omega_in)
@@ -799,12 +802,13 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
     # ### Dirichlet BCs
     # have to be defined twice (operator & range product)
     zero = df.fem.Constant(V.mesh, (df.default_scalar_type(0.0),) * example.gdim)
-    gamma_out = example.get_gamma_out(cell_index)
+    global_cell_index = example.config_to_omega_in(configuration, local=False)[0]
+    gamma_out = example.get_gamma_out(global_cell_index)
     bc_gamma_out = BCGeom(zero, gamma_out, V)
     bcs_op = list()
     bcs_op.append(bc_gamma_out)
     bcs_range_product = []
-    hom_dirichlet = example.get_dirichlet(coarse_grid.grid, cell_index)
+    hom_dirichlet = example.get_dirichlet(global_coarse_grid.grid, configuration)
     if hom_dirichlet is not None:
         # determine entities and define BCTopo
         entities_omega = df.mesh.locate_entities_boundary(
@@ -866,23 +870,42 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
     entities_gamma_out = df.mesh.locate_entities_boundary(
         V.mesh, V.mesh.topology.dim - 1, gamma_out
     )
+    assert entities_gamma_out.size > 0
     rhs = DirichletLift(operator.range, operator.compiled_form, entities_gamma_out)  # type: ignore
 
 
     # FIXME : use scaled inner product operators!!!
+    def scaled_h1_0_semi(V, gdim, a=example.l_char):
+        l_char = df.fem.Constant(V.mesh, df.default_scalar_type(a ** gdim))
+        u = ufl.TrialFunction(V)
+        v = ufl.TestFunction(V)
+        return l_char * ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx # type: ignore
+
+    def scaled_l2(V, gdim, a=example.l_char):
+        l_char = df.fem.Constant(V.mesh, df.default_scalar_type(a ** gdim))
+        u = ufl.TrialFunction(V)
+        v = ufl.TestFunction(V)
+        return l_char * ufl.inner(u, v) * ufl.dx # type: ignore
 
     # ### Range product operator
-    inner_product = InnerProduct(V_in, example.range_product, bcs=bcs_range_product)
-    pmat = inner_product.assemble_matrix()
-    range_product = FenicsxMatrixOperator(pmat, V_in, V_in)
+    h1_cpp = df.fem.form(scaled_h1_0_semi(V_in, example.gdim))
+    pmat_range = dolfinx.fem.petsc.create_matrix(h1_cpp)
+    pmat_range.zeroEntries()
+    dolfinx.fem.petsc.assemble_matrix(pmat_range, h1_cpp, bcs=bcs_range_product)
+    pmat_range.assemble()
+    range_product = FenicsxMatrixOperator(pmat_range, V_in, V_in, name="scaled_h1_0_semi")
 
     # ### Source product operator
-    inner_source = InnerProduct(V, "l2", bcs=[])
-    source_mat = csr_array(inner_source.assemble_matrix().getValuesCSR()[::-1])  # type: ignore
-    source_product = NumpyMatrixOperator(source_mat[rhs.dofs, :][:, rhs.dofs])
+    l2_cpp = df.fem.form(scaled_l2(V, example.gdim))
+    pmat_source = dolfinx.fem.petsc.create_matrix(l2_cpp)
+    pmat_source.zeroEntries()
+    dolfinx.fem.petsc.assemble_matrix(pmat_source, l2_cpp, bcs=[])
+    pmat_source.assemble()
+    source_mat = csr_array(pmat_source.getValuesCSR()[::-1])  # type: ignore
+    source_product = NumpyMatrixOperator(source_mat[rhs.dofs, :][:, rhs.dofs], name="scaled_l2")
 
     # ### Rigid body modes
-    kernel_set = example.get_kernel_set(cell_index)
+    kernel_set = example.get_kernel_set(global_cell_index)
     ns_vecs = build_nullspace(V_in, gdim=example.gdim)
     assert len(ns_vecs) == 3
     rigid_body_modes = []
@@ -890,8 +913,8 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
         dolfinx.fem.petsc.set_bc(ns_vecs[j], bcs_range_product)
         rigid_body_modes.append(ns_vecs[j])
     kernel = target_space.make_array(rigid_body_modes)  # type: ignore
-    gram_schmidt(kernel, product=range_product, copy=False)
-    assert np.allclose(kernel.gramian(range_product), np.eye(len(kernel)))
+    gram_schmidt(kernel, product=None, copy=False)
+    assert np.allclose(kernel.gramian(), np.eye(len(kernel)))
 
     # #### Transfer Problem
     transfer = ParametricTransferProblem(
@@ -931,4 +954,7 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
 
 
 if __name__ == "__main__":
-    pass
+    from .tasks import example
+    discretize_transfer_problem(example, "left")
+    # discretize_transfer_problem(example, "right")
+    # discretize_transfer_problem(example, "inner")

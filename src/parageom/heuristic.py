@@ -89,22 +89,27 @@ def heuristic_range_finder(
     B = tp.range.empty()
     maxnorm = np.inf
     num_iter = 0
-    logger.debug(f"{len(training_set)=}")
+    ntrain = len(training_set)
+    # re-use {mu_0, ..., mu_ntrain} until target tolerance is reached
+    mu_j = np.hstack((np.arange(ntrain, dtype=np.int32),) * 3)
+    logger.debug(f"{ntrain=}")
     while maxnorm > testlimit:
         basis_length = len(B)
+        j = mu_j[num_iter]
+        mu = training_set[j]
         # randomly select mu from existing LHS design
         # mu_ind = rng.integers(0, len(training_set))
         # FIXME
         # figure out what is the best stratgey for drawing μ from LHS design
         # logger.debug(f"{mu_ind=}")
         # mu = training_set.pop(mu_ind)
-        mu = training_set.pop(0)
+        # mu = training_set.pop(0)
         training_samples.append(mu)
         tp.assemble_operator(mu)
         # FIXME
         # instead of adjusting the parameter samples in the LHS design
         # it is simpler to simply use more boundary data for the same sample
-        v = tp.generate_random_boundary_data(3, distribution, options=sampling_options)
+        v = tp.generate_random_boundary_data(1, distribution, options=sampling_options)
 
         B.append(tp.solve(v))
         gram_schmidt(B, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
@@ -153,12 +158,6 @@ def main(args):
     parameter_name = list(example.parameters[args.configuration].keys())[0]
     ntrain = example.ntrain(args.configuration)
 
-    # FIXME
-    # I am not sure if I should simply sample mu randomly inside the while loop
-    # `samples` will have an influence on the LHS design
-    # but still this should be better than walk through parameter space randomly?
-    # the downside is that I cannot guarantee that the training set will be larger
-    # than the number of iterations required
     training_set = sample_lhs(
         parameter_space,
         name=parameter_name,
@@ -166,11 +165,6 @@ def main(args):
         criterion="center",
         random_state=training_seeds[args.configuration],
     )
-    # training_set.extend(
-    #         sample_lhs(parameter_space, name=parameter_name, samples=ntrain, criterion="center", random_state=training_seeds[args.configuration])
-    #         )
-    # breakpoint()
-    # assert len(training_set) == 2 * ntrain
 
     # NOTE
     # The testing set for the heuristic range approximation should have
@@ -198,7 +192,6 @@ def main(args):
     transfer, FEXT = discretize_transfer_problem(example, args.configuration)
 
     # ### Heuristic range approximation
-    training_set_length = len(training_set)
     logger.debug(f"{seed_seqs_rrf[0]=}")
     with new_rng(seed_seqs_rrf[0]):
         spectral_basis, training_samples = heuristic_range_finder(
@@ -211,51 +204,24 @@ def main(args):
             num_testvecs=example.rrf_num_testvecs,
             sampling_options={"scale":0.1},
         )
-    assert len(training_set) + len(training_samples) == training_set_length
 
     # ### Compute Neumann Modes
-    neumann_snapshots = spectral_basis.space.empty(reserve=len(training_samples))
-    for mu in training_samples:
+    # restrict to ntrain, otherwise would just compute the same data twice
+    neumann_snapshots = spectral_basis.space.empty(reserve=len(training_samples[:ntrain]))
+    for mu in training_samples[:ntrain]:
         transfer.assemble_operator(mu)
         U_neumann = transfer.op.apply_inverse(FEXT)
-        # u_vec = transfer._u.x.petsc_vec  # type: ignore
-        # u_vec.array[:] = U_neumann.to_numpy().flatten()
-        # transfer._u.x.scatter_forward()  # type: ignore
-
-        # ### restrict full solution to target subdomain
-        # transfer._u_in.interpolate(
-        #     transfer._u, nmm_interpolation_data=transfer._interp_data
-        # )  # type: ignore
-        # transfer._u_in.x.scatter_forward()  # type: ignore
-        # U_in_neumann = transfer.range.make_array([transfer._u_in.x.petsc_vec.copy()])  # type: ignore
         U_in_neumann = transfer.range.from_numpy(U_neumann.dofs(transfer._restriction))
 
         # ### Remove kernel after restriction to target subdomain
         U_orth = orthogonal_part(
-            U_in_neumann, transfer.kernel, product=transfer.range_product, orthonormal=True
+            U_in_neumann, transfer.kernel, product=None, orthonormal=True
         )
         neumann_snapshots.append(U_orth)
 
-    assert np.allclose(
-        spectral_basis.gramian(transfer.range_product), np.eye(len(spectral_basis))
-    )
     logger.info("Extending spectral basis by Neumann snapshots via GS ...")
     basis_length = len(spectral_basis)
-    n_neumann = len(neumann_snapshots)
-    # extend_basis(neumann_snapshots, spectral_basis, product=transfer.range_product, method="gram_schmidt")
-    # gram_schmidt(neumann_snapshots, transfer.range_product, atol=0, rtol=0, copy=False)
-    N_proj_err = neumann_snapshots - spectral_basis.lincomb(
-        neumann_snapshots.inner(spectral_basis, transfer.range_product)
-    )
-    neumann_modes, _ = pod(
-        N_proj_err,
-        modes=len(neumann_snapshots),
-        product=transfer.range_product,
-        rtol=example.pod_rtol,
-        orth_tol=np.inf,
-    )
-
-    spectral_basis.append(neumann_modes)
+    spectral_basis.append(neumann_snapshots)
     gram_schmidt(
         spectral_basis,
         product=transfer.range_product,
@@ -263,12 +229,9 @@ def main(args):
         check=False,
         copy=False,
     )
-    assert np.allclose(spectral_basis.gramian(transfer.range_product),
-                       np.eye(len(spectral_basis)))
 
     logger.info(f"Spectral basis size: {basis_length}.")
-    # logger.info(f"Neumann modes: {n_neumann}.")
-    logger.info(f"Neumann modes: {len(neumann_modes)}/{n_neumann}.")
+    logger.info(f"Neumann snapshots: {len(neumann_snapshots)}")
     logger.info(f"Final basis length: {len(spectral_basis)}.")
 
     viz = FenicsxVisualizer(spectral_basis.space)

@@ -33,10 +33,7 @@ def main(args):
     local_basis = np.load(basis_path)
     basis = transfer.range.from_numpy(local_basis)
 
-    full_basis = transfer.kernel
-    full_basis.append(basis)
-
-    orthonormal = np.allclose(full_basis.gramian(range_product), np.eye(len(full_basis)), atol=1e-5)
+    orthonormal = np.allclose(basis.gramian(transfer.range_product), np.eye(len(basis)), atol=1e-5)
     if not orthonormal:
         raise ValueError("Basis is not orthonormal wrt range product.")
 
@@ -62,17 +59,17 @@ def main(args):
             transfer.assemble_operator(mu)
             g = transfer.generate_random_boundary_data(1, "normal", {"scale": 0.1})
             test_data.append(transfer.solve(g))
-            neumann = transfer.op.apply_inverse(f_ext)
-            neumann_in = transfer.range.from_numpy(neumann.dofs(transfer._restriction))
-            test_data.append(orthogonal_part(neumann_in, transfer.kernel, product=transfer.range_product, orthonormal=True))
+            # neumann = transfer.op.apply_inverse(f_ext)
+            # neumann_in = transfer.range.from_numpy(neumann.dofs(transfer._restriction))
+            # test_data.append(orthogonal_part(neumann_in, transfer.kernel, product=None, orthonormal=True))
 
     aerrs = []
     rerrs = []
     u_norm = test_data.norm(transfer.range_product) # norm of each test vector
 
     logger.info("Computing relative projection error ...")
-    for N in range(len(full_basis) + 1):
-        U_proj = project_array(test_data, full_basis[:N], product=transfer.range_product, orthonormal=orthonormal)
+    for N in range(len(basis) + 1):
+        U_proj = project_array(test_data, basis[:N], product=transfer.range_product, orthonormal=orthonormal)
         err = (test_data - U_proj).norm(transfer.range_product) # absolute projection error
         if np.all(err == 0.):
             # ensure to return 0 here even when the norm of U is zero
