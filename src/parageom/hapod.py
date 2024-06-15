@@ -5,37 +5,19 @@ from pathlib import Path
 
 # import concurrent.futures
 import numpy as np
-from scipy.sparse import csr_array
 from scipy.sparse.linalg import LinearOperator, eigsh
 from scipy.special import erfinv
 
-from petsc4py import PETSc
-from mpi4py import MPI
-import dolfinx as df
-import dolfinx.fem.petsc
-import ufl
-
-from pymor.bindings.fenicsx import (
-    FenicsxVectorSpace,
-    FenicsxMatrixOperator,
-    FenicsxVisualizer,
-)
+from pymor.bindings.fenicsx import FenicsxVisualizer
 from pymor.algorithms.pod import pod
 from pymor.algorithms.gram_schmidt import gram_schmidt
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
 from pymor.operators.interface import Operator
-from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.tools.random import new_rng
 from pymor.parameters.base import ParameterSpace
 
-from multi.io import read_mesh
-from multi.domain import RectangularDomain, StructuredQuadGrid
-from multi.materials import LinearElasticMaterial
-from multi.problems import LinearElasticityProblem
-from multi.product import InnerProduct
 from multi.projection import orthogonal_part
-from multi.solver import build_nullspace
 
 
 def adaptive_rrf_normal(
@@ -142,7 +124,9 @@ def adaptive_rrf_normal(
     logger.info(f"{lambda_min=}")
     logger.info(f"{testlimit=}")
 
-    R = tp.generate_random_boundary_data(count=num_testvecs, distribution=distribution, options=sampling_options)
+    R = tp.generate_random_boundary_data(
+        count=num_testvecs, distribution=distribution, options=sampling_options
+    )
     M = tp.solve(R)
     B = tp.range.empty()
     maxnorm = np.inf
@@ -161,17 +145,8 @@ def adaptive_rrf_normal(
 
 def main(args):
     from .tasks import example
-    from .definitions import BeamProblem
     from .lhs import sample_lhs
-    from .auxiliary_problem import GlobalAuxiliaryProblem
-    from .locmor import ParametricTransferProblem, DirichletLift
-    from .matrix_based_operator import (
-        FenicsxMatrixBasedOperator,
-        BCGeom,
-        BCTopo,
-        _create_dirichlet_bcs,
-    )
-    from .fom import ParaGeomLinEla
+    from .locmor import discretize_transfer_problem
 
     method = Path(__file__).stem  # hapod
     logfilename = example.log_basis_construction(
@@ -223,211 +198,7 @@ def main(args):
     this = realizations[args.nreal]
     seed_seqs_rrf = np.random.SeedSequence(this).generate_state(ntrain)
 
-    # ### Oversampling Domain
-    domain, ct, ft = read_mesh(
-        example.parent_domain(args.configuration),
-        MPI.COMM_SELF,
-        kwargs={"gdim": example.gdim},
-    )
-    omega = RectangularDomain(domain, cell_tags=ct, facet_tags=ft)
-    ft_def = {"bottom": int(11), "left": int(12), "right": int(13), "top": int(14)}
-    omega.create_facet_tags(ft_def)
-
-    aux_tags = None
-    if args.configuration == "inner":
-        assert omega.facet_tags.find(11).size == example.num_intervals * 4  # bottom
-        assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
-        assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
-        assert omega.facet_tags.find(14).size == example.num_intervals * 4  # top
-        assert omega.facet_tags.find(15).size == example.num_intervals * 4  # void 1
-        assert omega.facet_tags.find(16).size == example.num_intervals * 4  # void 2
-        assert omega.facet_tags.find(17).size == example.num_intervals * 4  # void 3
-        assert omega.facet_tags.find(18).size == example.num_intervals * 4  # void 4
-        aux_tags = [15, 16, 17, 18]
-
-    elif args.configuration == "left":
-        assert omega.facet_tags.find(11).size == example.num_intervals * 3  # bottom
-        assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
-        assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
-        assert omega.facet_tags.find(14).size == example.num_intervals * 3  # top
-        assert omega.facet_tags.find(15).size == example.num_intervals * 4  # void 1
-        assert omega.facet_tags.find(16).size == example.num_intervals * 4  # void 2
-        assert omega.facet_tags.find(17).size == example.num_intervals * 4  # void 3
-        aux_tags = [15, 16, 17]
-
-    elif args.configuration == "right":
-        assert omega.facet_tags.find(11).size == example.num_intervals * 3  # bottom
-        assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
-        assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
-        assert omega.facet_tags.find(14).size == example.num_intervals * 3  # top
-        assert omega.facet_tags.find(15).size == example.num_intervals * 4  # void 1
-        assert omega.facet_tags.find(16).size == example.num_intervals * 4  # void 2
-        assert omega.facet_tags.find(17).size == example.num_intervals * 4  # void 3
-        aux_tags = [15, 16, 17]
-    else:
-        raise NotImplementedError
-
-    # ### Structured coarse grid
-    grid, _, _ = read_mesh(
-        example.coarse_grid(args.configuration),
-        MPI.COMM_SELF,
-        kwargs={"gdim": example.gdim},
-    )
-    coarse_grid = StructuredQuadGrid(grid)
-
-    # ### Auxiliary Problem
-    emod = df.fem.Constant(omega.grid, df.default_scalar_type(1.0))
-    nu = df.fem.Constant(omega.grid, df.default_scalar_type(0.25))
-    mat = LinearElasticMaterial(example.gdim, E=emod, NU=nu)
-    V = df.fem.functionspace(omega.grid, ("P", example.geom_deg, (example.gdim,)))
-    problem = LinearElasticityProblem(omega, V, phases=mat)
-    auxiliary_problem = GlobalAuxiliaryProblem(
-        problem, aux_tags, example.parameters[args.configuration], coarse_grid
-    )
-    d_trafo = df.fem.Function(V, name="d_trafo")
-
-    # ### Beam Problem
-    beam_problem = BeamProblem(
-        example.coarse_grid("global"), example.parent_domain("global"), example
-    )
-    cell_index = beam_problem.config_to_omega_in(args.configuration)[0]
-    # target subdomain needs to be translated by lower left corner point
-    assert cell_index in (0, 4, 8)
-    gamma_out = beam_problem.get_gamma_out(cell_index)
-    hom_dirichlet = beam_problem.get_dirichlet(cell_index)
-    kernel_set = beam_problem.get_kernel_set(cell_index)
-
-    # ### Target subdomain & Range space
-    xmin_omega_in = beam_problem.get_xmin(cell_index)
-    logger.debug(f"{xmin_omega_in=}")
-    target_domain, _, _ = read_mesh(
-        example.target_subdomain, MPI.COMM_SELF, kwargs={"gdim": example.gdim}
-    )
-    omega_in = RectangularDomain(target_domain)
-    omega_in.translate(xmin_omega_in)
-    logger.debug(f"{omega_in.xmin=}")
-    V_in = df.fem.functionspace(target_domain, V.ufl_element())
-    target_space = FenicsxVectorSpace(V_in)
-
-    # create necessary connectivities
-    omega.grid.topology.create_connectivity(0, 2)
-    omega_in.grid.topology.create_connectivity(0, 2)
-
-    # ### Dirichlet BCs
-    # have to be defined twice (operator & range product)
-    zero = df.fem.Constant(V.mesh, (df.default_scalar_type(0.0),) * example.gdim)
-    bc_gamma_out = BCGeom(zero, gamma_out, V)
-    bcs_op = list()
-    bcs_op.append(bc_gamma_out)
-    bcs_range_product = []
-    if hom_dirichlet is not None:
-        # determine entities and define BCTopo
-        entities_omega = df.mesh.locate_entities_boundary(
-            V.mesh, hom_dirichlet["entity_dim"], hom_dirichlet["boundary"]
-        )
-        entities_omega_in = df.mesh.locate_entities_boundary(
-            V_in.mesh, hom_dirichlet["entity_dim"], hom_dirichlet["boundary"]
-        )
-        bc = BCTopo(
-            df.fem.Constant(V.mesh, hom_dirichlet["value"]),
-            entities_omega,
-            hom_dirichlet["entity_dim"],
-            V,
-            sub=hom_dirichlet["sub"],
-        )
-        bc_rp = BCTopo(
-            df.fem.Constant(V_in.mesh, hom_dirichlet["value"]),
-            entities_omega_in,
-            hom_dirichlet["entity_dim"],
-            V_in,
-            sub=hom_dirichlet["sub"],
-        )
-        bcs_op.append(bc)
-        bcs_range_product.append(bc_rp)
-    bcs_op = tuple(bcs_op)
-    bcs_range_product = _create_dirichlet_bcs(tuple(bcs_range_product))
-    assert len(bcs_op) - 1 == len(bcs_range_product)
-
-    # ### FenicsxMatrixBasedOperator
-    parageom = ParaGeomLinEla(
-        omega,
-        V,
-        E=1.,
-        NU=example.poisson_ratio,
-        d=d_trafo,  # type: ignore
-    )  # type: ignore
-    params = example.parameters[args.configuration]
-
-    def param_setter(mu):
-        d_trafo.x.petsc_vec.zeroEntries()  # type: ignore
-        auxiliary_problem.solve(d_trafo, mu)  # type: ignore
-        d_trafo.x.scatter_forward()  # type: ignore
-
-    operator = FenicsxMatrixBasedOperator(
-        parageom.form_lhs, params, param_setter=param_setter, bcs=bcs_op
-    )
-
-    # ### DirichletLift
-    entities_gamma_out = df.mesh.locate_entities_boundary(
-        V.mesh, V.mesh.topology.dim - 1, gamma_out
-    )
-    rhs = DirichletLift(operator.range, operator.compiled_form, entities_gamma_out)  # type: ignore
-
-    # ### Range product operator
-    inner_product = InnerProduct(V_in, example.range_product, bcs=bcs_range_product)
-    pmat = inner_product.assemble_matrix()
-    range_product = FenicsxMatrixOperator(pmat, V_in, V_in)
-
-    # ### Source product operator
-    inner_source = InnerProduct(V, "l2", bcs=[])
-    source_mat = csr_array(inner_source.assemble_matrix().getValuesCSR()[::-1])  # type: ignore
-    source_product = NumpyMatrixOperator(source_mat[rhs.dofs, :][:, rhs.dofs])
-
-    # ### Rigid body modes
-    ns_vecs = build_nullspace(V_in, gdim=example.gdim)
-    assert len(ns_vecs) == 3
-    rigid_body_modes = []
-    for j in kernel_set:
-        dolfinx.fem.petsc.set_bc(ns_vecs[j], bcs_range_product)
-        rigid_body_modes.append(ns_vecs[j])
-    kernel = target_space.make_array(rigid_body_modes)  # type: ignore
-    with logger.block("Orthonormalizing kernel of A ..."):  # type: ignore
-        gram_schmidt(kernel, product=range_product, copy=False)
-    assert np.allclose(kernel.gramian(range_product), np.eye(len(kernel)))
-
-    # #### Transfer Problem
-    transfer = ParametricTransferProblem(
-        operator,
-        rhs,
-        target_space,
-        source_product=source_product,
-        range_product=range_product,
-        kernel=kernel,
-        padding=1e-8,
-    )
-
-    # ### Discretize Neumann Data
-    dA = ufl.Measure("ds", domain=omega.grid, subdomain_data=omega.facet_tags)
-    t_y = -example.traction_y / example.youngs_modulus
-    traction = df.fem.Constant(
-        omega.grid,
-        (df.default_scalar_type(0.0), df.default_scalar_type(t_y)),
-    )
-    v = ufl.TestFunction(V)
-    L = ufl.inner(v, traction) * dA(ft_def["top"])
-    Lcpp = df.fem.form(L)
-    f_ext = dolfinx.fem.petsc.create_vector(Lcpp)  # type: ignore
-
-    with f_ext.localForm() as b_loc:
-        b_loc.set(0)
-    dolfinx.fem.petsc.assemble_vector(f_ext, Lcpp)
-
-    # Apply boundary conditions to the rhs
-    bcs_neumann = _create_dirichlet_bcs(bcs_op)
-    dolfinx.fem.petsc.apply_lifting(f_ext, [operator.compiled_form], bcs=[bcs_neumann])  # type: ignore
-    f_ext.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
-    dolfinx.fem.petsc.set_bc(f_ext, bcs_neumann)
-    FEXT = operator.range.make_array([f_ext])  # type: ignore
+    transfer, FEXT = discretize_transfer_problem(example, args.configuration)
 
     assert len(training_set) == len(seed_seqs_rrf)
     snapshots = transfer.range.empty()
@@ -449,28 +220,27 @@ def main(args):
             spectral_basis_sizes.append(len(basis))
 
             U_neumann = transfer.op.apply_inverse(FEXT)
-            # u_vec = transfer._u.x.petsc_vec  # type: ignore
-            # u_vec.array[:] = U_neumann.to_numpy().flatten()
-            # transfer._u.x.scatter_forward()  # type: ignore
-
-            # ### restrict full solution to target subdomain
-            # transfer._u_in.interpolate(
-            #     transfer._u, nmm_interpolation_data=transfer._interp_data
-            # )  # type: ignore
-            # transfer._u_in.x.scatter_forward()  # type: ignore
-            # U_in_neumann = transfer.range.make_array(
-            #     [transfer._u_in.x.petsc_vec.copy()]
-            # )  # type: ignore
             U_in_neumann = transfer.range.from_numpy(
-                    U_neumann.dofs(transfer._restriction))
+                U_neumann.dofs(transfer._restriction)
+            )
 
             # ### Remove kernel after restriction to target subdomain
             U_orth = orthogonal_part(
-                U_in_neumann, kernel, product=transfer.range_product, orthonormal=True
+                U_in_neumann,
+                transfer.kernel,
+                product=transfer.range_product,
+                orthonormal=True,
             )
             basis_length = len(basis)
             basis.append(U_orth)
-            gram_schmidt(basis, transfer.range_product, atol=0, rtol=0, offset=basis_length, copy=False)
+            gram_schmidt(
+                basis,
+                transfer.range_product,
+                atol=0,
+                rtol=0,
+                offset=basis_length,
+                copy=False,
+            )
 
             # debugging
             # viz = FenicsxVisualizer(transfer.range)
@@ -479,7 +249,9 @@ def main(args):
 
         snapshots.append(basis)  # type: ignore
 
-    logger.info(f"Average length of spectral basis: {np.average(spectral_basis_sizes)}.")
+    logger.info(
+        f"Average length of spectral basis: {np.average(spectral_basis_sizes)}."
+    )
     pod_modes, pod_svals = pod(
         snapshots, product=transfer.range_product, rtol=example.pod_rtol
     )  # type: ignore
