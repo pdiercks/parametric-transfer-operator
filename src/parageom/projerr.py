@@ -91,8 +91,7 @@ def main(args):
         logger.info(
             f"Average length of spectral basis: {np.average(spectral_basis_sizes)}."
         )
-        # basis = pod(snapshots, product=transfer.range_product, rtol=example.pod_rtol)[0]  # type: ignore
-        basis = pod(snapshots, product=transfer.range_product, atol=0.1)
+        basis = pod(snapshots, product=transfer.range_product, l2_err=0.05)[0]  # type: ignore
 
     elif args.method == "heuristic":
         from .heuristic import heuristic_range_finder
