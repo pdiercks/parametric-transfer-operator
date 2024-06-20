@@ -229,7 +229,9 @@ def task_gfem():
                 elif method == "heuristic":
                     deps.append(example.heuristic_modes_npy(nreal, distr, cfg))
             targets = []
-            for cell in range(example.nx * example.ny):
+            # see gfem.py, only 5 (=3+2) cells are used
+            # (+2 to facilitate transition between the 3 archetypes/configurations)
+            for cell in range(5):
                 targets.append(example.local_basis_npy(nreal, method, distr, cell))
             yield {
                     "name": method + ":" + str(nreal),
