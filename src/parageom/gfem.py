@@ -53,9 +53,6 @@ def main(args):
         )[0]
 
     global_quad_grid = StructuredQuadGrid(global_coarse_grid)
-    # Not sure how to make use of this information
-    # patches = [(0, 1), (1, 2), (2, 3), (3, 4)]
-    # patch_to_config = ["left", "inner", "inner", "right"]
     vertex_to_config = {
             0: "left",
             1: "left",
@@ -129,7 +126,6 @@ def main(args):
     psi = df.fem.Function(V, name="psi") # GFEM function, psi=phi*xi
 
     for cell in range(global_quad_grid.num_cells):
-        num_gfem_dofs = 0
         gfem = []
 
         # Get vertices of current cell and translate unit cell
@@ -186,8 +182,7 @@ def main(args):
             phi.interpolate(Phi, nmm_interpolation_data=coarse_to_unit_cell)
             phi.x.scatter_forward()
 
-            # use only 1 modes for now (debugging)
-            for mode in basis[:1]:
+            for mode in basis:
                 # Fill in values for basis
                 xi_in.x.petsc_vec.zeroEntries()
                 xi_in.x.petsc_vec.array[:] = mode
@@ -208,8 +203,8 @@ def main(args):
                 # not necessary though
 
                 gfem.append(psi.x.petsc_vec.copy())
-                num_gfem_dofs += 1
 
+            logger.info(f"Computed {len(gfem)} GFEM functions for vertex {vertex} (cell {cell}).")
             # reverse translation
             omega[config].translate(-dx_omega)
             omega_in.translate(-dx_omega_in)
@@ -217,6 +212,7 @@ def main(args):
         G = source.make_array(gfem)
         outstream = example.local_basis_npy(args.nreal, args.method, args.distribution, cell)
         np.save(outstream, G.to_numpy())
+        logger.info(f"Computed {len(gfem)} GFEM functions for cell {cell}.")
         # visualizer.visualize(G, filename=f"gfem_{cell}.xdmf")
 
         # reverse translation
