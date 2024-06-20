@@ -69,6 +69,7 @@ def main(args):
     # ### Read basis and wrap as pymor object
     logger.info(f"Computing spectral basis with method {args.method} ...")
     basis = None
+    epsilon_star = 0.1
     if args.method == "hapod":
         from .hapod import adaptive_rrf_normal
 
@@ -91,7 +92,8 @@ def main(args):
         logger.info(
             f"Average length of spectral basis: {np.average(spectral_basis_sizes)}."
         )
-        basis = pod(snapshots, product=transfer.range_product, l2_err=0.05)[0]  # type: ignore
+        epsilon = np.sqrt(len(snapshots)) * epsilon_star
+        basis = pod(snapshots, product=transfer.range_product, l2_err=epsilon)[0]  # type: ignore
 
     elif args.method == "heuristic":
         from .heuristic import heuristic_range_finder
@@ -105,6 +107,7 @@ def main(args):
                 error_tol=example.rrf_ttol,
                 failure_tolerance=example.rrf_ftol,
                 num_testvecs=example.rrf_num_testvecs,
+                l2_err=epsilon_star,
                 sampling_options={"scale": 0.1},
             )
         basis = spectral_basis
@@ -129,8 +132,8 @@ def main(args):
     #     criterion="center",
     #     random_state=example.projerr_seed,
     # )
-    test_set = parameter_space.sample_randomly(50)
 
+    test_set = parameter_space.sample_randomly(50)
     test_data = transfer.range.empty(reserve=len(test_set))
 
     logger.info(f"Computing test set of size {len(test_set)}...")
@@ -142,6 +145,7 @@ def main(args):
 
     aerrs = []
     rerrs = []
+    l2errs = []
     u_norm = test_data.norm(transfer.range_product)  # norm of each test vector
 
     logger.info("Computing projection error ...")
@@ -152,21 +156,24 @@ def main(args):
             product=transfer.range_product,
             orthonormal=orthonormal,
         )
-        err = (test_data - U_proj).norm(
-            transfer.range_product
-        )  # absolute projection error
-        if np.all(err == 0.0):
+        err = test_data - U_proj # type: ignore
+        errn = err.norm(transfer.range_product)  # absolute projection error
+        if np.all(errn == 0.0):
             # ensure to return 0 here even when the norm of U is zero
-            rel_err = err
+            rel_err = errn
         else:
-            rel_err = err / u_norm
-        aerrs.append(np.max(err))
+            rel_err = errn / u_norm
+        l2_err = np.sum((err).norm2(transfer.range_product)) / len(test_data)
+
+        aerrs.append(np.max(errn))
         rerrs.append(np.max(rel_err))
+        l2errs.append(l2_err)
 
     rerr = np.array(rerrs)
     aerr = np.array(aerrs)
+    l2err = np.array(l2errs)
     if args.output is not None:
-        np.savez(args.output, rerr=rerr, aerr=aerr)
+        np.savez(args.output, rerr=rerr, aerr=aerr, l2err=l2err)
 
 
 if __name__ == "__main__":

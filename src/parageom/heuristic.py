@@ -25,8 +25,9 @@ def heuristic_range_finder(
     error_tol: float = 1e-4,
     failure_tolerance: float = 1e-15,
     num_testvecs: int = 20,
-    lambda_min=None,
-    sampling_options=None,
+    lambda_min = None,
+    l2_err: float = 0.,
+    sampling_options = None,
 ):
     """Heuristic range approximation."""
 
@@ -63,16 +64,6 @@ def heuristic_range_finder(
             L, sigma=0, which="LM", return_eigenvectors=False, k=1, OPinv=Linv
         )[0]
 
-    # ### Compute non-parametric testlimit
-    # NOTE tp.source is the full space, while the source product
-    # is of lower dimension
-    num_source_dofs = tp.rhs.dofs.size
-    testfail = failure_tolerance / min(num_source_dofs, tp.range.dim)
-    testlimit = (
-        np.sqrt(2.0 * lambda_min) * erfinv(testfail ** (1.0 / num_testvecs)) * error_tol
-    )
-    logger.info(f"{lambda_min=}")
-    logger.info(f"{testlimit=}")
 
     logger.debug(f"Computing test set of size {len(testing_set) * num_testvecs}.")
     M = tp.range.empty()  # global test set
@@ -82,17 +73,40 @@ def heuristic_range_finder(
             count=num_testvecs, distribution=distribution, options=sampling_options
         )
         M.append(tp.solve(R))
+    ntest = len(M)
+
+    # ### Compute non-parametric testlimit
+    # NOTE tp.source is the full space, while the source product
+    # is of lower dimension
+    num_source_dofs = tp.rhs.dofs.size
+    testfail = failure_tolerance / min(num_source_dofs, tp.range.dim)
+    # use ntest instead of num_testvectors for the testlimit
+    testlimit = (
+        np.sqrt(2.0 * lambda_min) * erfinv(testfail ** (1.0 / ntest)) * error_tol
+    )
+    logger.info(f"{lambda_min=}")
+    logger.info(f"{testlimit=}")
+
+    def l2_mean(U, basis, product=None):
+        error = U - basis.lincomb(basis.inner(U, product).T)
+        norm = error.norm2(product)
+        return np.sum(norm) / len(U)
 
     # rng = get_rng()  # current RNG
     training_samples = []  # parameter values used in the training
     B = tp.range.empty()
     maxnorm = np.inf
+    l2 = np.sum(M.norm2(range_product)) / len(M)
     num_iter = 0
     ntrain = len(training_set)
     # re-use {mu_0, ..., mu_ntrain} until target tolerance is reached
     mu_j = np.hstack((np.arange(ntrain, dtype=np.int32),) * 3)
     logger.debug(f"{ntrain=}")
-    while maxnorm > testlimit:
+
+    l2_errors = [l2, ]
+    max_norms = [maxnorm, ]
+
+    while (maxnorm > testlimit) and (l2 > l2_err ** 2.):
         basis_length = len(B)
         j = mu_j[num_iter]
         mu = training_set[j]
@@ -114,9 +128,17 @@ def heuristic_range_finder(
         gram_schmidt(B, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
         M -= B.lincomb(B.inner(M, range_product).T)
         maxnorm = np.max(M.norm(range_product))
+        l2 = l2_mean(M, B, range_product)
+
+        l2_errors.append(l2)
+        max_norms.append(maxnorm)
+
         num_iter += 1
         logger.debug(f"{num_iter=}\t{maxnorm=}")
-    logger.info(f"Finished heuristic range approx. in {num_iter} iterations.")
+        logger.debug(f"{num_iter=}\t{l2=}")
+
+    reason = "maxnorm" if maxnorm < testlimit else "l2err"
+    logger.info(f"Finished heuristic range approx. in {num_iter} iterations ({reason=}).")
 
     return B, training_samples
 

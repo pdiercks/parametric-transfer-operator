@@ -28,7 +28,6 @@ from multi.domain import RectangularDomain, StructuredQuadGrid
 from multi.dofmap import DofMap
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinearElasticityProblem
-from multi.product import InnerProduct
 from multi.projection import orthogonal_part
 from multi.solver import build_nullspace
 from multi.io import read_mesh, select_modes
@@ -873,8 +872,6 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
     assert entities_gamma_out.size > 0
     rhs = DirichletLift(operator.range, operator.compiled_form, entities_gamma_out)  # type: ignore
 
-
-    # FIXME : use scaled inner product operators!!!
     def scaled_h1_0_semi(V, gdim, a=example.l_char):
         l_char = df.fem.Constant(V.mesh, df.default_scalar_type(a ** gdim))
         u = ufl.TrialFunction(V)

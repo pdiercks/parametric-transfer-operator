@@ -14,8 +14,9 @@ def main(cli):
         for method in example.methods:
             infile = example.projerr(cli.nreal, method, distr, cli.config)
             data = np.load(infile)
-            err = data["aerr"]
-            ax.semilogy(np.arange(err.size), err, label=method)
+            for key in ["aerr", "l2err"]:
+                e = data[key]
+                ax.semilogy(np.arange(e.size), e, label=":".join([method, key]))
         ax.legend(loc="best")
         ax.set_xlabel("Number of basis functions")
         ax.set_ylabel("Absolute projection error")
