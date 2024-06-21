@@ -69,12 +69,20 @@ def main(args):
     # ### Read basis and wrap as pymor object
     logger.info(f"Computing spectral basis with method {args.method} ...")
     basis = None
-    epsilon_star = 0.1
+
+    # TODO
+    # parametrize omega?
+    epsilon_star = {"heuristic": 0.1, "hapod": 0.1 / np.sqrt(10)}
+    omega = 0.5
+
     if args.method == "hapod":
         from .hapod import adaptive_rrf_normal
 
         snapshots = transfer.range.empty()
         spectral_basis_sizes = list()
+        epsilon_star = epsilon_star[args.method]
+        epsilon_alpha = np.sqrt(example.rrf_num_testvecs) * np.sqrt(1 - omega**2.) * epsilon_star
+
         for mu, seed_seq in zip(training_set, seed_seqs_rrf):
             with new_rng(seed_seq):
                 transfer.assemble_operator(mu)
@@ -84,6 +92,7 @@ def main(args):
                     error_tol=example.rrf_ttol,
                     failure_tolerance=example.rrf_ftol,
                     num_testvecs=example.rrf_num_testvecs,
+                    l2_err=epsilon_alpha,
                     sampling_options={"scale": 0.1},
                 )
                 logger.info(f"\nSpectral Basis length: {len(rb)}.")
@@ -97,6 +106,7 @@ def main(args):
 
     elif args.method == "heuristic":
         from .heuristic import heuristic_range_finder
+        epsilon_star = epsilon_star[args.method]
 
         with new_rng(seed_seqs_rrf[0]):
             spectral_basis, _ = heuristic_range_finder(

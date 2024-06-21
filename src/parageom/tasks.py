@@ -179,6 +179,8 @@ def task_projerr():
                 deps = [SRC / "projerr.py"]
                 deps.append(example.coarse_grid("global"))
                 deps.append(example.parent_domain("global"))
+                deps.append(example.coarse_grid("target"))
+                deps.append(example.parent_domain("target"))
                 deps.append(example.coarse_grid(config))
                 deps.append(example.parent_domain(config))
                 deps.append(example.parent_unit_cell)
