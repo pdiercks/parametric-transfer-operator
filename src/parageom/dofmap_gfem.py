@@ -163,6 +163,7 @@ if __name__ == "__main__":
         [ni, nr, ni, nr],
         [nr, nr, nr, nr]], dtype=np.int32)
     dofmap.distribute_dofs(dofs_per_vert)
+    breakpoint()
     assert np.isclose(dofmap.num_dofs, 4 * nl + 4 * nr + (dofmap.num_vertices-8) * ni)
     assert np.isclose(len(dofmap.entity_dofs(0)), nl)
     assert np.isclose(len(dofmap.entity_dofs(5)), ni)

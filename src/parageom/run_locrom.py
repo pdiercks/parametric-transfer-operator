@@ -1,3 +1,5 @@
+"""Build and run localized ROM."""
+
 from pathlib import Path
 
 import numpy as np
@@ -7,20 +9,18 @@ import dolfinx as df
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
 from pymor.models.basic import StationaryModel
-from pymor.tools.random import new_rng
-from pymor.operators.constructions import VectorOperator
-
-from multi.dofmap import DofMap
-from multi.io import BasesLoader
+# from pymor.tools.random import new_rng
+# from pymor.operators.constructions import VectorOperator
 
 
 def main(args):
     from .tasks import example
-    from .definitions import BeamProblem
     from .auxiliary_problem import discretize_auxiliary_problem
     from .fom import discretize_fom, discretize_subdomain_operators
-    from .ei import interpolate_subdomain_operator
-    from .locmor import reconstruct, assemble_system, assemble_system_with_ei, EISubdomainOperatorWrapper
+    # from .ei import interpolate_subdomain_operator
+    # from .locmor import reconstruct, assemble_system, assemble_system_with_ei, EISubdomainOperatorWrapper
+    from .locmor import reconstruct, assemble_gfem_system
+    from .dofmap_gfem import GFEMDofMap
 
     # ### logger
     set_defaults(
@@ -30,14 +30,14 @@ def main(args):
             )
         }
     )
-    logger = getLogger(Path(__file__).stem, level="DEBUG")
+    logger = getLogger(Path(__file__).stem, level=10)
 
     # ### Discretize global FOM
-    global_parent_domain_path = example.global_parent_domain.as_posix()
-    coarse_grid_path = example.coarse_grid("global").as_posix()
+    global_parent_domain_path = example.parent_domain("global")
+    coarse_grid_path = example.coarse_grid("global")
     # do not change interface tags; see src/parageom/preprocessing.py::create_parent_domain
     interface_tags = [i for i in range(15, 25)]
-    global_auxp = discretize_auxiliary_problem(global_parent_domain_path, example.geom_deg, interface_tags, example.parameters["global"], coarse_grid=coarse_grid_path)
+    global_auxp = discretize_auxiliary_problem(global_parent_domain_path.as_posix(), example.geom_deg, interface_tags, example.parameters["global"], coarse_grid=coarse_grid_path.as_posix())
     trafo_d_gl = df.fem.Function(global_auxp.problem.V, name="d_trafo")
     fom = discretize_fom(example, global_auxp, trafo_d_gl)
     h1_product = fom.products["h1_0_semi"]
@@ -50,34 +50,41 @@ def main(args):
     # restricted_op, _ = operator_local.restricted(magic_dofs)
     # wrapped_op = EISubdomainOperatorWrapper(restricted_op, mops, interpolation_matrix)
 
-    # ### Multiscale Problem
-    beam_problem = BeamProblem(
-        example.coarse_grid("global"), example.global_parent_domain, example
-    )
-    coarse_grid = beam_problem.coarse_grid
+    # ### Coarse grid of the global domain
+    coarse_grid = global_auxp.coarse_grid
 
     # ### DofMap
-    dofmap = DofMap(coarse_grid)
+    dofmap = GFEMDofMap(coarse_grid)
 
     # ### Reduced bases
-    bases_folder = example.bases_path(args.nreal, args.method, args.distr)
-    num_cells = example.nx * example.ny
-    bases_loader = BasesLoader(bases_folder, num_cells)
-    bases, num_max_modes = bases_loader.read_bases()
-    num_max_modes_per_cell = np.amax(num_max_modes, axis=1)
-    num_min_modes_per_cell = np.amin(num_max_modes, axis=1)
-    max_modes = np.amax(num_max_modes_per_cell)
-    min_modes = np.amin(num_min_modes_per_cell)
-    logger.info(f"Global minimum number of modes per edge is: {min_modes}.")
-    logger.info(f"Global maximum number of modes per edge is: {max_modes}.")
+    # 0: left, 1: transition, 2: inner, 3: transition, 4: right
+    archetypes = []
+    for cell in range(5):
+        archetypes.append(np.load(example.local_basis_npy(args.nreal, args.method, args.distr, cell)))
+
+    local_bases = list((archetypes[2], ) * coarse_grid.num_cells)
+    local_bases[0] = archetypes[0]
+    local_bases[1] = archetypes[1]
+    local_bases[-2] = archetypes[-2]
+    local_bases[-1] = archetypes[-1]
+    bases_length = [len(rb) for rb in local_bases]
+
+    # ### Maximum number of modes per vertex
+    max_dofs_per_vert = np.load(example.local_basis_dofs_per_vert(args.nreal, args.method, args.distr))
+    # raise to number of cells in the coarse grid
+    repetitions = [1, 1, coarse_grid.num_cells - len(archetypes) + 1, 1, 1]
+    assert np.isclose(np.sum(repetitions), coarse_grid.num_cells)
+    max_dofs_per_vert = np.repeat(max_dofs_per_vert, repetitions, axis=0)
+    assert max_dofs_per_vert.shape == (coarse_grid.num_cells, 4)
+    assert np.allclose(np.array(bases_length), np.sum(max_dofs_per_vert, axis=1))
 
     # ### ROM Assembly and Error Analysis
     # P = fom.parameters.space(example.mu_range)
     # with new_rng(example.validation_set_seed):
     #     validation_set = P.sample_randomly(args.num_test)
     validation_set = list()
-    mymu = fom.parameters.parse([0.12 * example.unit_length for _ in range(10)])
-    # mymu = fom.parameters.parse([0.2 * example.unit_length for _ in range(10)])
+    # mymu = fom.parameters.parse([0.12 * example.unit_length for _ in range(10)])
+    mymu = fom.parameters.parse([0.2 * example.unit_length for _ in range(10)])
     # mymu = fom.parameters.parse([0.28 * example.unit_length for _ in range(10)])
     validation_set.append(mymu)
 
@@ -89,7 +96,10 @@ def main(args):
     max_relerrors = []
 
     # TODO set appropriate value for number of modes
-    num_fine_scale_modes = list(range(0, max_modes + 1, 2))
+    # max_modes = 5
+    # num_modes_per_vertex = list(range(1, max_modes + 1, 2))
+    breakpoint()
+    num_modes_per_vertex = [17, 21, 32]
 
     # Conversion of rhs to NumpyVectorSpace
     # range_space = mops[0].range
@@ -97,7 +107,7 @@ def main(args):
     #     rhs.as_range_array().to_numpy()
     #     ))
 
-    for nmodes in num_fine_scale_modes:
+    for nmodes in num_modes_per_vertex:
         # operator, rhs, local_bases = assemble_system_with_ei(
         #         example, nmodes, dofmap, wrapped_op, b, bases, num_max_modes, fom.parameters
         # )
@@ -110,13 +120,21 @@ def main(args):
         for mu in validation_set:
             U_fom = fom.solve(mu)  # is this cached or computed everytime?
             fom_solutions.append(U_fom)
-            operator, rhs, local_bases = assemble_system(
-                    example, nmodes, dofmap, operator_local, rhs_local, mu, bases, num_max_modes, fom.parameters
+
+            # construct `dofs_per_vert` for current number of modes
+            dofs_per_vert = max_dofs_per_vert.copy()
+            dofs_per_vert[max_dofs_per_vert > nmodes] = nmodes
+            # distribute dofs
+            dofmap.distribute_dofs(dofs_per_vert)
+
+            operator, rhs, current_local_bases = assemble_gfem_system(
+                    dofmap, operator_local, rhs_local, mu, local_bases, dofs_per_vert, max_dofs_per_vert
                     )
             rom = StationaryModel(operator, rhs, name="locROM")
+            breakpoint()
             U_rb_ = rom.solve(mu)
 
-            reconstruct(U_rb_.to_numpy(), dofmap, local_bases, u_loc, u_rb)
+            reconstruct(U_rb_.to_numpy(), dofmap, current_local_bases, u_loc, u_rb)
             # copy seems necessary here
             # without it I get a PETSC ERROR (segmentation fault)
             U_rom = fom.solution_space.make_array([u_rb.vector.copy()])  # type: ignore
@@ -130,10 +148,9 @@ def main(args):
         max_errors.append(max_err)
         max_relerrors.append(max_err / fom_norms[np.argmax(err_norms)])
 
-        breakpoint()
-        # FIXME
-        # norm of rom solution is much smaller, although qualitatively rom solution
-        # seems to be okay
+    fom.visualize(fom_solutions, filename="ufom.xdmf")
+    fom.visualize(rom_solutions, filename="urom.xdmf")
+    breakpoint()
 
     if args.output is not None:
         np.savetxt(

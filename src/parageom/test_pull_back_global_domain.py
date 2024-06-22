@@ -54,8 +54,8 @@ def compute_reference_solution(example: BeamData, mshfile, degree, d):
         kwargs={"gdim": example.gdim},
     )
     coarse_grid = StructuredQuadGrid(grid)
-    dirichlet_left = example.get_dirichlet(coarse_grid.grid, 0)
-    dirichlet_right = example.get_dirichlet(coarse_grid.grid, 9)
+    dirichlet_left = example.get_dirichlet(coarse_grid.grid, "left")
+    dirichlet_right = example.get_dirichlet(coarse_grid.grid, "right")
     assert dirichlet_left is not None
     assert dirichlet_right is not None
 

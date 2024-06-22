@@ -29,7 +29,9 @@ def main(args):
     logger = getLogger(stem)
     # TODO
     # consider setting log level via example.log_level
-    set_log_levels({"pymor": 30, "pymor.algorithms.gram_schmidt.gram_schmidt": 30, stem: 10})
+    set_log_levels(
+        {"pymor": 30, "pymor.algorithms.gram_schmidt.gram_schmidt": 30, stem: 10}
+    )
 
     # ### Grids
 
@@ -54,19 +56,19 @@ def main(args):
 
     global_quad_grid = StructuredQuadGrid(global_coarse_grid)
     vertex_to_config = {
-            0: "left",
-            1: "left",
-            2: "left",
-            3: "left",
-            4: "inner",
-            5: "inner",
-            6: "inner",
-            7: "inner",
-            8: "right",
-            9: "right",
-            10: "right",
-            11: "right",
-            }
+        0: "left",
+        1: "left",
+        2: "left",
+        3: "left",
+        4: "inner",
+        5: "inner",
+        6: "inner",
+        7: "inner",
+        8: "right",
+        9: "right",
+        10: "right",
+        11: "right",
+    }
     left_boundary = global_quad_grid.locate_entities_boundary(0, plane_at(xmin, "x"))
     right_boundary = global_quad_grid.locate_entities_boundary(0, plane_at(xmax, "x"))
 
@@ -82,28 +84,37 @@ def main(args):
         omega[config] = RectangularDomain(domain)
 
     # target subdomain Ω_in, xmin = [0, 0, 0]
-    domain_in = read_mesh(example.target_subdomain, MPI.COMM_WORLD, kwargs={"gdim": gdim})[0]
+    domain_in = read_mesh(
+        example.target_subdomain, MPI.COMM_WORLD, kwargs={"gdim": gdim}
+    )[0]
     omega_in = RectangularDomain(domain_in)
 
     # translate Ω and Ω_in such that x=[0, 0, 0] ∈ Γ, where Γ is the interface
     # shared by the two coarse grid cells of Ω_in
     a = example.unit_length
-    omega_in.translate(np.array([[-a, 0., 0.]])) # xmin = [-a, 0, 0]
-    omega["left"].translate(np.array([[-a, 0., 0.]])) # xmin = [-a, 0, 0]
-    omega["inner"].translate(np.array([[-5*a, 0., 0.]])) # xmin = [-2a, 0, 0]
-    omega["right"].translate(np.array([[-9*a, 0., 0.]])) # xmin = [-2a, 0, 0]
+    omega_in.translate(np.array([[-a, 0.0, 0.0]]))  # xmin = [-a, 0, 0]
+    omega["left"].translate(np.array([[-a, 0.0, 0.0]]))  # xmin = [-a, 0, 0]
+    omega["inner"].translate(np.array([[-5 * a, 0.0, 0.0]]))  # xmin = [-2a, 0, 0]
+    omega["right"].translate(np.array([[-9 * a, 0.0, 0.0]]))  # xmin = [-2a, 0, 0]
 
     # unit cell grid Ω_i, xmin = [0, 0, 0]
-    unit_cell_grid = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, kwargs={"gdim": gdim})[0]
+    unit_cell_grid = read_mesh(
+        example.parent_unit_cell, MPI.COMM_WORLD, kwargs={"gdim": gdim}
+    )[0]
     unit_cell = RectangularDomain(unit_cell_grid)
 
     # ### Function spaces
     value_shape = (gdim,)
-    X = df.fem.functionspace(global_coarse_grid, ("P", 1, value_shape)) # global coarse space
-    V = df.fem.functionspace(unit_cell.grid, ("P", example.fe_deg, value_shape)) # fine space, unit cell level
-    V_in = df.fem.functionspace(omega_in.grid, V.ufl_element()) # fine space, target subdomain Ω_in
+    X = df.fem.functionspace(
+        global_coarse_grid, ("P", 1, value_shape)
+    )  # global coarse space
+    V = df.fem.functionspace(
+        unit_cell.grid, ("P", example.fe_deg, value_shape)
+    )  # fine space, unit cell level
+    V_in = df.fem.functionspace(
+        omega_in.grid, V.ufl_element()
+    )  # fine space, target subdomain Ω_in
     source = FenicsxVectorSpace(V)
-    # visualizer = FenicsxVisualizer(source)
 
     # read local bases
     distr = args.distribution
@@ -113,17 +124,22 @@ def main(args):
         if args.method == "hapod":
             bases[config] = np.load(example.hapod_modes_npy(args.nreal, distr, config))
         elif args.method == "heuristic":
-            bases[config] = np.load(example.heuristic_modes_npy(args.nreal, distr, config))
+            bases[config] = np.load(
+                example.heuristic_modes_npy(args.nreal, distr, config)
+            )
         else:
             raise NotImplementedError
         bases_length[config] = len(bases[config])
     assert len(list(bases.keys())) == 3
 
-    Phi = df.fem.Function(X, name="Phi") # coarse scale hat functions
-    phi = df.fem.Function(V, name="phi") # hat functions on the fine grid
-    xi_in = df.fem.Function(V_in, name="xi_in") # basis functions on target subdomain
-    xi = df.fem.Function(V, name="xi") # basis function on unit cell grid
-    psi = df.fem.Function(V, name="psi") # GFEM function, psi=phi*xi
+    Phi = df.fem.Function(X, name="Phi")  # coarse scale hat functions
+    phi = df.fem.Function(V, name="phi")  # hat functions on the fine grid
+    xi_in = df.fem.Function(V_in, name="xi_in")  # basis functions on target subdomain
+    xi = df.fem.Function(V, name="xi")  # basis function on unit cell grid
+    psi = df.fem.Function(V, name="psi")  # GFEM function, psi=phi*xi
+
+    # record maximum number of modes per vertex for each cell
+    max_modes_per_vertex = []
 
     for cell in range(global_quad_grid.num_cells):
         gfem = []
@@ -137,25 +153,30 @@ def main(args):
 
         # Create interpolation data after translation of the unit cell
         coarse_to_unit_cell = df.fem.create_nonmatching_meshes_interpolation_data(
-                V.mesh,
-                V.element,
-                X.mesh,
-                padding=1e-10)
+            V.mesh, V.element, X.mesh, padding=1e-10
+        )
+        # debug_phi = []
+        # if cell == 4:
+        #     debug_xi_in = []
 
 
+        modes_per_vertex = []
         for vertex in vertices:
+            count_modes_per_vertex = 0
             config = vertex_to_config[vertex]
             basis = bases[config]
 
             # Translate oversampling domain Ω
-            dx_omega = global_quad_grid.get_entity_coordinates(0, np.array([vertex], dtype=np.int32))
+            dx_omega = global_quad_grid.get_entity_coordinates(
+                0, np.array([vertex], dtype=np.int32)
+            )
             # Only translate in x-direction for this particular problem
-            dx_omega[:, 1:] = np.zeros_like(dx_omega[:, 1:]) 
+            dx_omega[:, 1:] = np.zeros_like(dx_omega[:, 1:])
             logger.debug(f"{dx_omega=}")
             if vertex in left_boundary:
                 dx_omega = np.array([[a, 0, 0]], dtype=np.float32)
             if vertex in right_boundary:
-                dx_omega = np.array([[9*a, 0, 0]], dtype=np.float32)
+                dx_omega = np.array([[4 * a, 0, 0]], dtype=np.float32)
             omega[config].translate(dx_omega)
             logger.debug(f"{config=}, \tomega.xmin={omega[config].xmin}")
 
@@ -165,58 +186,95 @@ def main(args):
 
             # Create interpolation data after translation of target subdomain
             target_to_unit_cell = df.fem.create_nonmatching_meshes_interpolation_data(
-                    V.mesh,
-                    V.element,
-                    V_in.mesh,
-                    padding=1e-10)
+                V.mesh, V.element, V_in.mesh, padding=1e-10
+            )
 
             # Fill values for hat function on coarse grid
-            Phi.x.petsc_vec.zeroEntries()
+            Phi.x.petsc_vec.zeroEntries()  # type: ignore
             for b in range(X.dofmap.index_map_bs):
                 dof = vertex * X.dofmap.index_map_bs + b
-                Phi.x.petsc_vec.array[dof] = 1.0
-            Phi.x.scatter_forward()
+                Phi.x.petsc_vec.array[dof] = 1.0  # type: ignore
+            Phi.x.scatter_forward()  # type: ignore
 
             # Interpolate hat function to unit cell grid
-            phi.x.petsc_vec.zeroEntries()
-            phi.interpolate(Phi, nmm_interpolation_data=coarse_to_unit_cell)
-            phi.x.scatter_forward()
+            phi.x.petsc_vec.zeroEntries()  # type: ignore
+            phi.interpolate(Phi, nmm_interpolation_data=coarse_to_unit_cell)  # type: ignore
+            phi.x.scatter_forward()  # type: ignore
 
+            # if cell == 4:
+            #     breakpoint()
+            #     print("check geometry again")
+            #
+            # check that phi is not zero
+            # assert np.sum(phi.x.array[::2]) > 0
+            # assert np.sum(phi.x.array[1::2]) > 0
+            # debug_phi.append(phi.x.petsc_vec.copy())
             for mode in basis:
                 # Fill in values for basis
-                xi_in.x.petsc_vec.zeroEntries()
-                xi_in.x.petsc_vec.array[:] = mode
-                xi_in.x.scatter_forward()
+                xi_in.x.petsc_vec.zeroEntries()  # type: ignore
+                xi_in.x.petsc_vec.array[:] = mode  # type: ignore
+                xi_in.x.scatter_forward()  # type: ignore
 
                 # Interpolate basis function to unit cell grid
-                xi.x.petsc_vec.zeroEntries()
-                xi.interpolate(xi_in, nmm_interpolation_data=target_to_unit_cell)
-                xi.x.scatter_forward()
+                xi.x.petsc_vec.zeroEntries()  # type: ignore
+                xi.interpolate(xi_in, nmm_interpolation_data=target_to_unit_cell)  # type: ignore
+                xi.x.scatter_forward()  # type: ignore
 
-                psi.x.petsc_vec.zeroEntries()
-                psi.x.petsc_vec.pointwiseMult(phi.x.petsc_vec, xi.x.petsc_vec)
-                psi.x.scatter_forward()
+                # if cell == 4:
+                #     debug_xi_in.append(xi.x.petsc_vec.copy())
+
+                # FIXME
+                # if vertex == 10 and cell == 4:
+                # mode[::2] is not zero, while xi.x.array[::2] is all zero
+                # mode is the full solution though ... so this can be?
+
+                psi.x.petsc_vec.zeroEntries()  # type: ignore
+                psi.x.petsc_vec.pointwiseMult(phi.x.petsc_vec, xi.x.petsc_vec)  # type: ignore
+                psi.x.scatter_forward()  # type: ignore
 
                 # TODO
                 # normalize, such that psi(node) = 1?
                 # would have to normalize each component separately
                 # not necessary though
 
-                gfem.append(psi.x.petsc_vec.copy())
+                gfem.append(psi.x.petsc_vec.copy())  # type: ignore
+                count_modes_per_vertex += 1
 
-            logger.info(f"Computed {len(gfem)} GFEM functions for vertex {vertex} (cell {cell}).")
+            modes_per_vertex.append(count_modes_per_vertex)
+            logger.info(
+                f"Computed {count_modes_per_vertex} GFEM functions for vertex {vertex} (cell {cell})."
+            )
             # reverse translation
             omega[config].translate(-dx_omega)
             omega_in.translate(-dx_omega_in)
 
-        G = source.make_array(gfem)
-        outstream = example.local_basis_npy(args.nreal, args.method, args.distribution, cell)
-        np.save(outstream, G.to_numpy())
+        assert len(modes_per_vertex) == 4
+        max_modes_per_vertex.append(modes_per_vertex)
+
         logger.info(f"Computed {len(gfem)} GFEM functions for cell {cell}.")
-        # visualizer.visualize(G, filename=f"gfem_{cell}.xdmf")
+
+        # ### Write local gfem basis for cell
+        G = source.make_array(gfem)  # type: ignore
+        outstream = example.local_basis_npy(
+            args.nreal, args.method, args.distribution, cell
+        )
+        np.save(outstream, G.to_numpy())
+
+        directory = outstream.parent
+        outstream_xdmf = outstream.with_suffix(".xdmf")
+        viz = FenicsxVisualizer(G.space)
+        viz.visualize(G, filename=outstream_xdmf.as_posix())
 
         # reverse translation
         unit_cell.translate(-dx_unit_cell)
+
+    # end of loop over cells
+    max_modes_per_verts = np.array(max_modes_per_vertex, dtype=np.int32)
+    assert max_modes_per_verts.shape == (global_quad_grid.num_cells, 4)
+    np.save(
+        example.local_basis_dofs_per_vert(args.nreal, args.method, args.distribution),
+        max_modes_per_verts,
+    )
 
 
 if __name__ == "__main__":

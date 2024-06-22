@@ -36,6 +36,7 @@ from multi.sampling import create_random_values
 from multi.utils import LogMixin
 from .definitions import BeamData
 from .matrix_based_operator import FenicsxMatrixBasedOperator
+from .dofmap_gfem import GFEMDofMap
 
 
 EISubdomainOperatorWrapper = namedtuple(
@@ -255,45 +256,29 @@ def reconstruct(
     u_global.x.scatter_forward()
 
 
-def assemble_system(
-    num_modes: int,
-    dofmap: DofMap,
+def assemble_gfem_system(
+    dofmap: GFEMDofMap,
     operator: FenicsxMatrixBasedOperator,
     b: VectorOperator,
     mu,
     bases: list[np.ndarray],
+    dofs_per_vert: np.ndarray,
+    max_dofs_per_vert: np.ndarray
 ):
     """Assembles ``operator`` and ``rhs`` for localized ROM as ``StationaryModel``.
 
     Args:
-        num_modes: Number of modes per vertex to be used.
-        dofmap: The dofmap of the global reduced space.
+        dofmap: The dofmap of the global GFEM space.
         operator: Local high fidelity operator for stiffness matrix.
         b: Local high fidelity external force vector.
         mu: Parameter value.
         bases: Local reduced basis for each subdomain.
+        dofs_per_vert: Number of active modes per vertex.
+        max_dofs_per_vert: Number of maximum modes per vertex.
 
     """
-    dofs_per_vertex = num_modes
-    dofs_per_edge = 0
-    dofs_per_face = 0
-    dofmap.distribute_dofs(dofs_per_vertex, dofs_per_edge, dofs_per_face)
-
-    # ### Definition of Dirichlet BCs
-    # This also depends on number of modes and can only be defined after
-    # distribution of dofs
-    # origin = dofmap.grid.locate_entities_boundary(0, point_at([0.0, 0.0, 0.0]))
-    # bottom_right = dofmap.grid.locate_entities_boundary(
-    #     0, point_at([example.length, 0.0, 0.0])
-    # )
-    # bc_dofs = []
-    # for vertex in origin:
-    #     bc_dofs += dofmap.entity_dofs(0, vertex)
-    # for vertex in bottom_right:
-    #     dofs = dofmap.entity_dofs(0, vertex)
-    #     bc_dofs.append(dofs[1])  # constrain uy, but not ux
-    # assert len(bc_dofs) == 3
-    # bc_dofs = np.array(bc_dofs)
+    # no need to apply bcs as basis functions should
+    # satisfy these automatically
     bc_dofs = np.array([], dtype=np.int32)
 
     lhs = defaultdict(list)
@@ -302,17 +287,31 @@ def assemble_system(
     local_bases = []
 
     def select_modes(rb, dofs_per_vertex, max_dofs_per_vertex):
-        n = max_dofs_per_vertex
-        v1 = []
-        v2 = []
-        v3 = []
-        v4 = []
-        for i in range(dofs_per_vertex):
-            v1.append(i)
-            v2.append(n+i)
-            v3.append(2*n+i)
-            v4.append(3*n+i)
-        mask = np.hstack((v1, v2, v3, v4), dtype=np.int32)
+        """Select currently active modes from basis `rb` for a single cell.
+
+        Args:
+            rb: The reduced basis.
+            dofs_per_vertex: The number of active dofs per vertex.
+            max_dofs_per_vertex: The maximum number of dofs per vertex.
+
+        """
+        assert isinstance(dofs_per_vertex, np.ndarray)
+        assert isinstance(max_dofs_per_vertex, np.ndarray)
+        assert dofs_per_vertex.shape == max_dofs_per_vertex.shape
+        num_verts = len(dofs_per_vertex)
+        assert np.isclose(num_verts, 4)
+
+        # mask: indices corresponding to selected basis functions in the
+        # full set of basis functions `rb`
+        mask = []
+        offset = 0
+        for v in range(num_verts):
+            all_vertex_dofs = np.arange(max_dofs_per_vertex[v], dtype=np.int32) + offset
+            offset += all_vertex_dofs.size
+            selected = np.arange(dofs_per_vertex[v], dtype=np.int32)
+            mask.append(all_vertex_dofs[selected])
+
+        mask = np.hstack(mask)
         return rb[mask]
 
     for ci, mu_i in zip(range(dofmap.num_cells), mu.to_numpy()):
@@ -323,16 +322,13 @@ def assemble_system(
         A = operator.assemble(loc_mu)
 
         # select active modes
-        local_basis = select_modes(bases[ci], num_modes, len(bases[ci]) // 4)
+        local_basis = select_modes(bases[ci], dofs_per_vert[ci], max_dofs_per_vert[ci])
         local_bases.append(local_basis)
         B = A.source.from_numpy(local_basis)  # type: ignore
         A_local = project(A, B, B)
         b_local = project(b, B, None)
         element_matrix = A_local.matrix  # type: ignore
         element_vector = b_local.matrix  # type: ignore
-        print(f"{ci=}")
-        print(f"{element_matrix[0, 0]=}")
-        # print(f"{element_vector=}")
 
         for l, x in enumerate(dofs):
             if x in bc_dofs:
@@ -384,15 +380,15 @@ def assemble_system(
     )
 
     # ### Add matrix to account for BCs
-    bc_array = coo_array(
-        (bc_mat["data"], (bc_mat["rows"], bc_mat["cols"])), shape=shape
-    )
-    bc_array.eliminate_zeros()
-    bc_op = NumpyMatrixOperator(
-        bc_array.tocsr(), op.source.id, op.range.id, op.solver_options, "bc_mat"
-    )
+    # bc_array = coo_array(
+    #     (bc_mat["data"], (bc_mat["rows"], bc_mat["cols"])), shape=shape
+    # )
+    # bc_array.eliminate_zeros()
+    # bc_op = NumpyMatrixOperator(
+    #     bc_array.tocsr(), op.source.id, op.range.id, op.solver_options, "bc_mat"
+    # )
 
-    lincomb = LincombOperator([op, bc_op], [1.0, 1.0])
+    # lincomb = LincombOperator([op, bc_op], [1.0, 1.0])
 
     data = np.array(rhs["data"])
     rows = np.array(rhs["rows"])
@@ -408,7 +404,7 @@ def assemble_system(
         solver_options=options,
         name="F",
     )
-    return lincomb, rhs_op, local_bases
+    return op, rhs_op, local_bases
 
 
 def assemble_system_with_ei(
