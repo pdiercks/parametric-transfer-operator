@@ -27,7 +27,7 @@ def adaptive_rrf_normal(
     failure_tolerance: float = 1e-15,
     num_testvecs: int = 20,
     lambda_min=None,
-    l2_err: float = 0.,
+    l2_err: float = 0.0,
     sampling_options=None,
 ):
     r"""Adaptive randomized range approximation of `A`.
@@ -138,10 +138,14 @@ def adaptive_rrf_normal(
     maxnorm = np.inf
     l2 = np.sum(M.norm2(range_product)) / len(M)
 
-    l2_errors = [l2, ]
-    max_norms = [maxnorm, ]
+    l2_errors = [
+        l2,
+    ]
+    max_norms = [
+        maxnorm,
+    ]
 
-    while (maxnorm > testlimit) and (l2 > l2_err ** 2.):
+    while (maxnorm > testlimit) and (l2 > l2_err**2.0):
         basis_length = len(B)
         v = tp.generate_random_boundary_data(1, distribution, options=sampling_options)
 
@@ -222,6 +226,12 @@ def main(args):
     snapshots = transfer.range.empty()
     spectral_basis_sizes = list()
 
+    epsilon_star = example.epsilon_star["hapod"]
+    omega = example.omega
+    epsilon_alpha = (
+        np.sqrt(example.rrf_num_testvecs) * np.sqrt(1.0 - omega**2.0) * epsilon_star
+    )
+
     for mu, seed_seq in zip(training_set, seed_seqs_rrf):
         with new_rng(seed_seq):
             transfer.assemble_operator(mu)
@@ -231,6 +241,7 @@ def main(args):
                 error_tol=example.rrf_ttol,
                 failure_tolerance=example.rrf_ftol,
                 num_testvecs=example.rrf_num_testvecs,
+                l2_err=epsilon_alpha,
                 sampling_options={"scale": 0.1},
             )
             logger.info(f"\nSpectral Basis length: {len(basis)}.")
@@ -265,9 +276,10 @@ def main(args):
     logger.info(
         f"Average length of spectral basis: {np.average(spectral_basis_sizes)}."
     )
+    epsilon = np.sqrt(len(snapshots)) * epsilon_star
     pod_modes, pod_svals = pod(
-        snapshots, product=transfer.range_product, rtol=example.pod_rtol
-    )  # type: ignore
+        snapshots, product=transfer.range_product, l2_err=epsilon
+    )
 
     viz = FenicsxVisualizer(pod_modes.space)
     viz.visualize(

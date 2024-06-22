@@ -8,6 +8,7 @@ from pymor.bindings.fenicsx import (
     FenicsxVisualizer
 )
 from pymor.algorithms.gram_schmidt import gram_schmidt
+from pymor.algorithms.pod import pod
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
 from pymor.operators.interface import Operator
@@ -214,6 +215,7 @@ def main(args):
 
     # ### Heuristic range approximation
     logger.debug(f"{seed_seqs_rrf[0]=}")
+    epsilon_star = example.epsilon_star["heuristic"]
     with new_rng(seed_seqs_rrf[0]):
         spectral_basis, training_samples = heuristic_range_finder(
             logger,
@@ -223,6 +225,7 @@ def main(args):
             error_tol=example.rrf_ttol,
             failure_tolerance=example.rrf_ftol,
             num_testvecs=example.rrf_num_testvecs,
+            l2_err=epsilon_star,
             sampling_options={"scale":0.1},
         )
 
@@ -240,9 +243,13 @@ def main(args):
         )
         neumann_snapshots.append(U_orth)
 
-    logger.info("Extending spectral basis by Neumann snapshots via GS ...")
+    with logger.block("Computing POD of Neumann snapshots ..."):
+        eps = np.sqrt(len(neumann_snapshots)) * epsilon_star
+        neumann_modes = pod(neumann_snapshots, product=transfer.range_product, l2_err=eps)[0]
+
+    logger.info("Extending spectral basis by Neumann modes via GS ...")
     basis_length = len(spectral_basis)
-    spectral_basis.append(neumann_snapshots)
+    spectral_basis.append(neumann_modes)
     gram_schmidt(
         spectral_basis,
         product=transfer.range_product,
@@ -252,7 +259,7 @@ def main(args):
     )
 
     logger.info(f"Spectral basis size: {basis_length}.")
-    logger.info(f"Neumann snapshots: {len(neumann_snapshots)}")
+    logger.info(f"Neumann modes/snapshots: {len(neumann_modes)}/{len(neumann_snapshots)}")
     logger.info(f"Final basis length: {len(spectral_basis)}.")
 
     viz = FenicsxVisualizer(spectral_basis.space)

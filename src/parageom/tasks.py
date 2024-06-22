@@ -235,6 +235,7 @@ def task_gfem():
             # (+2 to facilitate transition between the 3 archetypes/configurations)
             for cell in range(5):
                 targets.append(example.local_basis_npy(nreal, method, distr, cell))
+            targets.append(example.local_basis_dofs_per_vert(nreal, method, distr))
             yield {
                     "name": method + ":" + str(nreal),
                     "file_dep": deps,

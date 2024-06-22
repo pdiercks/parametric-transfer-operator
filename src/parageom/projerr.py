@@ -72,8 +72,8 @@ def main(args):
 
     # TODO
     # parametrize omega?
-    epsilon_star = {"heuristic": 0.1, "hapod": 0.1 / np.sqrt(10)}
-    omega = 0.5
+    epsilon_star = example.epsilon_star
+    omega = example.omega
 
     if args.method == "hapod":
         from .hapod import adaptive_rrf_normal

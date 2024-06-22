@@ -76,6 +76,12 @@ class BeamData:
     configurations: tuple[str, str, str] = ("left", "inner", "right")
     distributions: tuple[str, ...] = ("normal",)
     methods: tuple[str, ...] = ("hapod", "heuristic")
+    epsilon_star: dict = field(
+            default_factory=lambda: {
+                "heuristic": 0.1,
+                "hapod": 0.1 / np.sqrt(10),
+                })
+    omega: float = 0.5
     rrf_ttol: float = 10e-2
     rrf_ftol: float = 1e-10
     rrf_num_testvecs: int = 20
@@ -230,6 +236,10 @@ class BeamData:
         """final basis for loc rom assembly"""
         dir = self.bases_path(nr, name, distr)
         return dir / f"basis_{cell:02}.npy"
+
+    def local_basis_dofs_per_vert(self, nr: int, method: str, distr: str) -> Path:
+        dir = self.bases_path(nr, method, distr)
+        return dir / "dofs_per_vert.npy"
 
     # def loc_rom_error(self, distr: str, name: str) -> Path:
     #     """loc ROM error relative to FOM"""
