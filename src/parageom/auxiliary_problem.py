@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Union, Optional
+from typing import Union, Optional, Callable
 import numpy as np
 
 from mpi4py import MPI
@@ -8,6 +8,7 @@ from dolfinx.io import gmshio
 from basix.ufl import element
 
 from multi.io import read_mesh
+from multi.boundary import plane_at
 from multi.domain import RectangularDomain, StructuredQuadGrid
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinearElasticityProblem
@@ -18,13 +19,15 @@ from pymor.parameters.base import Mu, Parameters
 class GlobalAuxiliaryProblem:
     """Represents auxiliary problem on global parent domain."""
 
-    def __init__(self, problem: LinearElasticityProblem, interface_tags: list[int], parameters: dict[str, int], coarse_grid: StructuredQuadGrid):
+    def __init__(self, problem: LinearElasticityProblem, interface_tags: list[int], parameters: dict[str, int], coarse_grid: StructuredQuadGrid, interface_locators: list[Callable]):
         """Initializes the auxiliary problem.
 
         Args:
             problem: A linear elastic problem.
-            interface_tags: The facet tags for each subdomain interface.
+            interface_tags: The facet tags for each interior subdomain interface.
             parameters: Dictionary mapping parameter names to parameter dimensions.
+            coarse_grid: The coarse grid discretization of the global domain.
+            interface_locators: Functions to locate the interfaces between unit cells.
 
         """
 
@@ -32,7 +35,7 @@ class GlobalAuxiliaryProblem:
         self.interface_tags = interface_tags
         self.parameters = Parameters(parameters)
         self.coarse_grid = coarse_grid
-        self._init_boundary_dofs(interface_tags)
+        self._init_boundary_dofs(interface_tags, interface_locators)
         self._discretize_lhs()
         # function used to define Dirichlet data on the interface
         self._d = df.fem.Function(problem.V)  # d = X^μ - X^p
@@ -48,7 +51,7 @@ class GlobalAuxiliaryProblem:
         bc_zero = df.fem.dirichletbc(u_zero, self._boundary_dofs, p.V)
         p.assemble_matrix(bcs=[bc_zero])
 
-    def _init_boundary_dofs(self, interface_tags: list[int]):
+    def _init_boundary_dofs(self, interface_tags: list[int], interface_locators: list[Callable]):
         """Initializes dofs on ∂Ω and ∂Ω_int"""
 
         omega = self.problem.domain
@@ -59,7 +62,7 @@ class GlobalAuxiliaryProblem:
         alldofs = []
         interface_dofs = {}
 
-        # first determine dofs for each interface
+        # first determine dofs for each interface ∂Ω_int
         for k, tag in enumerate(interface_tags):
             dofs = df.fem.locate_dofs_topological(V, fdim, omega.facet_tags.find(tag))
             interface_dofs[k] = dofs
@@ -69,6 +72,14 @@ class GlobalAuxiliaryProblem:
         for boundary in omega.boundaries:
             boundary_locator = omega.str_to_marker(boundary)
             dofs = df.fem.locate_dofs_geometrical(V, boundary_locator)
+            alldofs.append(dofs)
+
+        # TODO
+        # add interfaces between unit cells to _boundary_dofs
+        # this way the transformation displacement add these interfaces
+        # can be constrained to be zero
+        for locator in interface_locators:
+            dofs = df.fem.locate_dofs_geometrical(V, locator)
             alldofs.append(dofs)
 
         self._boundary_dofs = np.unique(np.hstack(alldofs)) # union of dofs on ∂Ω and ∂Ω_int
@@ -122,6 +133,7 @@ class GlobalAuxiliaryProblem:
         # update parametric mapping
         mu_values = mu.to_numpy()
         g = self._d
+        g.x.petsc_vec.zeroEntries()
         for k, mu_i in enumerate(mu_values):
             dofs_interface = self._dofs_interface_blocked[k]
             g.x.array[dofs_interface] = self.compute_interface_coord(k, mu_i)
@@ -268,7 +280,11 @@ def discretize_auxiliary_problem(fine_grid: str, degree: int, facet_tags: Union[
         assert coarse_grid is not None
         grid, _, _ = read_mesh(Path(coarse_grid), MPI.COMM_SELF, kwargs={"gdim":gdim})
         sgrid = StructuredQuadGrid(grid)
-        aux = GlobalAuxiliaryProblem(problem, facet_tags, param, sgrid)
+        interface_locators = []
+        for x_coord in range(1, 10):
+            x_coord = float(x_coord)
+            interface_locators.append(plane_at(x_coord, "x"))
+        aux = GlobalAuxiliaryProblem(problem, facet_tags, param, sgrid, interface_locators=interface_locators)
     return aux
 
 

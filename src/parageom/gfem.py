@@ -10,6 +10,7 @@ from multi.preprocessing import create_rectangle
 from multi.io import read_mesh
 from multi.domain import StructuredQuadGrid, RectangularDomain
 from multi.boundary import plane_at
+from multi.interpolation import interpolate
 
 from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxVisualizer
 from pymor.core.logger import getLogger, set_log_levels
@@ -166,6 +167,8 @@ def main(args):
             config = vertex_to_config[vertex]
             basis = bases[config]
 
+            x_vertex = global_quad_grid.get_entity_coordinates(0, np.array([vertex], dtype=np.int32))
+
             # Translate oversampling domain Ω
             dx_omega = global_quad_grid.get_entity_coordinates(
                 0, np.array([vertex], dtype=np.int32)
@@ -232,10 +235,25 @@ def main(args):
                 psi.x.petsc_vec.pointwiseMult(phi.x.petsc_vec, xi.x.petsc_vec)  # type: ignore
                 psi.x.scatter_forward()  # type: ignore
 
-                # TODO
+                # TODO ???
                 # normalize, such that psi(node) = 1?
                 # would have to normalize each component separately
                 # not necessary though
+                # not sure how this works for the dirichlet boundaries when psi(node)=0
+
+                # nodal_value = interpolate(psi, x_vertex, padding=1e-9)
+                # if nodal_value.size == 0:
+                #     breakpoint()
+                # if not np.isclose(nodal_value[0], 0.0):
+                #     psi.x.array[::2] *= 1. / nodal_value[0]
+                # if not np.isclose(nodal_value[1], 0.0):
+                #     psi.x.array[1::2] *= 1. / nodal_value[1]
+                #
+                # psi.x.scatter_forward()
+                #
+                # if not np.allclose(nodal_value, np.zeros_like(nodal_value)):
+                #     other = interpolate(psi, x_vertex)
+                #     np.allclose(other, np.ones_like(other))
 
                 gfem.append(psi.x.petsc_vec.copy())  # type: ignore
                 count_modes_per_vertex += 1

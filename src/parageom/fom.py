@@ -114,10 +114,12 @@ def discretize_subdomain_operators(example):
     EMOD = example.youngs_modulus
     POISSON = example.poisson_ratio
     omega = aux.problem.domain
-    problem = ParaGeomLinEla(omega, aux.problem.V, E=1.0, NU=POISSON, d=d)
+    # problem = ParaGeomLinEla(omega, aux.problem.V, E=1.0, NU=POISSON, d=d)
+    problem = ParaGeomLinEla(omega, aux.problem.V, E=EMOD, NU=POISSON, d=d)
 
     # ### wrap stiffness matrix as pymor operator
     def param_setter(mu):
+        print(f"---- SOLVING AUXILIARY PROBLEM ---- {mu=}")
         d.x.array[:] = 0.0
         aux.solve(d, mu)
         d.x.scatter_forward()
@@ -128,7 +130,8 @@ def discretize_subdomain_operators(example):
     )
 
     # ### wrap external force as pymor operator
-    TY = -example.traction_y / EMOD
+    # TY = -example.traction_y / EMOD
+    TY = -example.traction_y * 100.
     traction = df.fem.Constant(
         omega.grid, (df.default_scalar_type(0.0), df.default_scalar_type(TY))
     )

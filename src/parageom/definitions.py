@@ -204,6 +204,10 @@ class BeamData:
             case _:
                 return "quad"
 
+    def archetype_to_cell(self, atype: int) -> int:
+        atc = {0: 0, 1: 1, 2: 4, 3: 8, 4: 9}
+        return atc[atype]
+
     def config_to_cell(self, config: str) -> int:
         """Maps config to global cell index."""
         map = {"inner": 4, "left": 0, "right": 9}

@@ -30,7 +30,7 @@ from multi.materials import LinearElasticMaterial
 from multi.problems import LinearElasticityProblem
 from multi.projection import orthogonal_part
 from multi.solver import build_nullspace
-from multi.io import read_mesh, select_modes
+from multi.io import read_mesh#, select_modes
 from multi.interpolation import make_mapping
 from multi.sampling import create_random_values
 from multi.utils import LogMixin
@@ -250,10 +250,10 @@ def reconstruct(
         # fill global field via dof mapping
         V_to_Vsub = make_mapping(Vsub, V)
         u_global_view[V_to_Vsub] = U_rb[0, dofs] @ basis
+        u_global.x.scatter_forward()
 
         # move subdomain mesh to origin
         x_submesh -= dx_cell
-    u_global.x.scatter_forward()
 
 
 def assemble_gfem_system(
@@ -277,6 +277,7 @@ def assemble_gfem_system(
         max_dofs_per_vert: Number of maximum modes per vertex.
 
     """
+    from .dofmap_gfem import select_modes
     # no need to apply bcs as basis functions should
     # satisfy these automatically
     bc_dofs = np.array([], dtype=np.int32)
@@ -285,34 +286,6 @@ def assemble_gfem_system(
     rhs = defaultdict(list)
     bc_mat = defaultdict(list)
     local_bases = []
-
-    def select_modes(rb, dofs_per_vertex, max_dofs_per_vertex):
-        """Select currently active modes from basis `rb` for a single cell.
-
-        Args:
-            rb: The reduced basis.
-            dofs_per_vertex: The number of active dofs per vertex.
-            max_dofs_per_vertex: The maximum number of dofs per vertex.
-
-        """
-        assert isinstance(dofs_per_vertex, np.ndarray)
-        assert isinstance(max_dofs_per_vertex, np.ndarray)
-        assert dofs_per_vertex.shape == max_dofs_per_vertex.shape
-        num_verts = len(dofs_per_vertex)
-        assert np.isclose(num_verts, 4)
-
-        # mask: indices corresponding to selected basis functions in the
-        # full set of basis functions `rb`
-        mask = []
-        offset = 0
-        for v in range(num_verts):
-            all_vertex_dofs = np.arange(max_dofs_per_vertex[v], dtype=np.int32) + offset
-            offset += all_vertex_dofs.size
-            selected = np.arange(dofs_per_vertex[v], dtype=np.int32)
-            mask.append(all_vertex_dofs[selected])
-
-        mask = np.hstack(mask)
-        return rb[mask]
 
     for ci, mu_i in zip(range(dofmap.num_cells), mu.to_numpy()):
         dofs = dofmap.cell_dofs(ci)
@@ -329,6 +302,7 @@ def assemble_gfem_system(
         b_local = project(b, B, None)
         element_matrix = A_local.matrix  # type: ignore
         element_vector = b_local.matrix  # type: ignore
+        breakpoint()
 
         for l, x in enumerate(dofs):
             if x in bc_dofs:

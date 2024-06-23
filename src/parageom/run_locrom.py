@@ -11,6 +11,8 @@ from pymor.core.logger import getLogger
 from pymor.models.basic import StationaryModel
 # from pymor.tools.random import new_rng
 # from pymor.operators.constructions import VectorOperator
+from scipy.sparse import csr_array
+from multi.boundary import plane_at
 
 
 def main(args):
@@ -42,8 +44,33 @@ def main(args):
     fom = discretize_fom(example, global_auxp, trafo_d_gl)
     h1_product = fom.products["h1_0_semi"]
 
+    # mu_test = fom.parameters.parse([0.15 * example.unit_length for _ in range(10)])
+    # U = fom.solve(mu_test)
+    #
+    # D = fom.solution_space.make_array([trafo_d_gl.x.petsc_vec.copy()])
+    # fom.visualize(D, filename="fom_trafo.xdmf")
+
+    # 23.06.24
+    # There is a mismatch between the transformation displacement for the single unit cell
+    # and a single unit cell in the global FOM.
+    # Therefore, there is also a mismatch in the stiffness.
+
     # ### Discretize subdomain operators
     operator_local, rhs_local = discretize_subdomain_operators(example)
+
+    # ### Debugging subdomain operator
+    # mu_bar = operator_local.parameters.parse([0.2])
+    # mu_1 = operator_local.parameters.parse([0.1])
+    #
+    # def assemble_csr(mu):
+    #     K = operator_local.assemble(mu=mu)
+    #     return csr_array(K.matrix.getValuesCSR()[::-1])
+    #
+    # K = assemble_csr(mu_bar)
+    # M = assemble_csr(mu_1)
+    # if not np.allclose(K.todense(), M.todense()):
+    #     print("yes, this is correct")
+
 
     # ### EI of subdomain operator
     # mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local)
@@ -61,6 +88,10 @@ def main(args):
     archetypes = []
     for cell in range(5):
         archetypes.append(np.load(example.local_basis_npy(args.nreal, args.method, args.distr, cell)))
+
+    # SCALING ???
+    # for i in range(5):
+    #     archetypes[i] = archetypes[i] * 100.
 
     local_bases = list((archetypes[2], ) * coarse_grid.num_cells)
     local_bases[0] = archetypes[0]
@@ -99,7 +130,8 @@ def main(args):
     # max_modes = 5
     # num_modes_per_vertex = list(range(1, max_modes + 1, 2))
     breakpoint()
-    num_modes_per_vertex = [17, 21, 32]
+    # num_modes_per_vertex = [2, 17, 21, 32]
+    num_modes_per_vertex = [32,]
 
     # Conversion of rhs to NumpyVectorSpace
     # range_space = mops[0].range
@@ -131,13 +163,15 @@ def main(args):
                     dofmap, operator_local, rhs_local, mu, local_bases, dofs_per_vert, max_dofs_per_vert
                     )
             rom = StationaryModel(operator, rhs, name="locROM")
+            # manual = same as U_rb_ below
+            # A = rom.operator.assemble(mu=None)
+            # b = rom.rhs.as_range_array(mu=None)
+            # u_rb = A.apply_inverse(b)
             breakpoint()
             U_rb_ = rom.solve(mu)
 
             reconstruct(U_rb_.to_numpy(), dofmap, current_local_bases, u_loc, u_rb)
-            # copy seems necessary here
-            # without it I get a PETSC ERROR (segmentation fault)
-            U_rom = fom.solution_space.make_array([u_rb.vector.copy()])  # type: ignore
+            U_rom = fom.solution_space.make_array([u_rb.x.petsc_vec.copy()])  # type: ignore
             rom_solutions.append(U_rom)
 
         err = fom_solutions - rom_solutions

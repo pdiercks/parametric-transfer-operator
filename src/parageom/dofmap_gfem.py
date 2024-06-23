@@ -92,6 +92,36 @@ class GFEMDofMap(object):
         return cell_dofs
 
 
+def select_modes(rb, dofs_per_vertex, max_dofs_per_vertex):
+    """Select currently active modes from basis `rb` for a single cell.
+
+    Args:
+        rb: The reduced basis.
+        dofs_per_vertex: The number of active dofs per vertex.
+        max_dofs_per_vertex: The maximum number of dofs per vertex.
+
+    """
+    assert isinstance(dofs_per_vertex, np.ndarray)
+    assert isinstance(max_dofs_per_vertex, np.ndarray)
+    assert dofs_per_vertex.shape == max_dofs_per_vertex.shape
+    num_verts = len(dofs_per_vertex)
+    assert np.isclose(num_verts, 4)
+
+    # mask: indices corresponding to selected basis functions in the
+    # full set of basis functions `rb`
+    mask = []
+    offset = 0
+    for v in range(num_verts):
+        all_vertex_dofs = np.arange(max_dofs_per_vertex[v], dtype=np.int32) + offset
+        offset += all_vertex_dofs.size
+        selected = np.arange(dofs_per_vertex[v], dtype=np.int32)
+        mask.append(all_vertex_dofs[selected])
+
+    mask = np.hstack(mask)
+    breakpoint()
+    return rb[mask]
+
+
 def parageom_dof_distribution_factory(n: int, nmax: dict[str, int]) -> npt.NDArray[np.int32]:
     """Return number of DOFs per vertex.
 
@@ -163,14 +193,26 @@ if __name__ == "__main__":
         [ni, nr, ni, nr],
         [nr, nr, nr, nr]], dtype=np.int32)
     dofmap.distribute_dofs(dofs_per_vert)
-    breakpoint()
     assert np.isclose(dofmap.num_dofs, 4 * nl + 4 * nr + (dofmap.num_vertices-8) * ni)
     assert np.isclose(len(dofmap.entity_dofs(0)), nl)
     assert np.isclose(len(dofmap.entity_dofs(5)), ni)
 
+    max_dofs_per_vert = parageom_dof_distribution_factory(5, {'left': 3, 'inner': 5, 'right': 4})
+    active_dofs = parageom_dof_distribution_factory(2, {'left': 3, 'inner': 5, 'right': 4})
+    dofmap.distribute_dofs(active_dofs)
 
-    dd = parageom_dof_distribution_factory(5, {'left': 3, 'inner': 5, 'right': 4})
-    assert np.allclose(dofs_per_vert, dd)
+    modes_cell_1 = max_dofs_per_vert[1]
+    basis_1 = np.repeat(np.array([
+        [1, 1, 1, 1],
+        [2, 2, 2, 2],
+        [3, 3, 3, 3],
+        [4, 4, 4, 4]]), repeats=[3, 5, 3, 5], axis=0)
+    selection = select_modes(basis_1, active_dofs[1], max_dofs_per_vert[1])
+    assert np.allclose(np.repeat(np.array([
+        [1, 1, 1, 1],
+        [2, 2, 2, 2],
+        [3, 3, 3, 3],
+        [4, 4, 4, 4]]), repeats=[2, 2, 2, 2], axis=0), selection)
 
     dofs_per_vert = 3
     dd = parageom_dof_distribution_factory(dofs_per_vert, {'left': 3, 'inner': 5, 'right': 4})
