@@ -23,7 +23,7 @@ from pymor.vectorarrays.interface import VectorArray
 from pymor.vectorarrays.numpy import NumpyVectorSpace
 from pymor.parameters.base import Parameters
 
-from multi.boundary import point_at
+from multi.boundary import point_at, plane_at
 from multi.domain import RectangularDomain, StructuredQuadGrid
 from multi.dofmap import DofMap
 from multi.materials import LinearElasticMaterial
@@ -684,13 +684,13 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
 
     Args:
         example: Example data class.
+        configuration: The configuration/archetype.
     """
 
     from .fom import ParaGeomLinEla
     from .auxiliary_problem import GlobalAuxiliaryProblem
     from .matrix_based_operator import FenicsxMatrixBasedOperator, BCGeom, BCTopo, _create_dirichlet_bcs
 
-    # TODO: logger?
     global_coarse_domain, _, _ = read_mesh(example.coarse_grid("global"), MPI.COMM_WORLD,
                                            kwargs={"gdim": example.gdim})
     global_coarse_grid = StructuredQuadGrid(global_coarse_domain)
@@ -702,6 +702,15 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
         kwargs={"gdim": example.gdim},
     )
     coarse_grid = StructuredQuadGrid(coarse_domain)
+
+    # locate interfaces for definition of auxiliary problem
+    cell_vertices = coarse_grid.get_entities(0, 0)
+    x_vertices = coarse_grid.get_entity_coordinates(0, cell_vertices)
+    x_min = x_vertices[0][0]
+    interface_locators = []
+    for i in range(1, coarse_grid.num_cells):
+        x_coord = float(x_min + i)
+        interface_locators.append(plane_at(x_coord, "x"))
 
     # ### Fine scale grid of the oversampling domain Ω
     domain, ct, ft = read_mesh(
@@ -812,7 +821,7 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
     mat = LinearElasticMaterial(example.gdim, E=emod, NU=nu)
     problem = LinearElasticityProblem(omega, V, phases=mat)
     auxiliary_problem = GlobalAuxiliaryProblem(
-        problem, aux_tags, example.parameters[configuration], coarse_grid
+        problem, aux_tags, example.parameters[configuration], coarse_grid, interface_locators=interface_locators
     )
     d_trafo = df.fem.Function(V, name="d_trafo")
 
@@ -842,34 +851,32 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
     assert entities_gamma_out.size > 0
     rhs = DirichletLift(operator.range, operator.compiled_form, entities_gamma_out)  # type: ignore
 
-    def scaled_h1_0_semi(V, gdim, a=example.l_char):
-        l_char = df.fem.Constant(V.mesh, df.default_scalar_type(a ** gdim))
+    def h1_0_semi(V, gdim):
         u = ufl.TrialFunction(V)
         v = ufl.TestFunction(V)
-        return l_char * ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx # type: ignore
+        return ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx # type: ignore
 
-    def scaled_l2(V, gdim, a=example.l_char):
-        l_char = df.fem.Constant(V.mesh, df.default_scalar_type(a ** gdim))
+    def l2(V, gdim):
         u = ufl.TrialFunction(V)
         v = ufl.TestFunction(V)
-        return l_char * ufl.inner(u, v) * ufl.dx # type: ignore
+        return ufl.inner(u, v) * ufl.dx # type: ignore
 
     # ### Range product operator
-    h1_cpp = df.fem.form(scaled_h1_0_semi(V_in, example.gdim))
+    h1_cpp = df.fem.form(h1_0_semi(V_in, example.gdim))
     pmat_range = dolfinx.fem.petsc.create_matrix(h1_cpp)
     pmat_range.zeroEntries()
     dolfinx.fem.petsc.assemble_matrix(pmat_range, h1_cpp, bcs=bcs_range_product)
     pmat_range.assemble()
-    range_product = FenicsxMatrixOperator(pmat_range, V_in, V_in, name="scaled_h1_0_semi")
+    range_product = FenicsxMatrixOperator(pmat_range, V_in, V_in, name="h1_0_semi")
 
     # ### Source product operator
-    l2_cpp = df.fem.form(scaled_l2(V, example.gdim))
+    l2_cpp = df.fem.form(l2(V, example.gdim))
     pmat_source = dolfinx.fem.petsc.create_matrix(l2_cpp)
     pmat_source.zeroEntries()
     dolfinx.fem.petsc.assemble_matrix(pmat_source, l2_cpp, bcs=[])
     pmat_source.assemble()
     source_mat = csr_array(pmat_source.getValuesCSR()[::-1])  # type: ignore
-    source_product = NumpyMatrixOperator(source_mat[rhs.dofs, :][:, rhs.dofs], name="scaled_l2")
+    source_product = NumpyMatrixOperator(source_mat[rhs.dofs, :][:, rhs.dofs], name="l2")
 
     # ### Rigid body modes
     kernel_set = example.get_kernel_set(global_cell_index)
@@ -922,6 +929,6 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
 
 if __name__ == "__main__":
     from .tasks import example
-    discretize_transfer_problem(example, "left")
+    # discretize_transfer_problem(example, "left")
     # discretize_transfer_problem(example, "right")
-    # discretize_transfer_problem(example, "inner")
+    discretize_transfer_problem(example, "inner")

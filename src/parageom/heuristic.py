@@ -215,14 +215,14 @@ def main(args):
 
     # ### Heuristic range approximation
     logger.debug(f"{seed_seqs_rrf[0]=}")
-    epsilon_star = example.epsilon_star["heuristic"]
+    epsilon_star = example.epsilon_star["heuristic"] / example.l_char
     with new_rng(seed_seqs_rrf[0]):
         spectral_basis, training_samples = heuristic_range_finder(
             logger,
             transfer,
             training_set,
             testing_set,
-            error_tol=example.rrf_ttol,
+            error_tol=example.rrf_ttol / example.l_char,
             failure_tolerance=example.rrf_ftol,
             num_testvecs=example.rrf_num_testvecs,
             l2_err=epsilon_star,

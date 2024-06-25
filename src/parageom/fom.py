@@ -243,24 +243,24 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
     product_l2 = "l2"
     l2_product = FenicsxMatrixOperator(product_mat, V, V, name=product_l2)
 
-    u = ufl.TrialFunction(V)
-    v = ufl.TestFunction(V)
-    l_char = df.fem.Constant(V.mesh, df.default_scalar_type(100. ** 2))
-    scaled_h1_0_semi = l_char * ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx
-    a_cpp = df.fem.form(scaled_h1_0_semi)
-    A = dolfinx.fem.petsc.create_matrix(a_cpp)
-    A.zeroEntries()
-    dolfinx.fem.petsc.assemble_matrix(A, a_cpp, bcs=bcs)
-    A.assemble()
-    scaled_h1_product = FenicsxMatrixOperator(A, V, V, name="scaled_h1_0_semi")
+    # u = ufl.TrialFunction(V)
+    # v = ufl.TestFunction(V)
+    # l_char = df.fem.Constant(V.mesh, df.default_scalar_type(100. ** 2))
+    # scaled_h1_0_semi = l_char * ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx
+    # a_cpp = df.fem.form(scaled_h1_0_semi)
+    # A = dolfinx.fem.petsc.create_matrix(a_cpp)
+    # A.zeroEntries()
+    # dolfinx.fem.petsc.assemble_matrix(A, a_cpp, bcs=bcs)
+    # A.assemble()
+    # scaled_h1_product = FenicsxMatrixOperator(A, V, V, name="scaled_h1_0_semi")
 
-    scaled_l2 = l_char * ufl.inner(u, v) * ufl.dx
-    l2_cpp = df.fem.form(scaled_l2)
-    P = dolfinx.fem.petsc.create_matrix(l2_cpp)
-    P.zeroEntries()
-    dolfinx.fem.petsc.assemble_matrix(P, l2_cpp, bcs=bcs)
-    P.assemble()
-    scaled_l2_product = FenicsxMatrixOperator(P, V, V, name="scaled_l2")
+    # scaled_l2 = l_char * ufl.inner(u, v) * ufl.dx
+    # l2_cpp = df.fem.form(scaled_l2)
+    # P = dolfinx.fem.petsc.create_matrix(l2_cpp)
+    # P.zeroEntries()
+    # dolfinx.fem.petsc.assemble_matrix(P, l2_cpp, bcs=bcs)
+    # P.assemble()
+    # scaled_l2_product = FenicsxMatrixOperator(P, V, V, name="scaled_l2")
 
     # ### Visualizer
     viz = FenicsxVisualizer(FenicsxVectorSpace(V))
@@ -271,7 +271,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
     fom = StationaryModel(
         operator,
         rhs,
-        products={product_name: h1_product, product_l2: l2_product, "scaled_h1_0_semi": scaled_h1_product, "scaled_l2": scaled_l2_product},
+        products={product_name: h1_product, product_l2: l2_product},
         visualizer=viz,
         name="FOM",
     )
@@ -305,23 +305,16 @@ if __name__ == "__main__":
     U = fom.solve(mu) # dimensionless solution U, real displacement D=l_char * U
     # with characteristic length l_char = 100. mm (unit length)
 
-    Unorm = U.norm(fom.scaled_h1_0_semi_product)
-    Unorm_l2 = U.norm(fom.scaled_l2_product)
-
     D = U.copy()
     l_char = 100.
     D.scal(l_char)
-    Dnorm = D.norm(fom.h1_0_semi_product)
-    Dnorm_l2 = D.norm(fom.l2_product)
 
     # check norm of displacement field
     assert np.isclose(D.norm(), U.norm() * l_char)
-    assert np.isclose(Dnorm, Unorm)
-    assert np.isclose(Dnorm_l2, Unorm_l2)
+    assert np.isclose(D.norm(fom.h1_0_semi_product), U.norm(fom.h1_0_semi_product) * l_char)
 
     # check load
     total_load = np.sum(fom.rhs.as_range_array().to_numpy())  # type: ignore
     assert np.isclose(total_load, -example.traction_y / example.youngs_modulus * 10)
 
     fom.visualize(U, filename="fom_mu_bar.xdmf")
-    breakpoint()

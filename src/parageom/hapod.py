@@ -226,7 +226,7 @@ def main(args):
     snapshots = transfer.range.empty()
     spectral_basis_sizes = list()
 
-    epsilon_star = example.epsilon_star["hapod"]
+    epsilon_star = example.epsilon_star["hapod"] / example.l_char
     omega = example.omega
     epsilon_alpha = (
         np.sqrt(example.rrf_num_testvecs) * np.sqrt(1.0 - omega**2.0) * epsilon_star
@@ -238,7 +238,7 @@ def main(args):
             basis = adaptive_rrf_normal(
                 logger,
                 transfer,
-                error_tol=example.rrf_ttol,
+                error_tol=example.rrf_ttol / example.l_char,
                 failure_tolerance=example.rrf_ftol,
                 num_testvecs=example.rrf_num_testvecs,
                 l2_err=epsilon_alpha,

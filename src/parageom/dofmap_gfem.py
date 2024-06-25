@@ -118,7 +118,6 @@ def select_modes(rb, dofs_per_vertex, max_dofs_per_vertex):
         mask.append(all_vertex_dofs[selected])
 
     mask = np.hstack(mask)
-    breakpoint()
     return rb[mask]
 
 

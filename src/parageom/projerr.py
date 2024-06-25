@@ -80,7 +80,7 @@ def main(args):
 
         snapshots = transfer.range.empty()
         spectral_basis_sizes = list()
-        epsilon_star = epsilon_star[args.method]
+        epsilon_star = epsilon_star[args.method] / example.l_char
         epsilon_alpha = np.sqrt(example.rrf_num_testvecs) * np.sqrt(1 - omega**2.) * epsilon_star
 
         for mu, seed_seq in zip(training_set, seed_seqs_rrf):
@@ -89,7 +89,7 @@ def main(args):
                 rb = adaptive_rrf_normal(
                     logger,
                     transfer,
-                    error_tol=example.rrf_ttol,
+                    error_tol=example.rrf_ttol / example.l_char,
                     failure_tolerance=example.rrf_ftol,
                     num_testvecs=example.rrf_num_testvecs,
                     l2_err=epsilon_alpha,
@@ -106,7 +106,7 @@ def main(args):
 
     elif args.method == "heuristic":
         from .heuristic import heuristic_range_finder
-        epsilon_star = epsilon_star[args.method]
+        epsilon_star = epsilon_star[args.method] / example.l_char
 
         with new_rng(seed_seqs_rrf[0]):
             spectral_basis, _ = heuristic_range_finder(
@@ -114,7 +114,7 @@ def main(args):
                 transfer,
                 training_set,
                 testing_set,
-                error_tol=example.rrf_ttol,
+                error_tol=example.rrf_ttol / example.l_char,
                 failure_tolerance=example.rrf_ftol,
                 num_testvecs=example.rrf_num_testvecs,
                 l2_err=epsilon_star,
@@ -156,7 +156,7 @@ def main(args):
     aerrs = []
     rerrs = []
     l2errs = []
-    u_norm = test_data.norm(transfer.range_product)  # norm of each test vector
+    u_norm = example.l_char * test_data.norm(transfer.range_product)  # norm of each test vector
 
     logger.info("Computing projection error ...")
     for N in range(len(basis) + 1):
@@ -167,13 +167,13 @@ def main(args):
             orthonormal=orthonormal,
         )
         err = test_data - U_proj # type: ignore
-        errn = err.norm(transfer.range_product)  # absolute projection error
+        errn = example.l_char * err.norm(transfer.range_product)  # absolute projection error
         if np.all(errn == 0.0):
             # ensure to return 0 here even when the norm of U is zero
             rel_err = errn
         else:
             rel_err = errn / u_norm
-        l2_err = np.sum((err).norm2(transfer.range_product)) / len(test_data)
+        l2_err = np.sum(example.l_char**2. * (err).norm2(transfer.range_product)) / len(test_data)
 
         aerrs.append(np.max(errn))
         rerrs.append(np.max(rel_err))
