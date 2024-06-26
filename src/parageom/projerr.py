@@ -70,18 +70,23 @@ def main(args):
     logger.info(f"Computing spectral basis with method {args.method} ...")
     basis = None
 
-    # TODO
-    # parametrize omega?
-    epsilon_star = example.epsilon_star
-    omega = example.omega
-
     if args.method == "hapod":
         from .hapod import adaptive_rrf_normal
 
         snapshots = transfer.range.empty()
         spectral_basis_sizes = list()
-        epsilon_star = epsilon_star[args.method] / example.l_char
-        epsilon_alpha = np.sqrt(example.rrf_num_testvecs) * np.sqrt(1 - omega**2.) * epsilon_star
+
+        epsilon_star = example.epsilon_star[args.method]
+        Nin = transfer.rhs.dofs.size
+        epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2.) * epsilon_star
+        # np.sqrt(10) since hapod estimate is not accurate and produces l2 mean error
+        # 1 magnitude smaller than desired
+        epsilon_pod = (epsilon_star ** 2 * Nin - epsilon_alpha) * ntrain * np.sqrt(10)
+        assert epsilon_pod > 0
+
+        # scaling
+        epsilon_alpha /= example.l_char
+        epsilon_pod /= example.l_char
 
         for mu, seed_seq in zip(training_set, seed_seqs_rrf):
             with new_rng(seed_seq):
@@ -101,12 +106,14 @@ def main(args):
         logger.info(
             f"Average length of spectral basis: {np.average(spectral_basis_sizes)}."
         )
-        epsilon = np.sqrt(len(snapshots)) * epsilon_star
-        basis = pod(snapshots, product=transfer.range_product, l2_err=epsilon)[0]  # type: ignore
+        # epsilon = np.sqrt(len(snapshots)) * epsilon_star
+        # Nin = transfer.rhs.dofs.size
+        # epsilon_pod = (epsilon_star ** 2 * Nin - epsilon_alpha) * ntrain
+        basis = pod(snapshots, product=transfer.range_product, l2_err=epsilon_pod)[0]  # type: ignore
 
     elif args.method == "heuristic":
         from .heuristic import heuristic_range_finder
-        epsilon_star = epsilon_star[args.method] / example.l_char
+        epsilon_star = example.epsilon_star[args.method] / example.l_char
 
         with new_rng(seed_seqs_rrf[0]):
             spectral_basis, _ = heuristic_range_finder(

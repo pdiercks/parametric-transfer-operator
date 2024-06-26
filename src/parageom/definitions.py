@@ -81,7 +81,7 @@ class BeamData:
                 "heuristic": 0.1,
                 "hapod": 0.1,
                 })
-    omega: float = 0.001
+    omega: float = 0.9
     rrf_ttol: float = 10e-2
     rrf_ftol: float = 1e-10
     rrf_num_testvecs: int = 20
