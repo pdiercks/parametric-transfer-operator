@@ -22,7 +22,7 @@ def main(args):
     # from .ei import interpolate_subdomain_operator
     # from .locmor import reconstruct, assemble_system, assemble_system_with_ei, EISubdomainOperatorWrapper
     from .locmor import reconstruct, assemble_gfem_system
-    from .dofmap_gfem import GFEMDofMap
+    from .dofmap_gfem import GFEMDofMap, parageom_dof_distribution_factory
 
     # ### logger
     set_defaults(
@@ -93,11 +93,14 @@ def main(args):
     # for i in range(5):
     #     archetypes[i] = archetypes[i] * 100.
 
-    local_bases = list((archetypes[2], ) * coarse_grid.num_cells)
-    local_bases[0] = archetypes[0]
-    local_bases[1] = archetypes[1]
-    local_bases[-2] = archetypes[-2]
-    local_bases[-1] = archetypes[-1]
+    # local_bases = list((archetypes[2], ) * coarse_grid.num_cells)
+    local_bases = []
+    local_bases.append(archetypes[0].copy())
+    local_bases.append(archetypes[1].copy())
+    for _ in range(6):
+        local_bases.append(archetypes[2].copy())
+    local_bases.append(archetypes[3].copy())
+    local_bases.append(archetypes[4].copy())
     bases_length = [len(rb) for rb in local_bases]
 
     # ### Maximum number of modes per vertex
@@ -126,12 +129,8 @@ def main(args):
     max_errors = []
     max_relerrors = []
 
-    # TODO set appropriate value for number of modes
-    # max_modes = 5
-    # num_modes_per_vertex = list(range(1, max_modes + 1, 2))
+    num_modes_per_vertex = list(range(2, max_dofs_per_vert.max()+1, 4))
     breakpoint()
-    # num_modes_per_vertex = [2, 17, 21, 32]
-    num_modes_per_vertex = [32,]
 
     # Conversion of rhs to NumpyVectorSpace
     # range_space = mops[0].range
@@ -148,7 +147,6 @@ def main(args):
         fom_solutions = fom.solution_space.empty()
         rom_solutions = fom.solution_space.empty()
 
-        err_norms = []
         for mu in validation_set:
             U_fom = fom.solve(mu)  # is this cached or computed everytime?
             fom_solutions.append(U_fom)
@@ -163,27 +161,30 @@ def main(args):
                     dofmap, operator_local, rhs_local, mu, local_bases, dofs_per_vert, max_dofs_per_vert
                     )
             rom = StationaryModel(operator, rhs, name="locROM")
-            # manual = same as U_rb_ below
-            # A = rom.operator.assemble(mu=None)
-            # b = rom.rhs.as_range_array(mu=None)
-            # u_rb = A.apply_inverse(b)
-            breakpoint()
             U_rb_ = rom.solve(mu)
 
             reconstruct(U_rb_.to_numpy(), dofmap, current_local_bases, u_loc, u_rb)
             U_rom = fom.solution_space.make_array([u_rb.x.petsc_vec.copy()])  # type: ignore
             rom_solutions.append(U_rom)
 
+        # TODO:
+        # revisit error computation
+        # l2-mean?
+        # what value can be expected from the tolerances set in the training?
+
         err = fom_solutions - rom_solutions
         fom_norms = fom_solutions.norm(h1_product)
+        rom_norms = rom_solutions.norm(h1_product)
         err_norms = err.norm(h1_product)
         max_err = np.max(err_norms)
+
         logger.debug(f"{nmodes=}\tnum_dofs: {dofmap.num_dofs}\t{max_err=}")
         max_errors.append(max_err)
         max_relerrors.append(max_err / fom_norms[np.argmax(err_norms)])
 
     fom.visualize(fom_solutions, filename="ufom.xdmf")
     fom.visualize(rom_solutions, filename="urom.xdmf")
+    fom.visualize(err, filename="uerr.xdmf")
     breakpoint()
 
     if args.output is not None:

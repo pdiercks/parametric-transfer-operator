@@ -226,11 +226,17 @@ def main(args):
     snapshots = transfer.range.empty()
     spectral_basis_sizes = list()
 
-    epsilon_star = example.epsilon_star["hapod"] / example.l_char
-    omega = example.omega
-    epsilon_alpha = (
-        np.sqrt(example.rrf_num_testvecs) * np.sqrt(1.0 - omega**2.0) * epsilon_star
-    )
+    epsilon_star = example.epsilon_star["hapod"]
+    Nin = transfer.rhs.dofs.size
+    epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2.) * epsilon_star
+    # np.sqrt(10) since hapod estimate is not accurate and produces l2 mean error
+    # 1 magnitude smaller than desired
+    epsilon_pod = (epsilon_star ** 2 * Nin - epsilon_alpha) * ntrain * np.sqrt(10)
+    assert epsilon_pod > 0
+
+    # scaling
+    epsilon_alpha /= example.l_char
+    epsilon_pod /= example.l_char
 
     for mu, seed_seq in zip(training_set, seed_seqs_rrf):
         with new_rng(seed_seq):
@@ -276,9 +282,8 @@ def main(args):
     logger.info(
         f"Average length of spectral basis: {np.average(spectral_basis_sizes)}."
     )
-    epsilon = np.sqrt(len(snapshots)) * epsilon_star
     pod_modes, pod_svals = pod(
-        snapshots, product=transfer.range_product, l2_err=epsilon
+        snapshots, product=transfer.range_product, l2_err=epsilon_pod
     )
 
     viz = FenicsxVisualizer(pod_modes.space)

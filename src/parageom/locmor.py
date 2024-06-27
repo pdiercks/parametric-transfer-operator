@@ -302,7 +302,6 @@ def assemble_gfem_system(
         b_local = project(b, B, None)
         element_matrix = A_local.matrix  # type: ignore
         element_vector = b_local.matrix  # type: ignore
-        breakpoint()
 
         for l, x in enumerate(dofs):
             if x in bc_dofs:

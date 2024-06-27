@@ -106,9 +106,6 @@ def main(args):
         logger.info(
             f"Average length of spectral basis: {np.average(spectral_basis_sizes)}."
         )
-        # epsilon = np.sqrt(len(snapshots)) * epsilon_star
-        # Nin = transfer.rhs.dofs.size
-        # epsilon_pod = (epsilon_star ** 2 * Nin - epsilon_alpha) * ntrain
         basis = pod(snapshots, product=transfer.range_product, l2_err=epsilon_pod)[0]  # type: ignore
 
     elif args.method == "heuristic":

@@ -10,7 +10,6 @@ from multi.preprocessing import create_rectangle
 from multi.io import read_mesh
 from multi.domain import StructuredQuadGrid, RectangularDomain
 from multi.boundary import plane_at
-from multi.interpolation import interpolate
 
 from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxVisualizer
 from pymor.core.logger import getLogger, set_log_levels
@@ -35,7 +34,6 @@ def main(args):
     )
 
     # ### Grids
-
     # global quadrilateral grid for GFEM construction
     with tempfile.NamedTemporaryFile(suffix=".msh") as tf:
         xmin = ymin = 0.0
@@ -56,6 +54,20 @@ def main(args):
         )[0]
 
     global_quad_grid = StructuredQuadGrid(global_coarse_grid)
+    vertex_to_basis = {
+        0: "left",
+        1: "left",
+        2: "left",
+        3: "left",
+        4: "inner_enriched",
+        5: "inner_enriched",
+        6: "inner_enriched",
+        7: "inner_enriched",
+        8: "right",
+        9: "right",
+        10: "right",
+        11: "right",
+            }
     vertex_to_config = {
         0: "left",
         1: "left",
@@ -121,17 +133,30 @@ def main(args):
     distr = args.distribution
     bases = {}
     bases_length = {}
-    for config in example.configurations:
-        if args.method == "hapod":
-            bases[config] = np.load(example.hapod_modes_npy(args.nreal, distr, config))
-        elif args.method == "heuristic":
-            bases[config] = np.load(
-                example.heuristic_modes_npy(args.nreal, distr, config)
-            )
-        else:
-            raise NotImplementedError
-        bases_length[config] = len(bases[config])
-    assert len(list(bases.keys())) == 3
+    if args.method == "hapod":
+        fpath_modes_npy = example.hapod_modes_npy
+    elif args.method == "heuristic":
+        fpath_modes_npy = example.heuristic_modes_npy
+    else:
+        raise NotImplementedError
+    bases["left"] = np.load(fpath_modes_npy(args.nreal, distr, "left"))
+    bases["inner"] = np.load(fpath_modes_npy(args.nreal, distr, "inner"))
+    bases["right"] = np.load(fpath_modes_npy(args.nreal, distr, "right"))
+
+    def enrich_with_constant(rb):
+        dim = rb.shape[1]
+        xmode = np.ones((1, dim), dtype=np.float32)
+        xmode[:, 1::2 ] *= 0.
+        ymode = np.ones((1, dim), dtype=np.float32)
+        ymode[:, ::2] *= 0.
+        return np.vstack([xmode, ymode, rb])
+
+    bases["left_enriched"] = enrich_with_constant(bases["left"])
+    bases["inner_enriched"] = enrich_with_constant(bases["inner"])
+    bases["right_enriched"] = enrich_with_constant(bases["right"])
+
+    for k, v in bases.items():
+        bases_length[k] = len(v)
 
     Phi = df.fem.Function(X, name="Phi")  # coarse scale hat functions
     phi = df.fem.Function(V, name="phi")  # hat functions on the fine grid
@@ -165,9 +190,9 @@ def main(args):
         for vertex in vertices:
             count_modes_per_vertex = 0
             config = vertex_to_config[vertex]
-            basis = bases[config]
+            basis = bases[vertex_to_basis[vertex]]
 
-            x_vertex = global_quad_grid.get_entity_coordinates(0, np.array([vertex], dtype=np.int32))
+            # x_vertex = global_quad_grid.get_entity_coordinates(0, np.array([vertex], dtype=np.int32))
 
             # Translate oversampling domain Ω
             dx_omega = global_quad_grid.get_entity_coordinates(
@@ -192,26 +217,6 @@ def main(args):
                 V.mesh, V.element, V_in.mesh, padding=1e-10
             )
 
-            # Fill values for hat function on coarse grid
-            Phi.x.petsc_vec.zeroEntries()  # type: ignore
-            for b in range(X.dofmap.index_map_bs):
-                dof = vertex * X.dofmap.index_map_bs + b
-                Phi.x.petsc_vec.array[dof] = 1.0  # type: ignore
-            Phi.x.scatter_forward()  # type: ignore
-
-            # Interpolate hat function to unit cell grid
-            phi.x.petsc_vec.zeroEntries()  # type: ignore
-            phi.interpolate(Phi, nmm_interpolation_data=coarse_to_unit_cell)  # type: ignore
-            phi.x.scatter_forward()  # type: ignore
-
-            # if cell == 4:
-            #     breakpoint()
-            #     print("check geometry again")
-            #
-            # check that phi is not zero
-            # assert np.sum(phi.x.array[::2]) > 0
-            # assert np.sum(phi.x.array[1::2]) > 0
-            # debug_phi.append(phi.x.petsc_vec.copy())
             for mode in basis:
                 # Fill in values for basis
                 xi_in.x.petsc_vec.zeroEntries()  # type: ignore
@@ -223,13 +228,17 @@ def main(args):
                 xi.interpolate(xi_in, nmm_interpolation_data=target_to_unit_cell)  # type: ignore
                 xi.x.scatter_forward()  # type: ignore
 
-                # if cell == 4:
-                #     debug_xi_in.append(xi.x.petsc_vec.copy())
+                # Fill values for hat function on coarse grid
+                Phi.x.petsc_vec.zeroEntries()  # type: ignore
+                for b in range(X.dofmap.index_map_bs):
+                    dof = vertex * X.dofmap.index_map_bs + b
+                    Phi.x.petsc_vec.array[dof] = 1.0  # type: ignore
+                    Phi.x.scatter_forward()  # type: ignore
 
-                # FIXME
-                # if vertex == 10 and cell == 4:
-                # mode[::2] is not zero, while xi.x.array[::2] is all zero
-                # mode is the full solution though ... so this can be?
+                # Interpolate hat function to unit cell grid
+                phi.x.petsc_vec.zeroEntries()  # type: ignore
+                phi.interpolate(Phi, nmm_interpolation_data=coarse_to_unit_cell)  # type: ignore
+                phi.x.scatter_forward()  # type: ignore
 
                 psi.x.petsc_vec.zeroEntries()  # type: ignore
                 psi.x.petsc_vec.pointwiseMult(phi.x.petsc_vec, xi.x.petsc_vec)  # type: ignore

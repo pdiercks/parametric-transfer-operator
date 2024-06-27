@@ -214,8 +214,9 @@ def main(args):
     transfer, FEXT = discretize_transfer_problem(example, args.configuration)
 
     # ### Heuristic range approximation
-    logger.debug(f"{seed_seqs_rrf[0]=}")
     epsilon_star = example.epsilon_star["heuristic"] / example.l_char
+
+    logger.debug(f"{seed_seqs_rrf[0]=}")
     with new_rng(seed_seqs_rrf[0]):
         spectral_basis, training_samples = heuristic_range_finder(
             logger,
@@ -228,6 +229,10 @@ def main(args):
             l2_err=epsilon_star,
             sampling_options={"scale":0.1},
         )
+
+    # FIXME
+    # Neumann snapshots can also be directly computed in `heuristic_range_finder`
+    # to avoid repeated assembly of the operator
 
     # ### Compute Neumann Modes
     # restrict to ntrain, otherwise would just compute the same data twice
@@ -244,8 +249,7 @@ def main(args):
         neumann_snapshots.append(U_orth)
 
     with logger.block("Computing POD of Neumann snapshots ..."):
-        eps = np.sqrt(len(neumann_snapshots)) * epsilon_star
-        neumann_modes = pod(neumann_snapshots, product=transfer.range_product, l2_err=eps)[0]
+        neumann_modes = pod(neumann_snapshots, product=transfer.range_product, l2_err=epsilon_star)[0]
 
     logger.info("Extending spectral basis by Neumann modes via GS ...")
     basis_length = len(spectral_basis)
