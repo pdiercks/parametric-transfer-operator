@@ -78,8 +78,8 @@ class BeamData:
     methods: tuple[str, ...] = ("hapod", "heuristic")
     epsilon_star: dict = field(
             default_factory=lambda: {
-                "heuristic": 0.1,
-                "hapod": 0.1,
+                "heuristic": 0.001,
+                "hapod": 0.001,
                 })
     omega: float = 0.9
     rrf_ttol: float = 10e-2

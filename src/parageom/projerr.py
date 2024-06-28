@@ -79,10 +79,7 @@ def main(args):
         epsilon_star = example.epsilon_star[args.method]
         Nin = transfer.rhs.dofs.size
         epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2.) * epsilon_star
-        # np.sqrt(10) since hapod estimate is not accurate and produces l2 mean error
-        # 1 magnitude smaller than desired
-        epsilon_pod = (epsilon_star ** 2 * Nin - epsilon_alpha) * ntrain * np.sqrt(10)
-        assert epsilon_pod > 0
+        epsilon_pod = epsilon_star * np.sqrt(Nin * ntrain)
 
         # scaling
         epsilon_alpha /= example.l_char
@@ -186,6 +183,14 @@ def main(args):
     rerr = np.array(rerrs)
     aerr = np.array(aerrs)
     l2err = np.array(l2errs)
+
+    # TODO:
+    # write out error in euclidean norm
+    # write out max value of test_data, U_proj and error
+
+    # see which ROM error epsilon_star=0.001 yields (run_locrom)
+    # if max nodal ROM error is well below 1e-3 might rather use epsilon_star=0.01
+    breakpoint()
     if args.output is not None:
         np.savez(args.output, rerr=rerr, aerr=aerr, l2err=l2err)
 
