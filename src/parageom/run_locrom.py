@@ -137,6 +137,7 @@ def main(args):
     # b = VectorOperator(range_space.from_numpy(
     #     rhs.as_range_array().to_numpy()
     #     ))
+    maxes=[]
 
     for nmodes in num_modes_per_vertex:
         # operator, rhs, local_bases = assemble_system_with_ei(
@@ -176,6 +177,9 @@ def main(args):
         fom_norms = fom_solutions.norm(h1_product)
         rom_norms = rom_solutions.norm(h1_product)
         err_norms = err.norm(h1_product)
+        e_amax = err.amax()[1]
+        max_e_amax = np.max(e_amax)
+        maxes.append(max_e_amax)
         max_err = np.max(err_norms)
 
         logger.debug(f"{nmodes=}\tnum_dofs: {dofmap.num_dofs}\t{max_err=}")

@@ -236,8 +236,8 @@ def main(args):
 
     # ### Compute Neumann Modes
     # restrict to ntrain, otherwise would just compute the same data twice
-    neumann_snapshots = spectral_basis.space.empty(reserve=len(training_samples[:ntrain]))
-    for mu in training_samples[:ntrain]:
+    neumann_snapshots = spectral_basis.space.empty(reserve=len(training_set))
+    for mu in training_set:
         transfer.assemble_operator(mu)
         U_neumann = transfer.op.apply_inverse(FEXT)
         U_in_neumann = transfer.range.from_numpy(U_neumann.dofs(transfer._restriction))
@@ -249,7 +249,8 @@ def main(args):
         neumann_snapshots.append(U_orth)
 
     with logger.block("Computing POD of Neumann snapshots ..."):
-        neumann_modes = pod(neumann_snapshots, product=transfer.range_product, l2_err=epsilon_star)[0]
+        # neumann_modes = pod(neumann_snapshots, product=transfer.range_product, l2_err=epsilon_star)[0]
+        neumann_modes = pod(neumann_snapshots, product=transfer.range_product, rtol=1e-7)[0]
 
     logger.info("Extending spectral basis by Neumann modes via GS ...")
     basis_length = len(spectral_basis)

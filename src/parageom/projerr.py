@@ -1,5 +1,6 @@
 """compute projection error to assess quality of the basis"""
 
+from collections import defaultdict
 import numpy as np
 
 from multi.projection import project_array
@@ -154,10 +155,23 @@ def main(args):
             g = transfer.generate_random_boundary_data(1, args.distr, {"scale": 0.1})
             test_data.append(transfer.solve(g))
 
-    aerrs = []
-    rerrs = []
-    l2errs = []
-    u_norm = example.l_char * test_data.norm(transfer.range_product)  # norm of each test vector
+    aerrs = defaultdict(list)
+    rerrs = defaultdict(list)
+    l2errs = defaultdict(list)
+
+    def compute_norm(U, key, value):
+        lc = example.l_char
+
+        if key == "max":
+            return lc * U.amax()[1]
+        else:
+            assert key in ("h1-semi", "euclidean")
+            return lc * U.norm(value)
+
+    products = {"h1-semi": transfer.range_product, "euclidean": None, "max": False}
+    test_norms = {}
+    for k, v in products.items():
+        test_norms[k] = compute_norm(test_data, k, v)
 
     logger.info("Computing projection error ...")
     for N in range(len(basis) + 1):
@@ -167,32 +181,47 @@ def main(args):
             product=transfer.range_product,
             orthonormal=orthonormal,
         )
-        err = test_data - U_proj # type: ignore
-        errn = example.l_char * err.norm(transfer.range_product)  # absolute projection error
-        if np.all(errn == 0.0):
-            # ensure to return 0 here even when the norm of U is zero
-            rel_err = errn
-        else:
-            rel_err = errn / u_norm
-        l2_err = np.sum(example.l_char**2. * (err).norm2(transfer.range_product)) / len(test_data)
+        error = test_data - U_proj # type: ignore
+        for k, v in products.items():
+            error_norm = compute_norm(error, k, v)
+            if np.all(error_norm == 0.0):
+                # ensure to return 0 here even when the norm of U is zero
+                rel_err = error_norm
+            else:
+                rel_err = error_norm / test_norms[k]
+            l2_err = np.sum(error_norm ** 2.) / len(test_data)
 
-        aerrs.append(np.max(errn))
-        rerrs.append(np.max(rel_err))
-        l2errs.append(l2_err)
+            aerrs[k].append(np.max(error_norm))
+            rerrs[k].append(np.max(rel_err))
+            l2errs[k].append(l2_err)
 
-    rerr = np.array(rerrs)
-    aerr = np.array(aerrs)
-    l2err = np.array(l2errs)
-
+    # data = {"aerr": aerrs, "rerr": rerrs, "l2err": l2errs, "test_norms": test_norms}
     # TODO:
     # write out error in euclidean norm
     # write out max value of test_data, U_proj and error
 
+    # Summary
+    # epsilon_star = 0.1
+    # aerrs['max'][-1] = 0.0634 (in mm, because norm is scaled with lc)
+    # rerrs['max'][-1] = 0.0613
+    # aerrs['h1-semi'][-1] = 0.198
+    # l2errs['h1-semi'][-1] = 0.0078 (<1e-2=epsilon_star**2)
+
+    # TODO:
+    # run everything with epsilon_star = 0.1
+    # and compare actual error in run_locrom ...
+
+    # Summary
+    # epsilon_star = 0.01
+    # aerrs['max'][-1] = 0.0035 (in mm, because norm is scaled with lc)
+    # rerrs['max'][-1] = 0.00523
+    # aerrs['h1-semi'][-1] = 0.018
+    # l2errs['h1-semi'][-1] = 5.7e-05 (<1e-4=epsilon_star**2)
+
     # see which ROM error epsilon_star=0.001 yields (run_locrom)
     # if max nodal ROM error is well below 1e-3 might rather use epsilon_star=0.01
-    breakpoint()
     if args.output is not None:
-        np.savez(args.output, rerr=rerr, aerr=aerr, l2err=l2err)
+        np.savez(args.output, rerr=rerrs["h1-semi"], aerr=aerrs["h1-semi"], l2err=l2errs["h1-semi"])
 
 
 if __name__ == "__main__":

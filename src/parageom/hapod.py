@@ -229,10 +229,7 @@ def main(args):
     epsilon_star = example.epsilon_star["hapod"]
     Nin = transfer.rhs.dofs.size
     epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2.) * epsilon_star
-    # np.sqrt(10) since hapod estimate is not accurate and produces l2 mean error
-    # 1 magnitude smaller than desired
-    epsilon_pod = (epsilon_star ** 2 * Nin - epsilon_alpha) * ntrain * np.sqrt(10)
-    assert epsilon_pod > 0
+    epsilon_pod = epsilon_star * np.sqrt(Nin * ntrain)
 
     # scaling
     epsilon_alpha /= example.l_char

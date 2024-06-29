@@ -16,10 +16,12 @@ def main(cli):
             data = np.load(infile)
             for key in ["aerr", "l2err"]:
                 e = data[key]
-                ax.semilogy(np.arange(e.size), e, label=":".join([method, key]))
-        ax.legend(loc="best")
-        ax.set_xlabel("Number of basis functions")
-        ax.set_ylabel("Absolute projection error")
+                ax.semilogy(np.arange(e.size), e, label=":".join([method, key])) # type: ignore
+                eps = np.ones_like(e) * example.epsilon_star[method] ** 2
+                ax.semilogy(np.arange(e.size), eps, "k-") # type: ignore
+        ax.legend(loc="best") # type: ignore
+        ax.set_xlabel("Number of basis functions") # type: ignore
+        ax.set_ylabel("Absolute projection error") # type: ignore
     
 
 

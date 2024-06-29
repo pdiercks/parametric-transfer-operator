@@ -850,18 +850,18 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
     assert entities_gamma_out.size > 0
     rhs = DirichletLift(operator.range, operator.compiled_form, entities_gamma_out)  # type: ignore
 
-    def h1_0_semi(V, gdim):
+    def h1_0_semi(V):
         u = ufl.TrialFunction(V)
         v = ufl.TestFunction(V)
         return ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx # type: ignore
 
-    def l2(V, gdim):
+    def l2(V):
         u = ufl.TrialFunction(V)
         v = ufl.TestFunction(V)
         return ufl.inner(u, v) * ufl.dx # type: ignore
 
     # ### Range product operator
-    h1_cpp = df.fem.form(h1_0_semi(V_in, example.gdim))
+    h1_cpp = df.fem.form(h1_0_semi(V_in))
     pmat_range = dolfinx.fem.petsc.create_matrix(h1_cpp)
     pmat_range.zeroEntries()
     dolfinx.fem.petsc.assemble_matrix(pmat_range, h1_cpp, bcs=bcs_range_product)
@@ -869,7 +869,7 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
     range_product = FenicsxMatrixOperator(pmat_range, V_in, V_in, name="h1_0_semi")
 
     # ### Source product operator
-    l2_cpp = df.fem.form(l2(V, example.gdim))
+    l2_cpp = df.fem.form(l2(V))
     pmat_source = dolfinx.fem.petsc.create_matrix(l2_cpp)
     pmat_source.zeroEntries()
     dolfinx.fem.petsc.assemble_matrix(pmat_source, l2_cpp, bcs=[])
