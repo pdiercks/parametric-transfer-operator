@@ -243,9 +243,10 @@ class BeamData:
         dir = self.bases_path(nr, method, distr)
         return dir / "dofs_per_vert.npy"
 
-    # def loc_rom_error(self, distr: str, name: str) -> Path:
-    #     """loc ROM error relative to FOM"""
-    #     return self.rf / f"loc_rom_error_{distr}_{name}.csv"
+    def locrom_error(self, nreal: int, method: str, distr: str) -> Path:
+        """loc ROM error"""
+        dir = self.method_folder(nreal, method)
+        return dir / f"locrom_error_{distr}.npz"
 
     # @property
     # def fom_minimization_data(self) -> Path:

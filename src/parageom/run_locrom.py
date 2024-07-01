@@ -226,7 +226,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--show", action="store_true", help="show error plot.")
     parser.add_argument(
-        "--output", type=str, help="Path (.csv) to write relative error."
+        "--output", type=str, help="Path (.npz) to write error."
     )
     args = parser.parse_args(sys.argv[1:])
     main(args)

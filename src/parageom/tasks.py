@@ -243,3 +243,27 @@ def task_gfem():
                     "targets": targets,
                     "clean": True,
                     }
+
+
+def task_locrom():
+    """ParaGeom: Run localized ROM"""
+    module = "src.parageom.run_locrom"
+    distr = "normal"
+    num_test = 20
+    for nreal in range(example.num_real):
+        for method in example.methods:
+            deps = [SRC / "run_locrom.py"]
+            deps.append(example.coarse_grid("global"))
+            deps.append(example.parent_domain("global"))
+            deps.append(example.parent_unit_cell)
+            for cell in range(5):
+                deps.append(example.local_basis_npy(nreal, method, distr, cell))
+            deps.append(example.local_basis_dofs_per_vert(nreal, method, distr))
+            targets = [example.locrom_error(nreal, method, distr), example.log_run_locrom(nreal, method, distr)]
+            yield {
+                    "name": method + ":" + str(nreal),
+                    "file_dep": deps,
+                    "actions": ["python3 -m {} {} {} {} {} --output {}".format(module, nreal, method, distr, num_test, targets)],
+                    "targets": targets,
+                    "clean": True,
+                    }
