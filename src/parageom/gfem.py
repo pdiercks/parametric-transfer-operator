@@ -27,11 +27,13 @@ def main(args):
     ).as_posix()
     set_defaults({"pymor.core.logger.getLogger.filename": logfilename})
     logger = getLogger(stem)
-    # TODO
-    # consider setting log level via example.log_level
-    set_log_levels(
-        {"pymor": 30, "pymor.algorithms.gram_schmidt.gram_schmidt": 30, stem: 10}
-    )
+
+    loglevels = {"pymor": 30, "pymor.algorithms.gram_schmidt.gram_schmidt": 30}
+    if args.debug:
+        loglevels[stem] = 10
+    else:
+        loglevels[stem] = 30
+    set_log_levels(loglevels)
 
     # ### Grids
     # global quadrilateral grid for GFEM construction
@@ -181,18 +183,12 @@ def main(args):
         coarse_to_unit_cell = df.fem.create_nonmatching_meshes_interpolation_data(
             V.mesh, V.element, X.mesh, padding=1e-10
         )
-        # debug_phi = []
-        # if cell == 4:
-        #     debug_xi_in = []
-
 
         modes_per_vertex = []
         for vertex in vertices:
             count_modes_per_vertex = 0
             config = vertex_to_config[vertex]
             basis = bases[vertex_to_basis[vertex]]
-
-            # x_vertex = global_quad_grid.get_entity_coordinates(0, np.array([vertex], dtype=np.int32))
 
             # Translate oversampling domain Ω
             dx_omega = global_quad_grid.get_entity_coordinates(
@@ -244,26 +240,6 @@ def main(args):
                 psi.x.petsc_vec.pointwiseMult(phi.x.petsc_vec, xi.x.petsc_vec)  # type: ignore
                 psi.x.scatter_forward()  # type: ignore
 
-                # TODO ???
-                # normalize, such that psi(node) = 1?
-                # would have to normalize each component separately
-                # not necessary though
-                # not sure how this works for the dirichlet boundaries when psi(node)=0
-
-                # nodal_value = interpolate(psi, x_vertex, padding=1e-9)
-                # if nodal_value.size == 0:
-                #     breakpoint()
-                # if not np.isclose(nodal_value[0], 0.0):
-                #     psi.x.array[::2] *= 1. / nodal_value[0]
-                # if not np.isclose(nodal_value[1], 0.0):
-                #     psi.x.array[1::2] *= 1. / nodal_value[1]
-                #
-                # psi.x.scatter_forward()
-                #
-                # if not np.allclose(nodal_value, np.zeros_like(nodal_value)):
-                #     other = interpolate(psi, x_vertex)
-                #     np.allclose(other, np.ones_like(other))
-
                 gfem.append(psi.x.petsc_vec.copy())  # type: ignore
                 count_modes_per_vertex += 1
 
@@ -287,10 +263,10 @@ def main(args):
         )
         np.save(outstream, G.to_numpy())
 
-        directory = outstream.parent
-        outstream_xdmf = outstream.with_suffix(".xdmf")
-        viz = FenicsxVisualizer(G.space)
-        viz.visualize(G, filename=outstream_xdmf.as_posix())
+        if args.debug:
+            outstream_xdmf = outstream.with_suffix(".xdmf")
+            viz = FenicsxVisualizer(G.space)
+            viz.visualize(G, filename=outstream_xdmf.as_posix())
 
         # reverse translation
         unit_cell.translate(-dx_unit_cell)
@@ -318,5 +294,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "distribution", type=str, help="Distribution used for random sampling."
     )
+    parser.add_argument("--debug", action='store_true', help="Run in debug mode.")
     args = parser.parse_args(sys.argv[1:])
     main(args)
