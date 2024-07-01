@@ -48,9 +48,7 @@ def main(args):
     ):
         testing_seeds[cfg] = rndseed
 
-    parameter_space = ParameterSpace(
-        example.parameters[args.config], example.mu_range
-    )
+    parameter_space = ParameterSpace(example.parameters[args.config], example.mu_range)
     parameter_name = list(example.parameters[args.config].keys())[0]
     training_set = sample_lhs(
         parameter_space,
@@ -70,6 +68,7 @@ def main(args):
     # ### Read basis and wrap as pymor object
     logger.info(f"Computing spectral basis with method {args.method} ...")
     basis = None
+    epsilon_star = example.epsilon_star_projerr
 
     if args.method == "hapod":
         from .hapod import adaptive_rrf_normal
@@ -77,9 +76,8 @@ def main(args):
         snapshots = transfer.range.empty()
         spectral_basis_sizes = list()
 
-        epsilon_star = example.epsilon_star[args.method]
         Nin = transfer.rhs.dofs.size
-        epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2.) * epsilon_star
+        epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2.0) * epsilon_star
         epsilon_pod = epsilon_star * np.sqrt(Nin * ntrain)
 
         # scaling
@@ -108,7 +106,8 @@ def main(args):
 
     elif args.method == "heuristic":
         from .heuristic import heuristic_range_finder
-        epsilon_star = example.epsilon_star[args.method] / example.l_char
+
+        l2_err = epsilon_star / example.l_char
 
         with new_rng(seed_seqs_rrf[0]):
             spectral_basis, _ = heuristic_range_finder(
@@ -119,7 +118,7 @@ def main(args):
                 error_tol=example.rrf_ttol / example.l_char,
                 failure_tolerance=example.rrf_ftol,
                 num_testvecs=example.rrf_num_testvecs,
-                l2_err=epsilon_star,
+                l2_err=l2_err,
                 sampling_options={"scale": 0.1},
             )
         basis = spectral_basis
@@ -181,7 +180,7 @@ def main(args):
             product=transfer.range_product,
             orthonormal=orthonormal,
         )
-        error = test_data - U_proj # type: ignore
+        error = test_data - U_proj  # type: ignore
         for k, v in products.items():
             error_norm = compute_norm(error, k, v)
             if np.all(error_norm == 0.0):
@@ -189,16 +188,11 @@ def main(args):
                 rel_err = error_norm
             else:
                 rel_err = error_norm / test_norms[k]
-            l2_err = np.sum(error_norm ** 2.) / len(test_data)
+            l2_err = np.sum(error_norm**2.0) / len(test_data)
 
             aerrs[k].append(np.max(error_norm))
             rerrs[k].append(np.max(rel_err))
             l2errs[k].append(l2_err)
-
-    # data = {"aerr": aerrs, "rerr": rerrs, "l2err": l2errs, "test_norms": test_norms}
-    # TODO:
-    # write out error in euclidean norm
-    # write out max value of test_data, U_proj and error
 
     # Summary
     # epsilon_star = 0.1
@@ -207,10 +201,6 @@ def main(args):
     # aerrs['h1-semi'][-1] = 0.198
     # l2errs['h1-semi'][-1] = 0.0078 (<1e-2=epsilon_star**2)
 
-    # TODO:
-    # run everything with epsilon_star = 0.1
-    # and compare actual error in run_locrom ...
-
     # Summary
     # epsilon_star = 0.01
     # aerrs['max'][-1] = 0.0035 (in mm, because norm is scaled with lc)
@@ -218,10 +208,19 @@ def main(args):
     # aerrs['h1-semi'][-1] = 0.018
     # l2errs['h1-semi'][-1] = 5.7e-05 (<1e-4=epsilon_star**2)
 
-    # see which ROM error epsilon_star=0.001 yields (run_locrom)
-    # if max nodal ROM error is well below 1e-3 might rather use epsilon_star=0.01
     if args.output is not None:
-        np.savez(args.output, rerr=rerrs["h1-semi"], aerr=aerrs["h1-semi"], l2err=l2errs["h1-semi"])
+        np.savez(
+            args.output,
+            rerr_h1_semi=rerrs["h1-semi"],
+            rerr_euclidean=rerrs["euclidean"],
+            rerr_max=rerrs["max"],
+            aerr_h1_semi=aerrs["h1-semi"],
+            aerr_euclidean=aerrs["euclidean"],
+            aerr_max=aerrs["max"],
+            l2err_h1_semi=l2errs["h1-semi"],
+            l2err_euclidean=l2errs["euclidean"],
+            l2err_max=l2errs["max"],
+        )
 
 
 if __name__ == "__main__":

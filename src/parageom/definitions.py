@@ -44,7 +44,6 @@ class BeamData:
         rrf_ttol: Target tolerance range finder.
         rrf_ftol: Failure tolerance range finder.
         rrf_num_testvecs: Number of testvectors range finder.
-        pod_l2_err: Bound POD L2 error by this value.
         run_mode: DEBUG or PRODUCTION mode. Affects mesh sizes, training set, realizations.
 
     """
@@ -81,12 +80,11 @@ class BeamData:
                 "heuristic": 0.01,
                 "hapod": 0.01,
                 })
+    epsilon_star_projerr: float = 0.001
     omega: float = 0.5
     rrf_ttol: float = 10e-2
     rrf_ftol: float = 1e-10
     rrf_num_testvecs: int = 20
-    pod_l2_err: float = 1e-2
-    pod_rtol: float = 1e-5
     run_mode: str = "DEBUG"
 
     def __post_init__(self):
