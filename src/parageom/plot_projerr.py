@@ -3,6 +3,26 @@ from multi.postprocessing import read_bam_colors
 from multi.plotting_context import PlottingContext
 
 
+def postproc(nreal: int, method: str, distr: str, config: str, eps: float):
+    from .tasks import example
+
+    instream = example.projerr(nreal, method, distr, config)
+    data = np.load(instream)
+    eps2 = eps ** 2
+
+    # find number of modes needed to achieve l2err < eps^2
+    l2err = data['l2err_h1_semi']
+    ind = np.argmax(l2err<eps2)
+
+    # get corresponding nodal relative error
+    relerr = data['rerr_max'][:ind+1]
+    print(f"""Summary
+    Need {ind} Modes to bound l2-mean error by {eps2}, which correponds to
+    Need {ind} Modes to achieve relative error of {relerr[-1]}.
+    """)
+    breakpoint()
+
+
 def main(cli):
     from .tasks import example
 
