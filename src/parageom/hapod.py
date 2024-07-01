@@ -8,7 +8,6 @@ import numpy as np
 from scipy.sparse.linalg import LinearOperator, eigsh
 from scipy.special import erfinv
 
-from pymor.bindings.fenicsx import FenicsxVisualizer
 from pymor.algorithms.pod import pod
 from pymor.algorithms.gram_schmidt import gram_schmidt
 from pymor.core.defaults import set_defaults
@@ -224,6 +223,7 @@ def main(args):
 
     assert len(training_set) == len(seed_seqs_rrf)
     snapshots = transfer.range.empty()
+    neumann_snapshots = transfer.range.empty(reserve=len(training_set))
     spectral_basis_sizes = list()
 
     epsilon_star = example.epsilon_star["hapod"]
@@ -263,42 +263,45 @@ def main(args):
                 product=None,
                 orthonormal=True,
             )
-            basis_length = len(basis)
-            basis.append(U_orth)
-            gram_schmidt(
-                basis,
-                transfer.range_product,
-                atol=0,
-                rtol=0,
-                offset=basis_length,
-                copy=False,
-            )
 
+        neumann_snapshots.append(U_orth) # type: ignore
         snapshots.append(basis)  # type: ignore
 
     logger.info(
         f"Average length of spectral basis: {np.average(spectral_basis_sizes)}."
     )
-    pod_modes, pod_svals = pod(
-        snapshots, product=transfer.range_product, l2_err=epsilon_pod
-    )
+    with logger.block("Computing POD of spectral bases ..."):
+        spectral_modes, spectral_svals = pod(snapshots, product=transfer.range_product,
+                                             l2_err=epsilon_pod)
 
-    viz = FenicsxVisualizer(pod_modes.space)
-    viz.visualize(
-        pod_modes,
-        filename=example.hapod_modes_xdmf(
-            args.nreal, args.distribution, args.configuration
-        ),
-    )
+    with logger.block("Computing POD of neumann snapshots ..."):
+        neumann_modes, neumann_svals = pod(neumann_snapshots, product=transfer.range_product,
+                                           rtol=example.neumann_rtol)
+
+    with logger.block("Extending spectral basis by Neumann modes via GS ..."):
+        basis_length = len(spectral_modes)
+        spectral_modes.append(neumann_modes)
+        gram_schmidt(
+                spectral_modes,
+                product=transfer.range_product,
+                offset=basis_length,
+                check=False,
+                copy=False
+                )
+
+    logger.info(f"Spectral basis size (after POD): {basis_length}.")
+    logger.info(f"Neumann modes/snapshots: {len(neumann_modes)}/{len(neumann_snapshots)}")
+    logger.info(f"Final basis length: {len(spectral_modes)}.")
+
     np.save(
         example.hapod_modes_npy(args.nreal, args.distribution, args.configuration),
-        pod_modes.to_numpy(),
+        spectral_modes.to_numpy(),
     )
     np.save(
         example.hapod_singular_values(
             args.nreal, args.distribution, args.configuration
         ),
-        pod_svals,
+        spectral_svals,
     )
 
 

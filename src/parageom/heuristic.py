@@ -93,8 +93,6 @@ def heuristic_range_finder(
         norm = error.norm2(product)
         return np.sum(norm) / len(U)
 
-    # rng = get_rng()  # current RNG
-    training_samples = []  # parameter values used in the training
     B = tp.range.empty()
     maxnorm = np.inf
     l2 = np.sum(M.norm2(range_product)) / len(M)
@@ -109,20 +107,12 @@ def heuristic_range_finder(
 
     while (maxnorm > testlimit) and (l2 > l2_err ** 2.):
         basis_length = len(B)
+        # FIXME
+        # adaptive latin hypercube sampling or parameter selection
+        # in a greedy fashion potentially leads to faster convergence
         j = mu_j[num_iter]
         mu = training_set[j]
-        # randomly select mu from existing LHS design
-        # mu_ind = rng.integers(0, len(training_set))
-        # FIXME
-        # figure out what is the best stratgey for drawing μ from LHS design
-        # logger.debug(f"{mu_ind=}")
-        # mu = training_set.pop(mu_ind)
-        # mu = training_set.pop(0)
-        training_samples.append(mu)
         tp.assemble_operator(mu)
-        # FIXME
-        # instead of adjusting the parameter samples in the LHS design
-        # it is simpler to simply use more boundary data for the same sample
         v = tp.generate_random_boundary_data(1, distribution, options=sampling_options)
 
         B.append(tp.solve(v))
@@ -141,7 +131,7 @@ def heuristic_range_finder(
     reason = "maxnorm" if maxnorm < testlimit else "l2err"
     logger.info(f"Finished heuristic range approx. in {num_iter} iterations ({reason=}).")
 
-    return B, training_samples
+    return B
 
 
 def main(args):
@@ -218,7 +208,7 @@ def main(args):
 
     logger.debug(f"{seed_seqs_rrf[0]=}")
     with new_rng(seed_seqs_rrf[0]):
-        spectral_basis, training_samples = heuristic_range_finder(
+        spectral_basis = heuristic_range_finder(
             logger,
             transfer,
             training_set,
@@ -230,12 +220,7 @@ def main(args):
             sampling_options={"scale":0.1},
         )
 
-    # FIXME
-    # Neumann snapshots can also be directly computed in `heuristic_range_finder`
-    # to avoid repeated assembly of the operator
-
     # ### Compute Neumann Modes
-    # restrict to ntrain, otherwise would just compute the same data twice
     neumann_snapshots = spectral_basis.space.empty(reserve=len(training_set))
     for mu in training_set:
         transfer.assemble_operator(mu)
@@ -249,8 +234,7 @@ def main(args):
         neumann_snapshots.append(U_orth)
 
     with logger.block("Computing POD of Neumann snapshots ..."):
-        # neumann_modes = pod(neumann_snapshots, product=transfer.range_product, l2_err=epsilon_star)[0]
-        neumann_modes = pod(neumann_snapshots, product=transfer.range_product, rtol=1e-7)[0]
+        neumann_modes = pod(neumann_snapshots, product=transfer.range_product, rtol=example.neumann_rtol)[0]
 
     logger.info("Extending spectral basis by Neumann modes via GS ...")
     basis_length = len(spectral_basis)

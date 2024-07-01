@@ -85,6 +85,7 @@ class BeamData:
     rrf_ttol: float = 10e-2
     rrf_ftol: float = 1e-10
     rrf_num_testvecs: int = 20
+    neumann_rtol: float = 1e-5
     run_mode: str = "DEBUG"
 
     def __post_init__(self):

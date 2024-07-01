@@ -101,7 +101,7 @@ def main(args):
     u_loc = df.fem.Function(operator_local.source.V)
 
     Nmax = max_dofs_per_vert.max()
-    num_modes_per_vertex = [Nmax // 4, Nmax // 2, Nmax]
+    # FIXME
     num_modes_per_vertex = list(range(Nmax // 4, Nmax + 1, Nmax // 4))
 
     l_char = example.l_char
@@ -180,7 +180,6 @@ def main(args):
     # fom.visualize(fom_solutions, filename="ufom.xdmf")
     # fom.visualize(rom_solutions, filename="urom.xdmf")
     # fom.visualize(err, filename="uerr.xdmf")
-    breakpoint()
 
     if args.output is not None:
         np.savez(
