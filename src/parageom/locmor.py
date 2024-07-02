@@ -276,8 +276,14 @@ def assemble_gfem_system(
         dofs_per_vert: Number of active modes per vertex.
         max_dofs_per_vert: Number of maximum modes per vertex.
 
+    Note:
+        Without Empirical Interpolation `mu` is required to
+        assemble the global operators.
+
     """
+
     from .dofmap_gfem import select_modes
+
     # no need to apply bcs as basis functions should
     # satisfy these automatically
     bc_dofs = np.array([], dtype=np.int32)
@@ -303,7 +309,7 @@ def assemble_gfem_system(
         element_matrix = A_local.matrix  # type: ignore
         element_vector = b_local.matrix  # type: ignore
 
-        for l, x in enumerate(dofs):
+        for ld, x in enumerate(dofs):
             if x in bc_dofs:
                 rhs["rows"].append(x)
                 rhs["cols"].append(0)
@@ -311,7 +317,7 @@ def assemble_gfem_system(
             else:
                 rhs["rows"].append(x)
                 rhs["cols"].append(0)
-                rhs["data"].append(element_vector[l, 0])
+                rhs["data"].append(element_vector[ld, 0])
 
             for k, y in enumerate(dofs):
                 if x in bc_dofs or y in bc_dofs:
@@ -330,7 +336,7 @@ def assemble_gfem_system(
                 else:
                     lhs["rows"].append(x)
                     lhs["cols"].append(y)
-                    lhs["data"].append(element_matrix[l, k])
+                    lhs["data"].append(element_matrix[ld, k])
 
         lhs["indexptr"].append(len(lhs["rows"]))
         rhs["indexptr"].append(len(rhs["rows"]))
@@ -352,17 +358,6 @@ def assemble_gfem_system(
         name="K",
     )
 
-    # ### Add matrix to account for BCs
-    # bc_array = coo_array(
-    #     (bc_mat["data"], (bc_mat["rows"], bc_mat["cols"])), shape=shape
-    # )
-    # bc_array.eliminate_zeros()
-    # bc_op = NumpyMatrixOperator(
-    #     bc_array.tocsr(), op.source.id, op.range.id, op.solver_options, "bc_mat"
-    # )
-
-    # lincomb = LincombOperator([op, bc_op], [1.0, 1.0])
-
     data = np.array(rhs["data"])
     rows = np.array(rhs["rows"])
     cols = np.array(rhs["cols"])
@@ -380,70 +375,57 @@ def assemble_gfem_system(
     return op, rhs_op, local_bases
 
 
-def assemble_system_with_ei(
-    example,
-    num_modes: int,
-    dofmap: DofMap,
+def assemble_gfem_system_with_ei(
+    dofmap: GFEMDofMap,
     ei_sub_op: EISubdomainOperatorWrapper,
     b: VectorOperator,
     bases: list[np.ndarray],
-    num_max_modes: np.ndarray,
+    dofs_per_vert: np.ndarray,
+    max_dofs_per_vert: np.ndarray,
     parameters: Parameters,
 ):
     """Assembles ``operator`` and ``rhs`` for localized ROM as ``StationaryModel``.
 
     Args:
-        num_modes: Number of fine scale modes per edge to be used.
-        dofmap: The dofmap of the global reduced space.
-        mops: Collateral basis (matrix operators) of subdomain operator.
+        dofmap: The dofmap of the global GFEM space.
+        ei_sub_op: EISubdomainOperatorWrapper.
         b: Local high fidelity external force vector.
-        bases: Local reduced basis for each subdomain.
-        num_max_modes: Maximum number of fine scale modes for each edge.
-        parameters: The |Parameters| the ROM depends on.
+        bases: Local reduced basis for each subdomain / unit cell.
+        dofs_per_vert: Number of active modes per vertex.
+        max_dofs_per_vert: Number of maximum modes per vertex.
+        parameters: The |Parameters| the global ROM depends on.
 
     """
 
-    dofs_per_vertex = 2
-    dofs_per_face = 0
+    from .dofmap_gfem import select_modes
 
-    dofs_per_edge = num_max_modes.copy()
-    dofs_per_edge[num_max_modes > num_modes] = num_modes
-    dofmap.distribute_dofs(dofs_per_vertex, dofs_per_edge, dofs_per_face)
-
-    # ### Definition of Dirichlet BCs
-    # This also depends on number of modes and can only be defined after
-    # distribution of dofs
-    length = example.length
-    origin = dofmap.grid.locate_entities_boundary(0, point_at([0.0, 0.0, 0.0]))
-    bottom_right = dofmap.grid.locate_entities_boundary(0, point_at([length, 0.0, 0.0]))
-    bc_dofs = []
-    for vertex in origin:
-        bc_dofs += dofmap.entity_dofs(0, vertex)
-    for vertex in bottom_right:
-        dofs = dofmap.entity_dofs(0, vertex)
-        bc_dofs.append(dofs[1])  # constrain uy, but not ux
-    assert len(bc_dofs) == 3
-    bc_dofs = np.array(bc_dofs)
+    # no need to apply bcs as basis functions should
+    # satisfy these automatically
+    bc_dofs = np.array([], dtype=np.int32)
 
     lhs = defaultdict(list)
     rhs = defaultdict(list)
     bc_mat = defaultdict(list)
     local_bases = []
 
-    mops = ei_sub_op.cb
-    source = mops[0].source
-    M = len(mops)  # size of collateral basis
+    cb = ei_sub_op.cb
+    source = cb[0].source
+    cb_size = len(cb)  # size of collateral basis
 
     for ci in range(dofmap.num_cells):
         dofs = dofmap.cell_dofs(ci)
 
         # select active modes
-        local_basis = select_modes(bases[ci], num_max_modes[ci], dofs_per_edge[ci])
+        local_basis = select_modes(bases[ci], dofs_per_vert[ci], max_dofs_per_vert[ci])
         local_bases.append(local_basis)
         B = source.from_numpy(local_basis)  # type: ignore
-        mops_local = [project(A, B, B) for A in mops]
-        b_local = project(b, B, None)
+
+        # projected matrix operators
+        mops_local = [project(A, B, B) for A in cb]
         element_matrices = [a_local.matrix for a_local in mops_local]  # type: ignore
+
+        # projected rhs
+        b_local = project(b, B, None)
         element_vector = b_local.matrix  # type: ignore
 
         for ld, x in enumerate(dofs):
@@ -464,7 +446,7 @@ def assemble_system_with_ei(
                         if x not in lhs["diagonals"]:  # only set diagonal entry once
                             lhs["rows"].append(x)
                             lhs["cols"].append(y)
-                            for m in range(M):
+                            for m in range(cb_size):
                                 lhs[f"data_{m}"].append(0.0)
                             lhs["diagonals"].append(x)
                             bc_mat["rows"].append(x)
@@ -483,7 +465,7 @@ def assemble_system_with_ei(
     Ndofs = dofmap.num_dofs
 
     _data = []
-    for m in range(M):
+    for m in range(cb_size):
         _data.append(lhs[f"data_{m}"])
     data = np.vstack(_data)
     # stack matrix data as row vectors
@@ -522,17 +504,6 @@ def assemble_system_with_ei(
         name="K",
     )
 
-    # ### Add matrix to account for BCs
-    bc_array = coo_array(
-        (bc_mat["data"], (bc_mat["rows"], bc_mat["cols"])), shape=shape
-    )
-    bc_array.eliminate_zeros()
-    bc_op = NumpyMatrixOperator(
-        bc_array.tocsr(), op.source.id, op.range.id, op.solver_options, "bc_mat"
-    )
-
-    lincomb = LincombOperator([op, bc_op], [1.0, 1.0])
-
     data = np.array(rhs["data"])
     rows = np.array(rhs["rows"])
     cols = np.array(rhs["cols"])
@@ -547,7 +518,7 @@ def assemble_system_with_ei(
         solver_options=options,
         name="F",
     )
-    return lincomb, rhs_op, local_bases
+    return op, rhs_op, local_bases
 
 
 class DirichletLift(object):
@@ -603,15 +574,7 @@ class ParametricTransferProblem(LogMixin):
 
         self.source = operator.source  # type: ignore
         self.range = range_space
-        # self._u = df.fem.Function(self.source.V) # type: ignore
-        # self._u_in = df.fem.Function(self.range.V)  # type: ignore
         self._restriction = make_mapping(self.range.V, self.source.V, padding=padding, check=True)
-        # self._interp_data = df.fem.create_nonmatching_meshes_interpolation_data(
-        #     self.range.V.mesh,  # type: ignore
-        #     self.range.V.element,  # type: ignore
-        #     self.source.V.mesh,  # type: ignore
-        #     padding=padding,
-        # )
 
     def generate_random_boundary_data(
         self, count: int, distribution: str, options: Optional[dict[str, Any]] = None
@@ -645,28 +608,14 @@ class ParametricTransferProblem(LogMixin):
         assert isinstance(self.op, FenicsxMatrixOperator)
 
         # solution
-        # u = self._u
-        # u_vec = u.x.petsc_vec # type: ignore
-        # u_in = self._u_in
         U_in = self.range.zeros(0, reserve=len(boundary_values))
-
-        # I could also vectorize forming the DirichletLift
-        # However, the interpolation into the range space cannot be vectorized
-        # (unless U.dofs(range_dofs) is used. Computing range_dofs might be more error prone though)
 
         # construct rhs from boundary data
         for array in boundary_values:
             Ag = self.rhs.assemble(array)
             U = self.op.apply_inverse(Ag)
 
-            # fill function with values
-            # u_vec.array[:] = U.to_numpy().flatten()
-            # u.x.scatter_forward() # type: ignore
-
             # ### restrict full solution to target subdomain
-            # u_in.interpolate(u, nmm_interpolation_data=self._interp_data) # type: ignore
-            # u_in.x.scatter_forward() # type: ignore
-            # U_in.append(self.range.make_array([u_in.x.petsc_vec.copy()])) # type: ignore
             U_in.append(self.range.from_numpy(U.dofs(self._restriction)))
 
         if self.kernel is not None:

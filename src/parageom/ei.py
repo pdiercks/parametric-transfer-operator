@@ -19,13 +19,13 @@ def vec2mat(A: csr_array):
     return mapping
 
 
-def interpolate_subdomain_operator(example, operator):
+def interpolate_subdomain_operator(example, operator, ntrain: int=101):
     from pymor.vectorarrays.numpy import NumpyVectorSpace
     from pymor.operators.numpy import NumpyMatrixOperator
     from pymor.algorithms.ei import deim
 
     parameter_space = operator.parameters.space(example.mu_range)
-    training_set = parameter_space.sample_uniformly(101)
+    training_set = parameter_space.sample_uniformly(ntrain)
 
     # ### build map
     mu_0 = training_set[0]

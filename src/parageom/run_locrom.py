@@ -18,19 +18,12 @@ def main(args):
     from .auxiliary_problem import discretize_auxiliary_problem
     from .fom import discretize_fom, discretize_subdomain_operators
 
-    # from .ei import interpolate_subdomain_operator
-    # from .locmor import reconstruct, assemble_system, assemble_system_with_ei, EISubdomainOperatorWrapper
-    from .locmor import reconstruct, assemble_gfem_system
+    from .ei import interpolate_subdomain_operator
+    from .locmor import reconstruct, assemble_gfem_system, assemble_gfem_system_with_ei, EISubdomainOperatorWrapper
     from .dofmap_gfem import GFEMDofMap
 
     # ### logger
-    set_defaults(
-        {
-            "pymor.core.logger.getLogger.filename": example.log_run_locrom(
-                args.nreal, args.method, args.distr
-            )
-        }
-    )
+    set_defaults({"pymor.core.logger.getLogger.filename": example.log_run_locrom(args.nreal, args.method, args.distr)})
     logger = getLogger(Path(__file__).stem, level="INFO")
 
     # ### Discretize global FOM
@@ -53,9 +46,12 @@ def main(args):
     operator_local, rhs_local = discretize_subdomain_operators(example)
 
     # ### EI of subdomain operator
-    # mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local)
-    # restricted_op, _ = operator_local.restricted(magic_dofs)
-    # wrapped_op = EISubdomainOperatorWrapper(restricted_op, mops, interpolation_matrix)
+    if args.ei:
+        # FIXME
+        # store data of deim somewhere
+        mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local)
+        restricted_op, _ = operator_local.restricted(magic_dofs)
+        wrapped_op = EISubdomainOperatorWrapper(restricted_op, mops, interpolation_matrix)
 
     # ### Coarse grid of the global domain
     coarse_grid = global_auxp.coarse_grid
@@ -67,9 +63,7 @@ def main(args):
     # 0: left, 1: transition, 2: inner, 3: transition, 4: right
     archetypes = []
     for cell in range(5):
-        archetypes.append(
-            np.load(example.local_basis_npy(args.nreal, args.method, args.distr, cell))
-        )
+        archetypes.append(np.load(example.local_basis_npy(args.nreal, args.method, args.distr, cell)))
 
     local_bases = []
     local_bases.append(archetypes[0].copy())
@@ -81,9 +75,7 @@ def main(args):
     bases_length = [len(rb) for rb in local_bases]
 
     # ### Maximum number of modes per vertex
-    max_dofs_per_vert = np.load(
-        example.local_basis_dofs_per_vert(args.nreal, args.method, args.distr)
-    )
+    max_dofs_per_vert = np.load(example.local_basis_dofs_per_vert(args.nreal, args.method, args.distr))
     # raise to number of cells in the coarse grid
     repetitions = [1, 1, coarse_grid.num_cells - len(archetypes) + 1, 1, 1]
     assert np.isclose(np.sum(repetitions), coarse_grid.num_cells)
@@ -111,13 +103,6 @@ def main(args):
     ndofs = []
 
     for nmodes in num_modes_per_vertex:
-        # operator, rhs, local_bases = assemble_system_with_ei(
-        #         example, nmodes, dofmap, wrapped_op, b, bases, num_max_modes, fom.parameters
-        # )
-        # rom = StationaryModel(operator, rhs, name="locROM")
-
-        fom_solutions = fom.solution_space.empty()
-        rom_solutions = fom.solution_space.empty()
 
         # construct `dofs_per_vert` for current number of modes
         dofs_per_vert = max_dofs_per_vert.copy()
@@ -126,21 +111,35 @@ def main(args):
         dofmap.distribute_dofs(dofs_per_vert)
         ndofs.append(dofmap.num_dofs)
 
+        rom = None
+        if args.ei:
+            operator, rhs, current_local_bases = assemble_gfem_system_with_ei(
+                    dofmap, wrapped_op, rhs_local, local_bases, dofs_per_vert, max_dofs_per_vert, fom.parameters)
+            rom = StationaryModel(operator, rhs, name="locROM_with_ei")
+
+        fom_solutions = fom.solution_space.empty()
+        rom_solutions = fom.solution_space.empty()
+
         for mu in validation_set:
             U_fom = fom.solve(mu)  # is this cached or computed everytime?
             fom_solutions.append(U_fom)
 
-            operator, rhs, current_local_bases = assemble_gfem_system(
-                dofmap,
-                operator_local,
-                rhs_local,
-                mu,
-                local_bases,
-                dofs_per_vert,
-                max_dofs_per_vert,
-            )
-            rom = StationaryModel(operator, rhs, name="locROM")
-            U_rb_ = rom.solve(mu)
+            if args.ei:
+                assert rom is not None
+                assert rom.name == "locROM_with_ei"
+                U_rb_ = rom.solve(mu)
+            else:
+                operator, rhs, current_local_bases = assemble_gfem_system(
+                    dofmap,
+                    operator_local,
+                    rhs_local,
+                    mu,
+                    local_bases,
+                    dofs_per_vert,
+                    max_dofs_per_vert,
+                )
+                rom = StationaryModel(operator, rhs, name="locROM")
+                U_rb_ = rom.solve(mu)
 
             reconstruct(U_rb_.to_numpy(), dofmap, current_local_bases, u_loc, u_rb)
             U_rom = fom.solution_space.make_array([u_rb.x.petsc_vec.copy()])  # type: ignore
@@ -220,12 +219,9 @@ if __name__ == "__main__":
         help="The distribution used for sampling.",
         choices=("normal", "multivariate_normal"),
     )
-    parser.add_argument(
-        "num_test", type=int, help="Size of the test set used for validation."
-    )
-    parser.add_argument("--show", action="store_true", help="show error plot.")
-    parser.add_argument(
-        "--output", type=str, help="Path (.npz) to write error."
-    )
+    parser.add_argument("num_test", type=int, help="Size of the test set used for validation.")
+    parser.add_argument("--ei", action="store_true", help="Use empirical interpolation.")
+    parser.add_argument("--show", action="store_true", help="Show error plot.")
+    parser.add_argument("--output", type=str, help="Path (.npz) to write error.")
     args = parser.parse_args(sys.argv[1:])
     main(args)
