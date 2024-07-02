@@ -110,7 +110,7 @@ def main(args):
         l2_err = epsilon_star / example.l_char
 
         with new_rng(seed_seqs_rrf[0]):
-            spectral_basis, _ = heuristic_range_finder(
+            spectral_basis = heuristic_range_finder(
                 logger,
                 transfer,
                 training_set,

@@ -9,6 +9,7 @@ import dolfinx as df
 
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
+from pymor.operators.constructions import VectorOperator
 from pymor.models.basic import StationaryModel
 from pymor.tools.random import new_rng
 
@@ -46,12 +47,18 @@ def main(args):
     operator_local, rhs_local = discretize_subdomain_operators(example)
 
     # ### EI of subdomain operator
+    wrapped_op = None
     if args.ei:
         # FIXME
         # store data of deim somewhere
         mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local)
         restricted_op, _ = operator_local.restricted(magic_dofs)
         wrapped_op = EISubdomainOperatorWrapper(restricted_op, mops, interpolation_matrix)
+
+        # convert `rhs_local` to NumPy
+        vector = rhs_local.as_range_array().to_numpy()
+        rhs_va = mops[0].range.from_numpy(vector)
+        rhs_local = VectorOperator(rhs_va)
 
     # ### Coarse grid of the global domain
     coarse_grid = global_auxp.coarse_grid
@@ -94,7 +101,7 @@ def main(args):
 
     Nmax = max_dofs_per_vert.max()
     # FIXME
-    num_modes_per_vertex = list(range(Nmax // 4, Nmax + 1, Nmax // 4))
+    num_modes_per_vertex = list(range(Nmax // 5, Nmax + 1, Nmax // 5))
 
     l_char = example.l_char
     max_err = defaultdict(list)
@@ -109,10 +116,10 @@ def main(args):
         dofs_per_vert[max_dofs_per_vert > nmodes] = nmodes
         # distribute dofs
         dofmap.distribute_dofs(dofs_per_vert)
-        ndofs.append(dofmap.num_dofs)
 
         rom = None
         if args.ei:
+            assert wrapped_op is not None
             operator, rhs, current_local_bases = assemble_gfem_system_with_ei(
                     dofmap, wrapped_op, rhs_local, local_bases, dofs_per_vert, max_dofs_per_vert, fom.parameters)
             rom = StationaryModel(operator, rhs, name="locROM_with_ei")
@@ -150,21 +157,16 @@ def main(args):
 
         # l2-mean error
         l2_mean = np.sum(l_char**2.0 * err.norm2(h1_product)) / len(err)
-        l2_err.append(l2_mean)
 
         # H1 norm
         err_norms = l_char * err.norm(h1_product)
         fom_norms = l_char * fom_solutions.norm(h1_product)
         rel_errn = err_norms / fom_norms
-        max_err["h1_semi"].append(np.max(err_norms))
-        max_relerr["h1_semi"].append(np.max(rel_errn))
 
         # Max norm (nodal absolute values)
         u_fom_vec = l_char * fom_solutions.amax()[1]
         e_vec = l_char * err.amax()[1]
         relerr_vec = e_vec / u_fom_vec
-        max_err["max"].append(np.max(e_vec))
-        max_relerr["max"].append(np.max(relerr_vec))
 
         summary = f"""Summary
         Modes:\t{nmodes}
@@ -176,6 +178,23 @@ def main(args):
         """
         logger.info(summary)
 
+        # ### Gather data
+        if len(ndofs) < 1:
+            # prepend value for nmodes=0
+            ndofs.append(0)
+            max_err["h1_semi"].append(np.max(fom_norms))
+            max_err["max"].append(np.max(u_fom_vec))
+            max_relerr["h1_semi"].append(1.0)
+            max_relerr["max"].append(1.0)
+            l2_err.append(np.sum(l_char**2.0 * fom_solutions.norm2(h1_product)) / len(fom_solutions))
+
+        ndofs.append(dofmap.num_dofs)
+        l2_err.append(l2_mean)
+        max_err["h1_semi"].append(np.max(err_norms))
+        max_relerr["h1_semi"].append(np.max(rel_errn))
+        max_err["max"].append(np.max(e_vec))
+        max_relerr["max"].append(np.max(relerr_vec))
+
     # fom.visualize(fom_solutions, filename="ufom.xdmf")
     # fom.visualize(rom_solutions, filename="urom.xdmf")
     # fom.visualize(err, filename="uerr.xdmf")
@@ -184,6 +203,8 @@ def main(args):
         np.savez(
             args.output,
             ndofs=ndofs,
+            max_err_h1_semi=max_err["h1_semi"],
+            max_err_max=max_err["max"],
             max_relerr_h1_semi=max_relerr["h1_semi"],
             max_relerr_max=max_relerr["max"],
             l2_err=l2_err,
