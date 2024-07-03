@@ -12,7 +12,7 @@ from multi.domain import StructuredQuadGrid, RectangularDomain
 from multi.boundary import plane_at
 
 from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxVisualizer
-from pymor.core.logger import getLogger, set_log_levels
+from pymor.core.logger import getLogger
 from pymor.core.defaults import set_defaults
 
 
@@ -26,14 +26,11 @@ def main(args):
         args.nreal, args.method, args.distribution
     ).as_posix()
     set_defaults({"pymor.core.logger.getLogger.filename": logfilename})
-    logger = getLogger(stem)
-
-    loglevels = {"pymor": 30, "pymor.algorithms.gram_schmidt.gram_schmidt": 30}
     if args.debug:
-        loglevels[stem] = 10
+        loglevel = 10 # debug
     else:
-        loglevels[stem] = 30
-    set_log_levels(loglevels)
+        loglevel = 20 # info
+    logger = getLogger(stem, level=loglevel)
 
     # ### Grids
     # global quadrilateral grid for GFEM construction
