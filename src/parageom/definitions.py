@@ -280,6 +280,10 @@ class BeamData:
         return self.figures_path / f"fig_projerr_{config}.pdf"
 
     @property
+    def fig_locrom_error(self) -> Path:
+        return self.figures_path / "locrom_error.pdf"
+
+    @property
     def realizations(self) -> Path:
         """Returns realizations that can be used to create ``np.random.SeedSequence``"""
         file = SRC / "realizations.npy"

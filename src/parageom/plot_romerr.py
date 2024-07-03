@@ -29,6 +29,7 @@ def main(cli):
         "max": "o",
     }
     norm_label = {"h1_semi": "H1-semi", "max": "max"}
+    err_ = "max_relerr"
 
     args = [__file__, cli.outfile]
     styles = [example.plotting_style.as_posix()]
@@ -39,7 +40,7 @@ def main(cli):
             data = np.load(infile)
             num_dofs = data["ndofs"]
             for norm in cli.norm:
-                err = data[norm]
+                err = data["_".join([err_, norm])]
                 mark = marker[norm]
                 if method == "heuristic":
                     label = f"HRRF, {norm_label[norm]}"
@@ -48,6 +49,21 @@ def main(cli):
                     label = f"RRF+POD, {norm_label[norm]}"
                     color = red
                 ax.semilogy(num_dofs, err, color=color, marker=mark, label=label)  # type: ignore
+
+            if cli.ei:
+                infile = example.locrom_error(cli.nreal, method, distr, ei=True)
+                data = np.load(infile)
+                num_dofs = data["ndofs"]
+                for norm in cli.norm:
+                    err = data["_".join([err_, norm])]
+                    mark = marker[norm]
+                    if method == "heuristic":
+                        label = f"HRRF+EI, {norm_label[norm]}"
+                        color = blue
+                    elif method == "hapod":
+                        label = f"RRF+POD+EI, {norm_label[norm]}"
+                        color = red
+                    ax.semilogy(num_dofs, err, color=color, linestyle="dotted", marker=mark, label=label)  # type: ignore
         ax.legend(loc="best")  # type: ignore
         ax.set_xlabel("Number of DOFs")  # type: ignore
         ax.set_ylabel("Relative error")  # type: ignore
@@ -60,6 +76,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("nreal", type=int, help="The n-th realization.")
     parser.add_argument("--norm", nargs="+", type=str, required=True, help="Plot relative error in given norms")
+    parser.add_argument("--ei", action="store_true", help="Additionally plot error of loc ROM with EI.")
     parser.add_argument("outfile", type=str, help="Write plot to path (pdf).")
     args = parser.parse_args(sys.argv[1:])
     main(args)

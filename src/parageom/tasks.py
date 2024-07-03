@@ -279,3 +279,22 @@ def task_locrom():
                         "targets": targets,
                         "clean": True,
                         }
+
+
+def task_plot_locrom_error():
+    """ParaGeom: Plot ROM error"""
+    module = "src.parageom.plot_romerr"
+    nreal = 0
+    distr = "normal"
+    norm = "h1_semi"
+
+    deps = []
+    for method in example.methods:
+        deps.append(example.locrom_error(nreal, method, distr, ei=False))
+        deps.append(example.locrom_error(nreal, method, distr, ei=True))
+    return {
+            "file_dep": deps,
+            "actions": ["python3 -m {} {} --norm {} --ei %(targets)s".format(module, nreal, norm)],
+            "targets": [example.fig_locrom_error],
+            "clean": True,
+            }

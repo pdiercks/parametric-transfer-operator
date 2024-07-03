@@ -25,7 +25,7 @@ def main(args):
     from .dofmap_gfem import GFEMDofMap
 
     # ### logger
-    set_defaults({"pymor.core.logger.getLogger.filename": example.log_run_locrom(args.nreal, args.method, args.distr)})
+    set_defaults({"pymor.core.logger.getLogger.filename": example.log_run_locrom(args.nreal, args.method, args.distr, ei=args.ei)})
     if args.debug:
         loglevel = "DEBUG"
     else:
@@ -59,7 +59,7 @@ def main(args):
         with Timer("EI of subdomain operator") as t:
             mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local, ntrain=101, rtol=1e-4)
             logger.info(f"EI of subdomain operator took {t.elapsed()[0]}.")
-        restricted_op, _ = operator_local.restricted(magic_dofs)
+        restricted_op, _ = operator_local.restricted(magic_dofs, padding=1e-8)
         wrapped_op = EISubdomainOperatorWrapper(restricted_op, mops, interpolation_matrix)
 
         # convert `rhs_local` to NumPy
