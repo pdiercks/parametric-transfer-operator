@@ -124,7 +124,6 @@ def task_hapod():
                 example.log_basis_construction(nreal, "hapod", distr, config)
             )
             targets.append(example.hapod_modes_npy(nreal, distr, config))
-            targets.extend(with_h5(example.hapod_modes_xdmf(nreal, distr, config)))
             targets.append(example.hapod_singular_values(nreal, distr, config))
             yield {
                 "name": config + ":" + str(nreal),
@@ -157,7 +156,6 @@ def task_heuristic():
                 example.log_basis_construction(nreal, "heuristic", distr, config)
             )
             targets.append(example.heuristic_modes_npy(nreal, distr, config))
-            targets.extend(with_h5(example.heuristic_modes_xdmf(nreal, distr, config)))
             yield {
                 "name": config + ":" + str(nreal),
                 "file_dep": deps,
@@ -247,9 +245,18 @@ def task_gfem():
 
 def task_locrom():
     """ParaGeom: Run localized ROM"""
-    module = "src.parageom.run_locrom"
+
+    def create_action(nreal, method, distr, num_test, options):
+        action = "python3 -m src.parageom.run_locrom {} {} {} {}".format(nreal, method, distr, num_test)
+        for k, v in options.items():
+            action += f" {k}"
+            if v:
+                action += f" {v}"
+        return [action]
+
     distr = "normal"
     num_test = 20
+    with_ei = {"no_ei": False, "ei": True}
     for nreal in range(example.num_real):
         for method in example.methods:
             deps = [SRC / "run_locrom.py"]
@@ -259,11 +266,16 @@ def task_locrom():
             for cell in range(5):
                 deps.append(example.local_basis_npy(nreal, method, distr, cell))
             deps.append(example.local_basis_dofs_per_vert(nreal, method, distr))
-            targets = [example.locrom_error(nreal, method, distr), example.log_run_locrom(nreal, method, distr)]
-            yield {
-                    "name": method + ":" + str(nreal),
-                    "file_dep": deps,
-                    "actions": ["python3 -m {} {} {} {} {} --output {}".format(module, nreal, method, distr, num_test, targets)],
-                    "targets": targets,
-                    "clean": True,
-                    }
+            options = {}
+            for k, v in with_ei.items():
+                targets = [example.locrom_error(nreal, method, distr, ei=v), example.log_run_locrom(nreal, method, distr, ei=v)]
+                options["--output"] = targets[0]
+                if v:
+                    options["--ei"] = ""
+                yield {
+                        "name": ":".join([method, k, str(nreal)]),
+                        "file_dep": deps,
+                        "actions": create_action(nreal, method, distr, num_test, options),
+                        "targets": targets,
+                        "clean": True,
+                        }
