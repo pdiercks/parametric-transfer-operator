@@ -19,7 +19,7 @@ def vec2mat(A: csr_array):
     return mapping
 
 
-def interpolate_subdomain_operator(example, operator, ntrain: int=101, rtol: float=1e-5):
+def interpolate_subdomain_operator(example, operator, design: str="lhs", ntrain: int=101, rtol: float=1e-5):
     """EI of subdomain operator.
 
     Args:
@@ -31,9 +31,21 @@ def interpolate_subdomain_operator(example, operator, ntrain: int=101, rtol: flo
     from pymor.vectorarrays.numpy import NumpyVectorSpace
     from pymor.operators.numpy import NumpyMatrixOperator
     from pymor.algorithms.ei import deim
+    from .lhs import sample_lhs
 
     parameter_space = operator.parameters.space(example.mu_range)
-    training_set = parameter_space.sample_uniformly(ntrain)
+    parameter_name = list(example.parameters["subdomain"].keys())[0]
+    if design == "uniform":
+        training_set = parameter_space.sample_uniformly(ntrain)
+    elif design == "lhs":
+        training_set = sample_lhs(
+                parameter_space,
+                name=parameter_name,
+                samples=ntrain,
+                criterion="center",
+                random_state=25525298)
+    else:
+        raise NotImplementedError
 
     # ### build map
     mu_0 = training_set[0]
@@ -87,7 +99,7 @@ if __name__ == "__main__":
     r_op, source_dofs = operator.restricted(magic_dofs)
 
     pspace = operator.parameters.space((0.1, 0.3))
-    test_set = pspace.sample_randomly(20)
+    test_set = pspace.sample_randomly(30)
 
     abserr = []
     relerr = []
