@@ -1,43 +1,49 @@
+"""Build and run localized ROM."""
+
 from pathlib import Path
+from collections import defaultdict
 
 import numpy as np
 
 import dolfinx as df
+from dolfinx.common import Timer
 
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
+from pymor.operators.constructions import VectorOperator
 from pymor.models.basic import StationaryModel
 from pymor.tools.random import new_rng
-from pymor.operators.constructions import VectorOperator
-
-from multi.dofmap import DofMap
-from multi.io import BasesLoader
 
 
 def main(args):
     from .tasks import example
-    from .definitions import BeamProblem
     from .auxiliary_problem import discretize_auxiliary_problem
     from .fom import discretize_fom, discretize_subdomain_operators
+
     from .ei import interpolate_subdomain_operator
-    from .locmor import reconstruct, assemble_system, assemble_system_with_ei, EISubdomainOperatorWrapper
+    from .locmor import reconstruct, assemble_gfem_system, assemble_gfem_system_with_ei, EISubdomainOperatorWrapper
+    from .dofmap_gfem import GFEMDofMap
 
     # ### logger
-    set_defaults(
-        {
-            "pymor.core.logger.getLogger.filename": example.log_run_locrom(
-                args.nreal, args.method, args.distr
-            )
-        }
-    )
-    logger = getLogger(Path(__file__).stem, level="DEBUG")
+    set_defaults({"pymor.core.logger.getLogger.filename": example.log_run_locrom(args.nreal, args.method, args.distr, ei=args.ei)})
+    if args.debug:
+        loglevel = "DEBUG"
+    else:
+        loglevel = "INFO"
+    logger = getLogger(Path(__file__).stem, level=loglevel)
 
     # ### Discretize global FOM
-    global_parent_domain_path = example.global_parent_domain.as_posix()
-    coarse_grid_path = example.coarse_grid("global").as_posix()
+    global_parent_domain_path = example.parent_domain("global")
+    coarse_grid_path = example.coarse_grid("global")
     # do not change interface tags; see src/parageom/preprocessing.py::create_parent_domain
     interface_tags = [i for i in range(15, 25)]
-    global_auxp = discretize_auxiliary_problem(global_parent_domain_path, example.geom_deg, interface_tags, example.parameters["global"], coarse_grid=coarse_grid_path)
+    global_auxp = discretize_auxiliary_problem(
+        global_parent_domain_path.as_posix(),
+        example.geom_deg,
+        interface_tags,
+        example.parameters["global"],
+        coarse_grid=coarse_grid_path.as_posix(),
+    )
     trafo_d_gl = df.fem.Function(global_auxp.problem.V, name="d_trafo")
     fom = discretize_fom(example, global_auxp, trafo_d_gl)
     h1_product = fom.products["h1_0_semi"]
@@ -46,110 +52,194 @@ def main(args):
     operator_local, rhs_local = discretize_subdomain_operators(example)
 
     # ### EI of subdomain operator
-    # mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local)
-    # restricted_op, _ = operator_local.restricted(magic_dofs)
-    # wrapped_op = EISubdomainOperatorWrapper(restricted_op, mops, interpolation_matrix)
+    wrapped_op = None
+    if args.ei:
+        # FIXME
+        # store data of deim somewhere
+        with Timer("EI of subdomain operator") as t:
+            mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local, design="lhs", ntrain=201, rtol=1e-5)
+            logger.info(f"EI of subdomain operator took {t.elapsed()[0]}.")
+        restricted_op, _ = operator_local.restricted(magic_dofs, padding=1e-8)
+        wrapped_op = EISubdomainOperatorWrapper(restricted_op, mops, interpolation_matrix)
 
-    # ### Multiscale Problem
-    beam_problem = BeamProblem(
-        example.coarse_grid("global"), example.global_parent_domain, example
-    )
-    coarse_grid = beam_problem.coarse_grid
+        # convert `rhs_local` to NumPy
+        vector = rhs_local.as_range_array().to_numpy()
+        rhs_va = mops[0].range.from_numpy(vector)
+        rhs_local = VectorOperator(rhs_va)
+
+    # ### Coarse grid of the global domain
+    coarse_grid = global_auxp.coarse_grid
 
     # ### DofMap
-    dofmap = DofMap(coarse_grid)
+    dofmap = GFEMDofMap(coarse_grid)
 
     # ### Reduced bases
-    bases_folder = example.bases_path(args.nreal, args.method, args.distr)
-    num_cells = example.nx * example.ny
-    bases_loader = BasesLoader(bases_folder, num_cells)
-    bases, num_max_modes = bases_loader.read_bases()
-    num_max_modes_per_cell = np.amax(num_max_modes, axis=1)
-    num_min_modes_per_cell = np.amin(num_max_modes, axis=1)
-    max_modes = np.amax(num_max_modes_per_cell)
-    min_modes = np.amin(num_min_modes_per_cell)
-    logger.info(f"Global minimum number of modes per edge is: {min_modes}.")
-    logger.info(f"Global maximum number of modes per edge is: {max_modes}.")
+    # 0: left, 1: transition, 2: inner, 3: transition, 4: right
+    archetypes = []
+    for cell in range(5):
+        archetypes.append(np.load(example.local_basis_npy(args.nreal, args.method, args.distr, cell)))
+
+    local_bases = []
+    local_bases.append(archetypes[0].copy())
+    local_bases.append(archetypes[1].copy())
+    for _ in range(6):
+        local_bases.append(archetypes[2].copy())
+    local_bases.append(archetypes[3].copy())
+    local_bases.append(archetypes[4].copy())
+    bases_length = [len(rb) for rb in local_bases]
+
+    # ### Maximum number of modes per vertex
+    max_dofs_per_vert = np.load(example.local_basis_dofs_per_vert(args.nreal, args.method, args.distr))
+    # raise to number of cells in the coarse grid
+    repetitions = [1, 1, coarse_grid.num_cells - len(archetypes) + 1, 1, 1]
+    assert np.isclose(np.sum(repetitions), coarse_grid.num_cells)
+    max_dofs_per_vert = np.repeat(max_dofs_per_vert, repetitions, axis=0)
+    assert max_dofs_per_vert.shape == (coarse_grid.num_cells, 4)
+    assert np.allclose(np.array(bases_length), np.sum(max_dofs_per_vert, axis=1))
 
     # ### ROM Assembly and Error Analysis
-    # P = fom.parameters.space(example.mu_range)
-    # with new_rng(example.validation_set_seed):
-    #     validation_set = P.sample_randomly(args.num_test)
-    validation_set = list()
-    mymu = fom.parameters.parse([0.12 * example.unit_length for _ in range(10)])
-    # mymu = fom.parameters.parse([0.2 * example.unit_length for _ in range(10)])
-    # mymu = fom.parameters.parse([0.28 * example.unit_length for _ in range(10)])
-    validation_set.append(mymu)
+    P = fom.parameters.space(example.mu_range)
+    with new_rng(example.validation_set_seed):
+        validation_set = P.sample_randomly(args.num_test)
 
-    # better not create functions inside loops
+    # Functions to store FOM & ROM solution
     u_rb = df.fem.Function(fom.solution_space.V)
     u_loc = df.fem.Function(operator_local.source.V)
 
-    max_errors = []
-    max_relerrors = []
+    Nmax = max_dofs_per_vert.max()
+    ΔN = 10
+    num_modes_per_vertex = list(range(Nmax // ΔN, Nmax + 1, Nmax // ΔN))
+    logger.debug(f"{Nmax=}")
+    logger.debug(f"{num_modes_per_vertex=}")
 
-    # TODO set appropriate value for number of modes
-    num_fine_scale_modes = list(range(0, max_modes + 1, 2))
+    l_char = example.l_char
+    max_err = defaultdict(list)
+    max_relerr = defaultdict(list)
+    l2_err = []
+    ndofs = []
 
-    # Conversion of rhs to NumpyVectorSpace
-    # range_space = mops[0].range
-    # b = VectorOperator(range_space.from_numpy(
-    #     rhs.as_range_array().to_numpy()
-    #     ))
+    t_loop = Timer("Loop")
+    t_loop.start()
+    for nmodes in num_modes_per_vertex:
 
-    for nmodes in num_fine_scale_modes:
-        # operator, rhs, local_bases = assemble_system_with_ei(
-        #         example, nmodes, dofmap, wrapped_op, b, bases, num_max_modes, fom.parameters
-        # )
-        # rom = StationaryModel(operator, rhs, name="locROM")
+        # construct `dofs_per_vert` for current number of modes
+        dofs_per_vert = max_dofs_per_vert.copy()
+        dofs_per_vert[max_dofs_per_vert > nmodes] = nmodes
+        # distribute dofs
+        dofmap.distribute_dofs(dofs_per_vert)
+
+        rom = None
+        if args.ei:
+            assert wrapped_op is not None
+            with Timer("AssemblyEI") as t:
+                operator, rhs, current_local_bases = assemble_gfem_system_with_ei(
+                        dofmap, wrapped_op, rhs_local, local_bases, dofs_per_vert, max_dofs_per_vert, fom.parameters)
+                logger.info(f"AssemblyEI took {t.elapsed()[0]}.")
+            rom = StationaryModel(operator, rhs, name="locROM_with_ei")
 
         fom_solutions = fom.solution_space.empty()
         rom_solutions = fom.solution_space.empty()
 
-        err_norms = []
         for mu in validation_set:
-            U_fom = fom.solve(mu)  # is this cached or computed everytime?
+            U_fom = fom.solve(mu)
             fom_solutions.append(U_fom)
-            operator, rhs, local_bases = assemble_system(
-                    example, nmodes, dofmap, operator_local, rhs_local, mu, bases, num_max_modes, fom.parameters
-                    )
-            rom = StationaryModel(operator, rhs, name="locROM")
-            U_rb_ = rom.solve(mu)
 
-            reconstruct(U_rb_.to_numpy(), dofmap, local_bases, u_loc, u_rb)
-            # copy seems necessary here
-            # without it I get a PETSC ERROR (segmentation fault)
-            U_rom = fom.solution_space.make_array([u_rb.vector.copy()])  # type: ignore
+            if args.ei:
+                assert rom is not None
+                assert rom.name == "locROM_with_ei"
+                with Timer("SolveEI") as t:
+                    U_rb_ = rom.solve(mu)
+                    logger.info(f"SolveEI took {t.elapsed()[0]}.")
+            else:
+                with Timer("Assembly") as t:
+                    operator, rhs, current_local_bases = assemble_gfem_system(
+                        dofmap,
+                        operator_local,
+                        rhs_local,
+                        mu,
+                        local_bases,
+                        dofs_per_vert,
+                        max_dofs_per_vert,
+                    )
+                    logger.info(f"{nmodes=}, \tAssembly took {t.elapsed()[0]}.")
+                rom = StationaryModel(operator, rhs, name="locROM")
+                with Timer("Solve") as t:
+                    U_rb_ = rom.solve(mu)
+                    logger.info(f"{nmodes=}, \tSolve took {t.elapsed()[0]}.")
+
+            with Timer("reconstruction") as t:
+                reconstruct(U_rb_.to_numpy(), dofmap, current_local_bases, u_loc, u_rb)
+                logger.info(f"{nmodes=},\treconstruction took {t.elapsed()[0]}.")
+            U_rom = fom.solution_space.make_array([u_rb.x.petsc_vec.copy()])  # type: ignore
             rom_solutions.append(U_rom)
 
+        # absolute error
         err = fom_solutions - rom_solutions
-        fom_norms = fom_solutions.norm(h1_product)
-        err_norms = err.norm(h1_product)
-        max_err = np.max(err_norms)
-        logger.debug(f"{nmodes=}\tnum_dofs: {dofmap.num_dofs}\t{max_err=}")
-        max_errors.append(max_err)
-        max_relerrors.append(max_err / fom_norms[np.argmax(err_norms)])
 
-        breakpoint()
-        # FIXME
-        # norm of rom solution is much smaller, although qualitatively rom solution
-        # seems to be okay
+        # l2-mean error
+        l2_mean = np.sum(l_char**2.0 * err.norm2(h1_product)) / len(err)
+
+        # H1 norm
+        err_norms = l_char * err.norm(h1_product)
+        fom_norms = l_char * fom_solutions.norm(h1_product)
+        rel_errn = err_norms / fom_norms
+
+        # Max norm (nodal absolute values)
+        u_fom_vec = l_char * fom_solutions.amax()[1]
+        e_vec = l_char * err.amax()[1]
+        relerr_vec = e_vec / u_fom_vec
+
+        summary = f"""Summary
+        Modes:\t{nmodes}
+        Ndofs:\t{dofmap.num_dofs}
+        Test set size:\t{args.num_test}
+        Max H1 relative error:\t{np.max(rel_errn)}
+        Max max relative error:\t{np.max(relerr_vec)}
+        l2-mean error:\t{l2_mean}
+        """
+        logger.info(summary)
+
+        # ### Gather data
+        if len(ndofs) < 1:
+            # prepend value for nmodes=0
+            ndofs.append(0)
+            max_err["h1_semi"].append(np.max(fom_norms))
+            max_err["max"].append(np.max(u_fom_vec))
+            max_relerr["h1_semi"].append(1.0)
+            max_relerr["max"].append(1.0)
+            l2_err.append(np.sum(l_char**2.0 * fom_solutions.norm2(h1_product)) / len(fom_solutions))
+
+        ndofs.append(dofmap.num_dofs)
+        l2_err.append(l2_mean)
+        max_err["h1_semi"].append(np.max(err_norms))
+        max_relerr["h1_semi"].append(np.max(rel_errn))
+        max_err["max"].append(np.max(e_vec))
+        max_relerr["max"].append(np.max(relerr_vec))
+    t_loop.stop()
+    logger.info(f"Error analysis took {t_loop.elapsed()[0]}.")
+
+    # fom.visualize(fom_solutions, filename="ufom.xdmf")
+    # fom.visualize(rom_solutions, filename="urom.xdmf")
+    # fom.visualize(err, filename="uerr.xdmf")
 
     if args.output is not None:
-        np.savetxt(
+        np.savez(
             args.output,
-            np.vstack((num_fine_scale_modes, max_relerrors)).T,
-            delimiter=",",
-            header="modes, error",
+            ndofs=ndofs,
+            max_err_h1_semi=max_err["h1_semi"],
+            max_err_max=max_err["max"],
+            max_relerr_h1_semi=max_relerr["h1_semi"],
+            max_relerr_max=max_relerr["max"],
+            l2_err=l2_err,
         )
 
     if args.show:
         import matplotlib.pyplot as plt
 
         plt.title("ROM error relative to FOM")
-        plt.semilogy(num_fine_scale_modes, max_relerrors, "k-o")
+        plt.semilogy(ndofs, max_relerr["h1_semi"], "k-o")
         plt.ylabel("Rel. error")
-        plt.xlabel("Number of fine scale basis functions per edge")
+        plt.xlabel("Number of DOFs")
         plt.show()
 
 
@@ -173,12 +263,10 @@ if __name__ == "__main__":
         help="The distribution used for sampling.",
         choices=("normal", "multivariate_normal"),
     )
-    parser.add_argument(
-        "num_test", type=int, help="Size of the test set used for validation."
-    )
-    parser.add_argument("--show", action="store_true", help="show error plot.")
-    parser.add_argument(
-        "--output", type=str, help="Path (.csv) to write relative error."
-    )
+    parser.add_argument("num_test", type=int, help="Size of the test set used for validation.")
+    parser.add_argument("--ei", action="store_true", help="Use empirical interpolation.")
+    parser.add_argument("--show", action="store_true", help="Show error plot.")
+    parser.add_argument("--debug", action="store_true", help="Set loglevel to DEBUG.")
+    parser.add_argument("--output", type=str, help="Path (.npz) to write error.")
     args = parser.parse_args(sys.argv[1:])
     main(args)

@@ -1,14 +1,18 @@
 import typing
 import ufl
 
+from mpi4py import MPI
 import dolfinx as df
+import dolfinx.fem.petsc
+import numpy as np
 
-from multi.domain import Domain, RectangularDomain
+from multi.domain import Domain, RectangularDomain, StructuredQuadGrid
 from multi.problems import LinearProblem
 from multi.materials import LinearElasticMaterial
-from multi.boundary import plane_at, point_at
+from multi.boundary import plane_at
 from multi.preprocessing import create_meshtags
 from multi.product import InnerProduct
+from multi.io import read_mesh
 
 from pymor.basic import VectorOperator, StationaryModel
 from pymor.bindings.fenicsx import (
@@ -16,7 +20,7 @@ from pymor.bindings.fenicsx import (
     FenicsxVisualizer,
     FenicsxMatrixOperator,
 )
-
+from .definitions import BeamData
 
 class ParaGeomLinEla(LinearProblem):
     """Represents a geometrically parametrized linear elastic problem."""
@@ -107,10 +111,9 @@ def discretize_subdomain_operators(example):
     )
     d = df.fem.Function(aux.problem.V, name="d_trafo")
 
-    EMOD = example.youngs_modulus
     POISSON = example.poisson_ratio
     omega = aux.problem.domain
-    problem = ParaGeomLinEla(omega, aux.problem.V, E=EMOD, NU=POISSON, d=d)
+    problem = ParaGeomLinEla(omega, aux.problem.V, E=1.0, NU=POISSON, d=d)
 
     # ### wrap stiffness matrix as pymor operator
     def param_setter(mu):
@@ -124,7 +127,8 @@ def discretize_subdomain_operators(example):
     )
 
     # ### wrap external force as pymor operator
-    TY = -example.traction_y
+    EMOD = example.youngs_modulus
+    TY = -example.traction_y / EMOD
     traction = df.fem.Constant(
         omega.grid, (df.default_scalar_type(0.0), df.default_scalar_type(TY))
     )
@@ -136,10 +140,14 @@ def discretize_subdomain_operators(example):
     return operator, rhs
 
 
-def discretize_fom(example, auxiliary_problem, trafo_disp):
+def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
     """Discretize FOM with Pull Back"""
     from .fom import ParaGeomLinEla
-    from .matrix_based_operator import FenicsxMatrixBasedOperator, BCGeom, BCTopo
+    from .matrix_based_operator import (
+        FenicsxMatrixBasedOperator,
+        BCTopo,
+        _create_dirichlet_bcs,
+    )
 
     domain = auxiliary_problem.problem.domain.grid
     tdim = domain.topology.dim
@@ -152,38 +160,52 @@ def discretize_fom(example, auxiliary_problem, trafo_disp):
     EMOD = example.youngs_modulus
     POISSON = example.poisson_ratio
     V = trafo_disp.function_space
-    problem = ParaGeomLinEla(omega, V, E=EMOD, NU=POISSON, d=trafo_disp)
+    problem = ParaGeomLinEla(omega, V, E=1.0, NU=POISSON, d=trafo_disp)
+
+    # ### Dirichlet bcs are defined globally
+    grid, _, _ = read_mesh(
+        example.coarse_grid("global"),
+        MPI.COMM_SELF,
+        kwargs={"gdim": example.gdim},
+    )
+    coarse_grid = StructuredQuadGrid(grid)
+    dirichlet_left = example.get_dirichlet(coarse_grid.grid, "left")
+    dirichlet_right = example.get_dirichlet(coarse_grid.grid, "right")
+    assert dirichlet_left is not None
+    assert dirichlet_right is not None
 
     # Dirichlet BCs
-    origin = point_at(omega.xmin)
-    bottom_right_locator = point_at([omega.xmax[0], omega.xmin[1], 0.0])
-    bottom_right = df.mesh.locate_entities_boundary(domain, 0, bottom_right_locator)
-    u_origin = df.fem.Constant(domain, (df.default_scalar_type(0.0),) * omega.gdim)
-    u_bottom_right = df.fem.Constant(domain, df.default_scalar_type(0.0))
-
-    bc_origin = BCGeom(u_origin, origin, V)
-    bc_bottom_right = BCTopo(u_bottom_right, bottom_right, 0, V, sub=1)
-    problem.add_dirichlet_bc(
-        value=bc_origin.value, boundary=bc_origin.locator, method="geometrical"
+    entities_left = df.mesh.locate_entities_boundary(
+        domain, fdim, dirichlet_left["boundary"]
     )
-    problem.add_dirichlet_bc(
-        value=bc_bottom_right.value,
-        boundary=bc_bottom_right.entities,
-        sub=1,
-        method="topological",
-        entity_dim=bc_bottom_right.entity_dim,
+    bc_left = BCTopo(
+        df.fem.Constant(V.mesh, dirichlet_left["value"]),
+        entities_left,
+        fdim,
+        V,
+        sub=dirichlet_left["sub"],
     )
+    entities_right = df.mesh.locate_entities_boundary(
+        domain, fdim, dirichlet_right["boundary"]
+    )
+    bc_right = BCTopo(
+        df.fem.Constant(V.mesh, dirichlet_right["value"]),
+        entities_right,
+        fdim,
+        V,
+        sub=dirichlet_right["sub"],
+    )
+    bcs = _create_dirichlet_bcs((bc_left, bc_right))
 
     # Neumann BCs
-    TY = -example.traction_y
+    TY = -example.traction_y / EMOD
     traction = df.fem.Constant(
         domain, (df.default_scalar_type(0.0), df.default_scalar_type(TY))
     )
     problem.add_neumann_bc(top_marker, traction)
 
     problem.setup_solver()
-    dirichlet = problem.get_dirichlet_bcs()
-    problem.assemble_vector(bcs=dirichlet)
+    problem.assemble_vector(bcs=bcs)
 
     # ### wrap as pymor model
     def param_setter(mu):
@@ -198,7 +220,7 @@ def discretize_fom(example, auxiliary_problem, trafo_disp):
         problem.form_lhs,
         params,
         param_setter=param_setter,
-        bcs=(bc_origin, bc_bottom_right),
+        bcs=(bc_left, bc_right),
         name="ParaGeom",
     )
 
@@ -207,11 +229,35 @@ def discretize_fom(example, auxiliary_problem, trafo_disp):
     # problem goes out of scope and problem.b is deleted
     rhs = VectorOperator(operator.range.make_array([problem.b.copy()]))  # type: ignore
 
-    # ### Inner product
-    inner_product = InnerProduct(V, product="h1-semi", bcs=dirichlet)
+    # ### Inner products
+    inner_product = InnerProduct(V, product="h1-semi", bcs=bcs)
     product_mat = inner_product.assemble_matrix()
     product_name = "h1_0_semi"
     h1_product = FenicsxMatrixOperator(product_mat, V, V, name=product_name)
+
+    l2_inner = InnerProduct(V, product="l2", bcs=bcs)
+    product_mat = l2_inner.assemble_matrix()
+    product_l2 = "l2"
+    l2_product = FenicsxMatrixOperator(product_mat, V, V, name=product_l2)
+
+    # u = ufl.TrialFunction(V)
+    # v = ufl.TestFunction(V)
+    # l_char = df.fem.Constant(V.mesh, df.default_scalar_type(100. ** 2))
+    # scaled_h1_0_semi = l_char * ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx
+    # a_cpp = df.fem.form(scaled_h1_0_semi)
+    # A = dolfinx.fem.petsc.create_matrix(a_cpp)
+    # A.zeroEntries()
+    # dolfinx.fem.petsc.assemble_matrix(A, a_cpp, bcs=bcs)
+    # A.assemble()
+    # scaled_h1_product = FenicsxMatrixOperator(A, V, V, name="scaled_h1_0_semi")
+
+    # scaled_l2 = l_char * ufl.inner(u, v) * ufl.dx
+    # l2_cpp = df.fem.form(scaled_l2)
+    # P = dolfinx.fem.petsc.create_matrix(l2_cpp)
+    # P.zeroEntries()
+    # dolfinx.fem.petsc.assemble_matrix(P, l2_cpp, bcs=bcs)
+    # P.assemble()
+    # scaled_l2_product = FenicsxMatrixOperator(P, V, V, name="scaled_l2")
 
     # ### Visualizer
     viz = FenicsxVisualizer(FenicsxVectorSpace(V))
@@ -220,6 +266,52 @@ def discretize_fom(example, auxiliary_problem, trafo_disp):
     # output functional !!!
 
     fom = StationaryModel(
-        operator, rhs, products={product_name: h1_product}, visualizer=viz, name="FOM"
+        operator,
+        rhs,
+        products={product_name: h1_product, product_l2: l2_product},
+        visualizer=viz,
+        name="FOM",
     )
     return fom
+
+
+if __name__ == "__main__":
+    from .tasks import example
+    from .auxiliary_problem import discretize_auxiliary_problem
+
+    coarse_grid_path = example.coarse_grid("global").as_posix()
+    parent_domain_path = example.parent_domain("global").as_posix()
+    degree = example.geom_deg
+    interface_tags = [
+        i for i in range(15, 25)
+    ]  # FIXME better define in Example data class
+    auxp = discretize_auxiliary_problem(
+        parent_domain_path,
+        degree,
+        interface_tags,
+        example.parameters["global"],
+        coarse_grid=coarse_grid_path,
+    )
+    d = df.fem.Function(auxp.problem.V, name="d_trafo")
+    fom = discretize_fom(example, auxp, d)
+
+    parameter_space = auxp.parameters.space(example.mu_range)
+    mu = parameter_space.parameters.parse(
+        [0.2 * example.unit_length for _ in range(10)]
+    )
+    U = fom.solve(mu) # dimensionless solution U, real displacement D=l_char * U
+    # with characteristic length l_char = 100. mm (unit length)
+
+    D = U.copy()
+    l_char = 100.
+    D.scal(l_char)
+
+    # check norm of displacement field
+    assert np.isclose(D.norm(), U.norm() * l_char)
+    assert np.isclose(D.norm(fom.h1_0_semi_product), U.norm(fom.h1_0_semi_product) * l_char)
+
+    # check load
+    total_load = np.sum(fom.rhs.as_range_array().to_numpy())  # type: ignore
+    assert np.isclose(total_load, -example.traction_y / example.youngs_modulus * 10)
+
+    fom.visualize(U, filename="fom_mu_bar.xdmf")

@@ -104,7 +104,7 @@ def _replace_integral_domains(form, common_domain):
     return form
 
 
-def _restrict_form(form, S, R, submesh: SubmeshWrapper):
+def _restrict_form(form, S, R, submesh: SubmeshWrapper, padding=1e-14):
     """Restrict `form` to submesh.
 
     Args:
@@ -112,6 +112,7 @@ def _restrict_form(form, S, R, submesh: SubmeshWrapper):
         S: Source space.
         R: Range space.
         submesh: The submesh for restricted evaluation.
+        padding: Padding parameter for creation of interpolation data.
     """
 
     # FIXME
@@ -136,7 +137,7 @@ def _restrict_form(form, S, R, submesh: SubmeshWrapper):
         V_r_range = V_r_source
 
     interp_data = df.fem.create_nonmatching_meshes_interpolation_data(
-        V_r_source.mesh, V_r_source.element, S.mesh
+        V_r_source.mesh, V_r_source.element, S.mesh, padding=padding
     )
 
     args = tuple(
@@ -390,7 +391,7 @@ class FenicsxMatrixBasedOperator(Operator):
             V, initial_guess=initial_guess, least_squares=least_squares
         )
 
-    def restricted(self, dofs):
+    def restricted(self, dofs, padding=1e-14):
 
         if len(self.form.arguments()) == 1:
             raise NotImplementedError
@@ -418,7 +419,7 @@ class FenicsxMatrixBasedOperator(Operator):
         ))
 
         # ### restrict form to submesh
-        restricted_form, V_r_source, V_r_range, interp_data = _restrict_form(self.form, S, R, submesh)
+        restricted_form, V_r_source, V_r_range, interp_data = _restrict_form(self.form, S, R, submesh, padding=padding)
 
         # ### restrict Dirichlet BCs
         r_bcs = list()
@@ -473,6 +474,7 @@ class FenicsxMatrixBasedOperator(Operator):
                 for r_coeff in restricted_form.coefficients():
                     for coeff in self.form.coefficients():
                         if r_coeff.name == coeff.name:
+                            r_coeff.x.array[:] = 0.0
                             r_coeff.interpolate(
                                 coeff, nmm_interpolation_data=interp_data
                             )

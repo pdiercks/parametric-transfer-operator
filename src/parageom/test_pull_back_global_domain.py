@@ -1,22 +1,25 @@
 import numpy as np
 
 from mpi4py import MPI
-from dolfinx import fem, default_scalar_type
+import dolfinx as df
 from dolfinx.io import gmshio
 from dolfinx.io.utils import XDMFFile
 
-from multi.boundary import plane_at, point_at
+from multi.boundary import plane_at
 from multi.preprocessing import create_meshtags
-from multi.domain import RectangularDomain
+from multi.domain import RectangularDomain, StructuredQuadGrid
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinearElasticityProblem
 from multi.product import InnerProduct
+from multi.io import read_mesh
 
-from pymor.bindings.fenicsx import FenicsxMatrixOperator, FenicsxVectorSpace
+from pymor.bindings.fenicsx import FenicsxMatrixOperator
 from multi.projection import relative_error, absolute_error
+from .definitions import BeamData
 
 
-def compute_reference_solution(example, mshfile, degree, d):
+def compute_reference_solution(example: BeamData, mshfile, degree, d):
+    from .matrix_based_operator import BCTopo, _create_dirichlet_bcs
     # translate parent domain
     domain = gmshio.read_from_msh(
         mshfile, MPI.COMM_WORLD, gdim=2
@@ -41,21 +44,35 @@ def compute_reference_solution(example, mshfile, degree, d):
     EMOD = example.youngs_modulus
     POISSON = example.poisson_ratio
     material = LinearElasticMaterial(gdim=omega.gdim, E=EMOD, NU=POISSON)
-    V = fem.functionspace(domain, ("P", degree, (omega.gdim,)))
+    V = df.fem.functionspace(domain, ("P", degree, (omega.gdim,)))
     problem = LinearElasticityProblem(omega, V, phases=material)
 
     # Dirichlet BCs
-    origin = point_at(omega.xmin)
-    bottom_right = point_at([omega.xmax[0], omega.xmin[1], 0.])
-    u_origin = fem.Constant(domain, (default_scalar_type(0.0),) * omega.gdim)
-    u_bottom_right = fem.Constant(domain, default_scalar_type(0.0))
-    problem.add_dirichlet_bc(u_origin, origin, method="geometrical")
-    problem.add_dirichlet_bc(u_bottom_right, bottom_right, sub=1, method="geometrical", entity_dim=0)
+    grid, _, _ = read_mesh(
+        example.coarse_grid("global"),
+        MPI.COMM_SELF,
+        kwargs={"gdim": example.gdim},
+    )
+    coarse_grid = StructuredQuadGrid(grid)
+    dirichlet_left = example.get_dirichlet(coarse_grid.grid, "left")
+    dirichlet_right = example.get_dirichlet(coarse_grid.grid, "right")
+    assert dirichlet_left is not None
+    assert dirichlet_right is not None
+
+    # Dirichlet BCs
+    entities_left = df.mesh.locate_entities_boundary(domain, fdim, dirichlet_left["boundary"])
+    entities_right = df.mesh.locate_entities_boundary(domain, fdim, dirichlet_right["boundary"])
+
+    bc_left = BCTopo(df.fem.Constant(V.mesh, dirichlet_left["value"]), entities_left, fdim, V, sub=dirichlet_left["sub"])
+    bc_right = BCTopo(df.fem.Constant(V.mesh, dirichlet_right["value"]), entities_right, fdim, V, sub=dirichlet_right["sub"])
+    bcs = _create_dirichlet_bcs((bc_left, bc_right))
+    for bc in bcs:
+        problem.add_dirichlet_bc(bc)
 
     # Neumann BCs
     TY = -example.traction_y
-    traction = fem.Constant(
-        domain, (default_scalar_type(0.0), default_scalar_type(TY))
+    traction = df.fem.Constant(
+        domain, (df.default_scalar_type(0.0), df.default_scalar_type(TY))
     )
     problem.add_neumann_bc(top_marker, traction)
 
@@ -71,17 +88,18 @@ def main():
     from .fom import discretize_fom
 
     coarse_grid_path = example.coarse_grid("global").as_posix()
-    parent_domain_path = example.global_parent_domain.as_posix()
+    parent_domain_path = example.parent_domain("global").as_posix()
     degree = example.geom_deg
 
     interface_tags = [i for i in range(15, 25)] # FIXME better define in Example data class
     aux = discretize_auxiliary_problem(
         parent_domain_path, degree, interface_tags, example.parameters["global"], coarse_grid=coarse_grid_path
     )
-    values = np.array([0.15, 0.17, 0.19, 0.21, 0.23, 0.25, 0.27, 0.29, 0.2, 0.3]) * example.unit_length
-    mu = aux.parameters.parse(values)
-    d = fem.Function(aux.problem.V, name="d_trafo")
-    aux.solve(d, mu)  # type: ignore
+    parameter_space = aux.parameters.space(example.mu_range)
+    mu = parameter_space.sample_randomly(1)[0]
+    d = df.fem.Function(aux.problem.V, name="d_trafo")
+    fom = discretize_fom(example, aux, d)
+    U = fom.solve(mu)
 
     # ### reference displacement solution on the physical mesh
     u_phys = compute_reference_solution(example, parent_domain_path, degree, d)
@@ -91,8 +109,6 @@ def main():
         xdmf.write_mesh(u_phys.function_space.mesh) # type: ignore
         xdmf.write_function(u_phys, t=0.0) # type: ignore
 
-    fom = discretize_fom(example, aux, d)
-    U = fom.solve(mu)
     # fom.visualize(U, filename="test_fom.bp")
 
     # ISSUE
@@ -100,10 +116,10 @@ def main():
     # it works based on geometry.
     # In the physical mesh, the whole might actually be bigger/smaller and therefore
     # for some cells in the parent mesh there are no cells at these positions.
-    # Therefore, after the interpolation the zeros at these locations are simply zero.
+    # Therefore, after the interpolation the values at these locations are simply zero.
     source = fom.solution_space
     U_ref = source.from_numpy(u_phys.x.array.reshape(1, -1)) # type: ignore
-    # fom.visualize(U_ref, filename="test_fom_ref.bp")
+    fom.visualize(U_ref, filename="test_fom_pull_back.xdmf")
 
     inner_product = InnerProduct(source.V, "h1")
     prod_mat = inner_product.assemble_matrix()

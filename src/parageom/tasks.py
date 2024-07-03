@@ -7,7 +7,7 @@ from doit.tools import run_once
 from .definitions import BeamData, ROOT
 
 os.environ["PYMOR_COLORS_DISABLE"] = "1"
-example = BeamData(name="parageom")
+example = BeamData(name="parageom", run_mode="DEBUG")
 SRC = ROOT / "src" / f"{example.name}"
 CONFIGS = example.configurations
 
@@ -61,119 +61,72 @@ def task_parent_unit_cell():
     }
 
 
-def task_training_sets():
-    """ParaGeom: Create training sets"""
-    from .lhs import sample_lhs
-    import numpy as np
-    from pymor.parameters.base import ParameterSpace
-    from pymor.core.pickle import dump
+def task_coarse_grid():
+    """ParaGeom: Create structured coarse grids"""
+    module = "src.parageom.preprocessing"
 
-    def create_training_set(config, seed, targets):
-        parameter_space = ParameterSpace(example.parameters[config], example.mu_range)
-        name = list(example.parameters[config].keys())[0]
-        num_samples = example.ntrain(config)
-        train = sample_lhs(
-            parameter_space,
-            name=name,
-            samples=num_samples,
-            criterion="center",
-            random_state=seed,
-        )
-        with open(targets[0], "wb") as fh:
-            dump({"training_set": train, "seed": seed}, fh)
-
-    seed = example.training_set_seed
-    random_seeds = np.random.SeedSequence(seed).generate_state(len(CONFIGS))
-
-    for config, seed in zip(CONFIGS, random_seeds):
+    for config in list(CONFIGS) + ["global", "target"]:
         yield {
             "name": config,
             "file_dep": [],
-            "actions": [(create_training_set, [config, seed])],
-            "targets": [example.training_set(config)],
+            "actions": [
+                "python3 -m {} {} {} --output %(targets)s".format(
+                    module, config, "coarse"
+                )
+            ],
+            "targets": [example.coarse_grid(config)],
             "clean": True,
             "uptodate": [run_once],
         }
 
 
-def task_coarse_grid():
-    """ParaGeom: Create structured coarse grids"""
+def task_fine_grid():
+    """ParaGeom: Create parent domain mesh"""
     module = "src.parageom.preprocessing"
-
-    for config in list(CONFIGS) + ["global"]:
+    for config in list(CONFIGS) + ["global", "target"]:
         yield {
-                "name": config,
-                "file_dep": [],
-                "actions": ["python3 -m {} {} {} --output %(targets)s".format(module, config, "coarse")],
-                "targets": [example.coarse_grid(config)],
-                "clean": True,
-                "uptodate": [run_once],
-                }
-
-
-def task_global_parent_domain():
-    """ParaGeom: Create global parent domain mesh"""
-    module = "src.parageom.preprocessing"
-    config = "global"
-    return {
-            "file_dep": [example.coarse_grid(config)],
-            "actions": ["python3 -m {} {} {} --output %(targets)s".format(module, config, "parent")],
-            "targets": [example.global_parent_domain],
+            "name": config,
+            "file_dep": [example.coarse_grid(config), example.parent_unit_cell],
+            "actions": [
+                "python3 -m {} {} {} --output %(targets)s".format(
+                    module, config, "fine"
+                )
+            ],
+            "targets": [example.parent_domain(config)],
             "clean": True,
-            }
-
-
-def task_oversampling_grids():
-    """ParaGeom: Create physical meshes (Ω, Ω_in) for each μ"""
-    module = "src.parageom.preprocessing"
-
-    for config in CONFIGS:
-        ntrain = example.ntrain(config)
-        targets = []
-        for k in range(ntrain):
-            targets.extend(with_h5(example.oversampling_domain(config, k)))
-            targets.extend(with_h5(example.target_subdomain(config, k)))
-        yield {
-                "name": config,
-                "file_dep": [example.parent_unit_cell, example.training_set(config), example.coarse_grid(config)],
-                "actions": ["python3 -m {} {} {}".format(module, config, "oversampling")],
-                "targets": targets,
-                "clean": True,
-                }
+        }
 
 
 def task_preproc():
     """ParaGeom: All tasks related to preprocessing"""
     return {
-            "actions": None,
-            "task_dep": ["oversampling_grids", "global_parent_domain", "coarse_grid", "training_sets", "parent_unit_cell"]
-            }
+        "actions": None,
+        "task_dep": ["coarse_grid", "fine_grid", "parent_unit_cell"],
+    }
 
 
 def task_hapod():
-    """ParaGeom: Construct edge basis via HAPOD"""
+    """ParaGeom: Construct basis via HAPOD"""
     module = "src.parageom.hapod"
     nworkers = 4  # number of workers in pool
     distr = example.distributions[0]
     for nreal in range(example.num_real):
         for config in CONFIGS:
             deps = [SRC / "hapod.py"]
-            # global grids needed for BeamProblem initialization
             deps.append(example.coarse_grid("global"))
-            deps.append(example.global_parent_domain)
+            deps.append(example.parent_domain("global"))
+            deps.append(example.coarse_grid("target"))
+            deps.append(example.parent_domain("target"))
+            deps.append(example.coarse_grid(config))
+            deps.append(example.parent_domain(config))
             targets = []
-            for k in range(example.ntrain(config)):
-                deps.append(example.oversampling_domain(config, k))
-                targets.extend(with_h5(
-                        example.hapod_snapshots(nreal, distr, config, k)
-                        ))
-            targets.append(example.log_edge_basis(nreal, "hapod", distr, config))
-            targets.append(example.rrf_bases_length(nreal, "hapod", distr, config))
-            targets.append(example.fine_scale_edge_modes_npz(nreal, "hapod", distr, config))
-            targets.append(example.hapod_singular_values_npz(nreal, distr, config))
-            targets.append(example.hapod_pod_data(nreal, distr, config))
+            targets.append(
+                example.log_basis_construction(nreal, "hapod", distr, config)
+            )
+            targets.append(example.hapod_modes_npy(nreal, distr, config))
+            targets.append(example.hapod_singular_values(nreal, distr, config))
             yield {
-                "name": config+":"+str(nreal),
+                "name": config + ":" + str(nreal),
                 "file_dep": deps,
                 "actions": [
                     "python3 -m {} {} {} {} --max_workers {}".format(
@@ -185,25 +138,163 @@ def task_hapod():
             }
 
 
-def task_extension():
-    """ParaGeom: Extend fine scale modes and write final basis"""
-    module = "src.parageom.extension"
-    num_cells = example.nx * example.ny
+def task_heuristic():
+    """ParaGeom: Construct basis via Heuristic range finder"""
+    module = "src.parageom.heuristic"
+    distr = example.distributions[0]
+    for nreal in range(example.num_real):
+        for config in CONFIGS:
+            deps = [SRC / "heuristic.py"]
+            deps.append(example.coarse_grid("global"))
+            deps.append(example.parent_domain("global"))
+            deps.append(example.coarse_grid("target"))
+            deps.append(example.parent_domain("target"))
+            deps.append(example.coarse_grid(config))
+            deps.append(example.parent_domain(config))
+            targets = []
+            targets.append(
+                example.log_basis_construction(nreal, "heuristic", distr, config)
+            )
+            targets.append(example.heuristic_modes_npy(nreal, distr, config))
+            yield {
+                "name": config + ":" + str(nreal),
+                "file_dep": deps,
+                "actions": [
+                    "python3 -m {} {} {} {}".format(module, distr, config, nreal)
+                ],
+                "targets": targets,
+                "clean": True,
+            }
+
+
+def task_projerr():
+    """ParaGeom: Compute projection error"""
+    module = "src.parageom.projerr"
     distr = example.distributions[0]
     for nreal in range(example.num_real):
         for method in example.methods:
-            for cell_index in range(num_cells):
-                config = example.cell_to_config(cell_index)
+            for config in CONFIGS:
+                deps = [SRC / "projerr.py"]
+                deps.append(example.coarse_grid("global"))
+                deps.append(example.parent_domain("global"))
+                deps.append(example.coarse_grid("target"))
+                deps.append(example.parent_domain("target"))
+                deps.append(example.coarse_grid(config))
+                deps.append(example.parent_domain(config))
+                deps.append(example.parent_unit_cell)
+                targets = []
+                targets.append(example.projerr(nreal, method, distr, config))
+                targets.append(example.log_projerr(nreal, method, distr, config))
                 yield {
-                    "name": f"{method}_{cell_index}",
-                    "file_dep": [example.fine_scale_edge_modes_npz(nreal, method, distr, config)],
-                    "actions": [
-                        "python3 -m {} {} {} {} {}".format(module, nreal, method, distr, cell_index)
-                    ],
-                    "targets": [
-                        example.local_basis_npz(nreal, method, distr, cell_index),
-                        example.fine_scale_modes_bp(nreal, method, distr, cell_index),
-                        example.log_extension(nreal, method, distr, cell_index),
-                    ],
-                    "clean": [rm_rf],
-                }
+                        "name": method + ":" + config + ":" + str(nreal),
+                        "file_dep": deps,
+                        "actions": ["python3 -m {} {} {} {} {} --output {}".format(module, nreal, method, distr, config, targets[0])],
+                        "targets": targets,
+                        "clean": True
+                        }
+
+
+def task_fig_projerr():
+    """ParaGeom: Plot projection error"""
+    module = "src.parageom.plot_projerr"
+    distr = example.distributions[0]
+    for nreal in range(example.num_real):
+        for config in CONFIGS:
+            deps = [SRC / "plot_projerr.py"]
+            deps.append(example.projerr(nreal, "hapod", distr, config))
+            deps.append(example.projerr(nreal, "heuristic", distr, config))
+            targets = []
+            targets.append(example.fig_projerr(config))
+            yield {
+                    "name": config + ":" + str(nreal),
+                    "file_dep": deps,
+                    "actions": ["python3 -m {} {} {} %(targets)s".format(module, nreal, config)],
+                    "targets": targets,
+                    "clean": True,
+                    }
+
+
+def task_gfem():
+    """ParaGeom: Build GFEM approximation"""
+    module = "src.parageom.gfem"
+    distr = example.distributions[0]
+    for nreal in range(example.num_real):
+        for method in example.methods:
+            deps = [SRC / "gfem.py"]
+            deps.append(example.coarse_grid("global"))
+            deps.append(example.parent_unit_cell)
+            for cfg in CONFIGS:
+                if method == "hapod":
+                    deps.append(example.hapod_modes_npy(nreal, distr, cfg))
+                elif method == "heuristic":
+                    deps.append(example.heuristic_modes_npy(nreal, distr, cfg))
+            targets = []
+            # see gfem.py, only 5 (=3+2) cells are used
+            # (+2 to facilitate transition between the 3 archetypes/configurations)
+            for cell in range(5):
+                targets.append(example.local_basis_npy(nreal, method, distr, cell))
+            targets.append(example.local_basis_dofs_per_vert(nreal, method, distr))
+            yield {
+                    "name": method + ":" + str(nreal),
+                    "file_dep": deps,
+                    "actions": ["python3 -m {} {} {} {}".format(module, nreal, method, distr)],
+                    "targets": targets,
+                    "clean": True,
+                    }
+
+
+def task_locrom():
+    """ParaGeom: Run localized ROM"""
+
+    def create_action(nreal, method, distr, num_test, options):
+        action = "python3 -m src.parageom.run_locrom {} {} {} {}".format(nreal, method, distr, num_test)
+        for k, v in options.items():
+            action += f" {k}"
+            if v:
+                action += f" {v}"
+        return [action]
+
+    distr = "normal"
+    num_test = 20
+    with_ei = {"no_ei": False, "ei": True}
+    for nreal in range(example.num_real):
+        for method in example.methods:
+            deps = [SRC / "run_locrom.py"]
+            deps.append(example.coarse_grid("global"))
+            deps.append(example.parent_domain("global"))
+            deps.append(example.parent_unit_cell)
+            for cell in range(5):
+                deps.append(example.local_basis_npy(nreal, method, distr, cell))
+            deps.append(example.local_basis_dofs_per_vert(nreal, method, distr))
+            options = {}
+            for k, v in with_ei.items():
+                targets = [example.locrom_error(nreal, method, distr, ei=v), example.log_run_locrom(nreal, method, distr, ei=v)]
+                options["--output"] = targets[0]
+                if v:
+                    options["--ei"] = ""
+                yield {
+                        "name": ":".join([method, k, str(nreal)]),
+                        "file_dep": deps,
+                        "actions": create_action(nreal, method, distr, num_test, options),
+                        "targets": targets,
+                        "clean": True,
+                        }
+
+
+def task_plot_locrom_error():
+    """ParaGeom: Plot ROM error"""
+    module = "src.parageom.plot_romerr"
+    nreal = 0
+    distr = "normal"
+    norm = "h1_semi"
+
+    deps = []
+    for method in example.methods:
+        deps.append(example.locrom_error(nreal, method, distr, ei=False))
+        deps.append(example.locrom_error(nreal, method, distr, ei=True))
+    return {
+            "file_dep": deps,
+            "actions": ["python3 -m {} {} --norm {} --ei %(targets)s".format(module, nreal, norm)],
+            "targets": [example.fig_locrom_error],
+            "clean": True,
+            }

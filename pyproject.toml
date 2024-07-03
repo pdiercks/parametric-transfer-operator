@@ -7,3 +7,6 @@ backend = "dbm"
 
 [tool.doit.commands.list]
 sort = "definition"
+
+[tool.ruff]
+line-length = 120
