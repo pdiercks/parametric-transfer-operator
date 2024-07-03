@@ -16,21 +16,21 @@ import ufl
 from pymor.algorithms.gram_schmidt import gram_schmidt
 from pymor.algorithms.projection import project
 from pymor.bindings.fenicsx import FenicsxMatrixOperator, FenicsxVectorSpace
-from pymor.operators.constructions import VectorOperator, LincombOperator
+from pymor.operators.constructions import VectorOperator
 from pymor.operators.interface import Operator
 from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.vectorarrays.interface import VectorArray
 from pymor.vectorarrays.numpy import NumpyVectorSpace
 from pymor.parameters.base import Parameters
 
-from multi.boundary import point_at, plane_at
+from multi.boundary import plane_at
 from multi.domain import RectangularDomain, StructuredQuadGrid
 from multi.dofmap import DofMap
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinearElasticityProblem
 from multi.projection import orthogonal_part
 from multi.solver import build_nullspace
-from multi.io import read_mesh#, select_modes
+from multi.io import read_mesh
 from multi.interpolation import make_mapping
 from multi.sampling import create_random_values
 from multi.utils import LogMixin
@@ -170,8 +170,6 @@ class GlobalParaGeomOperator(Operator):
 
         data = self.data
         new = np.zeros((data.shape[1],), dtype=np.float32)
-
-        # TODO: works as expected?
 
         for i, mu_i in enumerate(mu.to_numpy()):
             # restricted evaluation of the subdomain operator

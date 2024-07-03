@@ -244,10 +244,13 @@ class BeamData:
         dir = self.bases_path(nr, method, distr)
         return dir / "dofs_per_vert.npy"
 
-    def locrom_error(self, nreal: int, method: str, distr: str) -> Path:
+    def locrom_error(self, nreal: int, method: str, distr: str, ei: bool=False) -> Path:
         """loc ROM error"""
         dir = self.method_folder(nreal, method)
-        return dir / f"locrom_error_{distr}.npz"
+        if ei:
+            return dir / f"locrom_error_ei_{distr}.npz"
+        else:
+            return dir / f"locrom_error_{distr}.npz"
 
     # @property
     # def fom_minimization_data(self) -> Path:
@@ -300,8 +303,12 @@ class BeamData:
     def log_gfem(self, nr: int, method: str, distr: str) -> Path:
         return self.logs_path(nr, method) / f"gfem_{distr}.log"
 
-    def log_run_locrom(self, nr: int, method: str, distr: str) -> Path:
-        return self.logs_path(nr, method) / f"run_locrom_{distr}.log"
+    def log_run_locrom(self, nr: int, method: str, distr: str, ei: bool=False) -> Path:
+        dir = self.logs_path(nr, method)
+        if ei:
+            return dir / f"run_locrom_ei_{distr}.log"
+        else:
+            return dir / f"run_locrom_{distr}.log"
 
     def hapod_singular_values(self, nr: int, distr: str, conf: str) -> Path:
         """singular values of final POD"""

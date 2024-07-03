@@ -6,6 +6,7 @@ from collections import defaultdict
 import numpy as np
 
 import dolfinx as df
+from dolfinx.common import Timer
 
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
@@ -25,7 +26,11 @@ def main(args):
 
     # ### logger
     set_defaults({"pymor.core.logger.getLogger.filename": example.log_run_locrom(args.nreal, args.method, args.distr)})
-    logger = getLogger(Path(__file__).stem, level="INFO")
+    if args.debug:
+        loglevel = "DEBUG"
+    else:
+        loglevel = "INFO"
+    logger = getLogger(Path(__file__).stem, level=loglevel)
 
     # ### Discretize global FOM
     global_parent_domain_path = example.parent_domain("global")
@@ -51,7 +56,9 @@ def main(args):
     if args.ei:
         # FIXME
         # store data of deim somewhere
-        mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local)
+        with Timer("EI of subdomain operator") as t:
+            mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local, ntrain=101, rtol=1e-4)
+            logger.info(f"EI of subdomain operator took {t.elapsed()[0]}.")
         restricted_op, _ = operator_local.restricted(magic_dofs)
         wrapped_op = EISubdomainOperatorWrapper(restricted_op, mops, interpolation_matrix)
 
@@ -100,8 +107,10 @@ def main(args):
     u_loc = df.fem.Function(operator_local.source.V)
 
     Nmax = max_dofs_per_vert.max()
-    # FIXME
-    num_modes_per_vertex = list(range(Nmax // 5, Nmax + 1, Nmax // 5))
+    ΔN = 10
+    num_modes_per_vertex = list(range(Nmax // ΔN, Nmax + 1, Nmax // ΔN))
+    logger.debug(f"{Nmax=}")
+    logger.debug(f"{num_modes_per_vertex=}")
 
     l_char = example.l_char
     max_err = defaultdict(list)
@@ -109,6 +118,8 @@ def main(args):
     l2_err = []
     ndofs = []
 
+    t_loop = Timer("Loop")
+    t_loop.start()
     for nmodes in num_modes_per_vertex:
 
         # construct `dofs_per_vert` for current number of modes
@@ -120,35 +131,45 @@ def main(args):
         rom = None
         if args.ei:
             assert wrapped_op is not None
-            operator, rhs, current_local_bases = assemble_gfem_system_with_ei(
-                    dofmap, wrapped_op, rhs_local, local_bases, dofs_per_vert, max_dofs_per_vert, fom.parameters)
+            with Timer("AssemblyEI") as t:
+                operator, rhs, current_local_bases = assemble_gfem_system_with_ei(
+                        dofmap, wrapped_op, rhs_local, local_bases, dofs_per_vert, max_dofs_per_vert, fom.parameters)
+                logger.info(f"AssemblyEI took {t.elapsed()[0]}.")
             rom = StationaryModel(operator, rhs, name="locROM_with_ei")
 
         fom_solutions = fom.solution_space.empty()
         rom_solutions = fom.solution_space.empty()
 
         for mu in validation_set:
-            U_fom = fom.solve(mu)  # is this cached or computed everytime?
+            U_fom = fom.solve(mu)
             fom_solutions.append(U_fom)
 
             if args.ei:
                 assert rom is not None
                 assert rom.name == "locROM_with_ei"
-                U_rb_ = rom.solve(mu)
+                with Timer("SolveEI") as t:
+                    U_rb_ = rom.solve(mu)
+                    logger.info(f"SolveEI took {t.elapsed()[0]}.")
             else:
-                operator, rhs, current_local_bases = assemble_gfem_system(
-                    dofmap,
-                    operator_local,
-                    rhs_local,
-                    mu,
-                    local_bases,
-                    dofs_per_vert,
-                    max_dofs_per_vert,
-                )
+                with Timer("Assembly") as t:
+                    operator, rhs, current_local_bases = assemble_gfem_system(
+                        dofmap,
+                        operator_local,
+                        rhs_local,
+                        mu,
+                        local_bases,
+                        dofs_per_vert,
+                        max_dofs_per_vert,
+                    )
+                    logger.info(f"{nmodes=}, \tAssembly took {t.elapsed()[0]}.")
                 rom = StationaryModel(operator, rhs, name="locROM")
-                U_rb_ = rom.solve(mu)
+                with Timer("Solve") as t:
+                    U_rb_ = rom.solve(mu)
+                    logger.info(f"{nmodes=}, \tSolve took {t.elapsed()[0]}.")
 
-            reconstruct(U_rb_.to_numpy(), dofmap, current_local_bases, u_loc, u_rb)
+            with Timer("reconstruction") as t:
+                reconstruct(U_rb_.to_numpy(), dofmap, current_local_bases, u_loc, u_rb)
+                logger.info(f"{nmodes=},\treconstruction took {t.elapsed()[0]}.")
             U_rom = fom.solution_space.make_array([u_rb.x.petsc_vec.copy()])  # type: ignore
             rom_solutions.append(U_rom)
 
@@ -194,6 +215,8 @@ def main(args):
         max_relerr["h1_semi"].append(np.max(rel_errn))
         max_err["max"].append(np.max(e_vec))
         max_relerr["max"].append(np.max(relerr_vec))
+    t_loop.stop()
+    logger.info(f"Error analysis took {t_loop.elapsed()[0]}.")
 
     # fom.visualize(fom_solutions, filename="ufom.xdmf")
     # fom.visualize(rom_solutions, filename="urom.xdmf")
@@ -243,6 +266,7 @@ if __name__ == "__main__":
     parser.add_argument("num_test", type=int, help="Size of the test set used for validation.")
     parser.add_argument("--ei", action="store_true", help="Use empirical interpolation.")
     parser.add_argument("--show", action="store_true", help="Show error plot.")
+    parser.add_argument("--debug", action="store_true", help="Set loglevel to DEBUG.")
     parser.add_argument("--output", type=str, help="Path (.npz) to write error.")
     args = parser.parse_args(sys.argv[1:])
     main(args)
