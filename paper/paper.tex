@@ -1,197 +1,243 @@
 \documentclass[a4paper]{eccomas_paper-2024}
 
 \usepackage{graphicx}
-\usepackage{hyperref}
+\usepackage{url}
+% \usepackage{hyperref}
 \usepackage{amsmath}
 \usepackage{amsfonts}
 \usepackage{amssymb}
+\usepackage{bm}
 \usepackage{physics}
-\usepackage{siunitx}
+% \usepackage{siunitx}
 
 \usepackage{standalone}
 \usepackage{booktabs}
 \usepackage{pgfplotstable}
 \pgfplotsset{compat=1.18}
 
-\title{INSTRUCTIONS TO PREPARE A FULL PAPER FOR THE 9th EUROPEAN CONGRESS ON COMPUTATIONAL METHODS IN APPLIED SCIENCES AND ENGINEERING\break ECCOMAS CONGRESS 2024}
+\usepackage[commentmarkup=uwave]{changes}
+\usepackage{xspace}
 
-\author{FIRST A. AUTHOR$^1$, SECOND B. AUTHOR$^2$ AND THIRD C. AUTHOR$^1$}
+\definechangesauthor[color=blue, name={Philipp Diercks}]{pd}
+\definechangesauthor[color=red, name={Joerg F. Unger}]{jfu}
+\definechangesauthor[color=orange, name={Annika Robens-Radermacher}]{arr}
 
-\heading{First A. Author, Second B. Author and Third C. Author}
+% custom commands
+\newcommand{\ie}{i.\,e.\@\xspace}
+\newcommand{\eg}{e.\,g.\@\xspace}
 
-\address{$^{1}$ International Center for Numerical Methods in Engineering (CIMNE)\\
-Universidad Polit\'{e}cnica de Catalu\~{n}a\\
-Campus Norte UPC, 08034 Barcelona, Spain\\
-e-mail: congress@cimne.upc.edu, www.cimne.com
+\title{AN EFFICIENT LOCALIZED MODEL ORDER REDUCTION FRAMEWORK FOR THE SHAPE OPTIMIZATION OF ADDITIVELY MANUFACTURED LATTICE STRUCTURES\break ECCOMAS CONGRESS 2024}
+
+\author{Philipp Diercks$^{1}$, Karen Veroy$^{2}$, Annika Robens-Radermacher$^{1}$ and Jörg F. Unger$^{1}$}
+
+\heading{Philipp Diercks, Karen Veroy, Annika Robens-Radermacher and Jörg F. Unger}
+
+\address{$^{1}$ Bundesanstalt für Materialforschung und -prüfung, Unter den Eichen 87, 12205 Berlin, \{philipp.diercks, annika.robens-radermacher, joerg.unger\}@bam.de, \url{www.bam.de}
 \and
-$^{2}$ Spanish Association for Numerical Methods in Engineering (SEMNI)\\
-Edificio C1, Campus Norte UPC\\
-Gran Capit\'{a}n s/n, 08034 Barcelona, Spain\\
-email: semni@cimne.upc.edu, www.semni.org
-}
+$^{2}$ Centre for Analysis, Scientific Computing and Applications (CASA), Department of Mathematics and Computer Science, TU Eindhoven, P.O. Box 513, 5600 MB Eindhoven, The Netherlands, k.p.veroy@tue.nl}
 
-\keywords{Computational Mechanics, FEM, Contact Problems}
+\keywords{Multiscale methods, Domain decomposition methods, Model order reduction, parameterized PDEs}
 
-\abstract{This document provides information and instructions for
-preparing a Full Paper to be included in the Proceedings
-of {\it ECCOMAS CONGRESS 2024}. }
+% TODO abstract
+\abstract{Add abstract.}
 
 \begin{document}
 \thispagestyle{empty}
 
-\section{INTRODUCTION}
+\section{INTRODUCTION}%
+\label{sec:introduction}
 
-\makeatletter
-orig: \f@size
-\verb+\normalsize+ \normalsize \f@size
-\makeatother
-It seems that the font size is actually set to 11pt, although 12pt should be used in the body of the text.
+Additive manufacturing (AM), commonly known as 3D printing, is a manufacturing technique that allows for the production of a wide range of structures and complex geometries.
+The objects are build successively by adding material layer by layer from three-dimensional models.
+The technology offers numerous advantages over conventional manufacturing, including greater design flexibility, reduced material waste, and the possibility to produce complex structures with tailored material properties.
+It has been used in a wide range of applications, including aerospace, biomechanical, automotive, and construction industries \comment[id=pd]{TODO:  add citations}.%~\cite{duplessis2022properties,wu2016critical}.
 
-All the participants whose Abstract has been accepted for presentation at the ECCOMAS 2022 Congress are kindly requested to submit the Full Paper electronically via the web page of the \href{https://eccomas2024.org/lisbon}{Congress}, before \textbf{July 1st, 2024}. Congress Proceedings (including full papers only) will be published on Scipedia with DOI number after the congress and will be submitted for indexation to SCOPUS database. Submission of the full paper is not mandatory. The Full Paper should be written following the format of macros for submission. The file has to be translated into Portable Document Format (PDF) before submission via the Conference site. The organizers do not commit themselves to include in the Proceedings any Full Paper received later than the above-mentioned deadline. The corresponding author should be the speaker, and is expected to register and pay his registration fee during the advance period (before \textbf{April 1st, 2024}) for the paper to be included in the technical programme of the ECCOMAS 2024.
+A common engineering practice is to optimize the geometry of a structure by an iterative process, in which an objective function is minimized by systematically choosing parameter values $\bm\mu$ (design variables) and computing the value of the function.
+In structural mechanics, a prominent example of an objective function is mass or compliance which is a function of the parameter-dependent displacement field $\bm{u}(\bm\mu)$.
+In each iteration of the optimization process, the geometry is manually changed in the CAD model and the high fidelity finite element (FE) model, also called full order model (FOM), is simply re-evaluated.
+While this approach is not only an ineffective use of resources, it is also infeasible when solving the FE model is a computationally demanding task, \eg{} in multiscale or large-scale industrial applications.
+Due to the prohibitive cost of even a single FOM solution, the iterative design process cannot be performed using direct numerical simulations.
+\comment[id=pd]{TODO: add suitable refs for localized MOR}
+Therefore, we propose a framework based on localized, also called component-based (CB), parametric model order reduction (pMOR).
+The main idea is to precompute, in a localized manner, empirical basis functions which approximate the solution for some part of the domain without the need to solve the global FOM even once.
+The global approximation is obtained by a suitable coupling of the local reduced spaces spanned by the aforementioned basis functions, in which one naturally relies on domain decomposition (DD) strategies.
+In particular, regarding lattice structures, this approach allows to take advantage of the repetitiveness of the lattice, such that a computation of the local basis is required only for few components, \ie{} unit cells.
 
-\section{METHODS}
+The computation of the local basis is an essential task in localized pMOR and is often done using the concept of oversampling\comment[id=pd]{cite Hou}.
+In this approach, the target subdomain $\varOmega_{\mathrm{in}}$, \ie{} that part of the domain for which one would like to construct basis functions, is extended and boundary conditions are prescribed on the boundary of the larger so-called oversampling domain $\varOmega$ to explore possible solutions.
+In the literature, this oversampling problem is also expressed in terms of a \textit{transfer operator} that maps the values on the boundary $\partial\varOmega$ to the unknown solution restricted to the target subdomain $\bm{u}(\bm{\mu})\vert_{\varOmega_{\mathrm{in}}}$.
+% TODO continue with how to solve the oversampling problem, leading up to range finder
 
-\section{RESULTS}
 
-\subsection{Problem setup}
+\section{METHOD}%
+\label{sec:method}
 
-\begin{figure}
-    \begin{center}
-        \includegraphics[width=0.95\textwidth]{./figures/beam/beam_sketch.pdf}
-    \end{center}
-    \caption{Schematic representation of the structural problem. A simply supported beam is subjected to a constant load.}\label{fig:beam_sketch}
-\end{figure}
+\subsection{Auxiliary Problem} % (fold)
+\label{sub:Auxiliary Problem}
 
+% subsection Auxiliary Problem (end)
+
+\subsection{Construction of local approximation spaces} % (fold)
+\label{sub:Construction of local approximation spaces}
+
+% subsection Construction of local approximation spaces (end)
+
+\subsubsection{Randomized range finder and POD} % (fold)
+\label{sec:Randomized range finder and POD}
+
+% subsubsection Randomized range finder and POD (end)
+
+\subsubsection{Heuristic randomized range finder} % (fold)
+\label{sec:Heuristic randomized range finder}
+
+% subsubsection Heuristic randomized range finder (end)
+
+\subsection{Construction of a global approximation} % (fold)
+\label{sub:Construction of a global approximation}
+
+% subsection Construction of a global approximation (end)
+
+\subsection{Online efficiency} % (fold)
+\label{sub:Online efficiency}
+
+% subsection Online efficiency (end)
+
+\section{NUMERICAL EXPERIMENTS} % (fold)
+\label{sec:numerical experiments}
+
+% section numerical experiments (end)
+
+\subsection{Graded concrete slab} % (fold)
+\label{sub:Graded concrete slab}
+
+% \begin{figure}
+%     \begin{center}
+%         \includegraphics[width=0.95\textwidth]{./figures/beam/beam_sketch.pdf}
+%     \end{center}
+%     \caption{Schematic representation of the structural problem. A simply supported beam is subjected to a constant load.}\label{fig:beam_sketch}
+% \end{figure}
+%
 % TODO placement
-\begin{figure}
-    \begin{center}
-        \includegraphics[width=0.65\textwidth]{./figures/beam/unit_cell.png}
-    \end{center}
-    \caption{Unit cell domain partition.}\label{fig:unit_cell_domain}
-\end{figure}
+% \begin{figure}
+%     \begin{center}
+%         \includegraphics[width=0.65\textwidth]{./figures/beam/unit_cell.png}
+%     \end{center}
+%     \caption{Unit cell domain partition.}\label{fig:unit_cell_domain}
+% \end{figure}
+%
+% \begin{figure}
+%     \begin{center}
+%         \includegraphics[width=0.95\textwidth]{./figures/beam/global_domain.png}
+%     \end{center}
+%     \caption{The partition of the global domain. The colors indicate the variation in Young's modulus for each subdomain.}\label{fig:global_domain}
+% \end{figure}
+%
+% subsection Graded concrete slab (end)
 
-\begin{figure}
-    \begin{center}
-        \includegraphics[width=0.95\textwidth]{./figures/beam/global_domain.png}
-    \end{center}
-    \caption{The partition of the global domain. The colors indicate the variation in Young's modulus for each subdomain.}\label{fig:global_domain}
-\end{figure}
+\subsection{Projection error} % (fold)
+\label{sub:Projection error}
 
-\subsection{Basis Construction}
-For the beam problem, there are three oversampling problems to consider (left, inner, right).
-For each of the associated parametric transfer operators, $n_{train}$ parameter samples are chosen, and
-the range for each of these (fixed) transfer operators is approximated via random sampling. In
-the sampling \textit{normal} or \textit{multivariate normal} distribution is used.
-The range approximation of the $n_{train}$ transfer operators yields $n_{train}$ sets of
-basis functions, which are further compressed via POD, to obtain the final parameter
-independent basis functions (POD modes).
+% subsection Projection error (end)
 
-\subsubsection{Distributed approximate POD}
+\subsection{Reduced order model validation} % (fold)
+\label{sub:Reduced order model validation}
 
-\begin{figure}[!htb]
-\minipage{0.49\textwidth}
-  \includegraphics[]{./figures/beam/fig_loc_svals_left.pdf}
-  \caption{Singular valus left}\label{fig:loc_svals_left}
-\endminipage\hfill
-\minipage{0.49\textwidth}
-  \includegraphics[]{./figures/beam/fig_loc_svals_right.pdf}
-  \caption{Singular valus right}\label{fig:loc_svals_right}
-\endminipage\hfill\\%
-\begin{center}
-\minipage{0.49\textwidth}
-  \includegraphics[]{./figures/beam/fig_loc_svals_inner.pdf}
-  \caption{Singular valus inner}\label{fig:loc_svals_inner}
-\endminipage
-\end{center}
-\end{figure}
+% subsection Reduced order model validation (end)
+
+\subsection{Shape optimization} % (fold)
+\label{sub:Shape optimization}
+
+% subsection Shape optimization (end)
+
+\section{CONCLUSIONS} % (fold)
+\label{sec:conclusions}
+
+% section CONCLUSION (end)
 
 
-% \subsubsection{Projection Error}
-% The projection error is computed for a test set for each configuration that was computed
-% using the FOM. Each test set has size $n_{test}$.
-
-\begin{figure}[!htb]
-\minipage{0.49\textwidth}
-  \includegraphics{./figures/beam/fig_proj_error_left_hapod.pdf}
-  \caption{Projection error hapod}\label{fig:proj_error_left_hapod}
-\endminipage\hfill
-\minipage{0.49\textwidth}
-  \includegraphics{./figures/beam/fig_proj_error_right_hapod.pdf}
-  \caption{Projection error hapod}\label{fig:proj_error_right_hapod}
-\endminipage\hfill\\
-\begin{center}
-\minipage{0.49\textwidth}%
-  \includegraphics{./figures/beam/fig_proj_error_inner_hapod.pdf}
-  \caption{Projection error hapod}\label{fig:proj_error_inner_hapod}
-\endminipage
-\end{center}
-\end{figure}
-
-\begin{table}
-    \centering
-    \caption{HAPOD inner}\label{tab:hapod_inner}
-    \input{./src/beam/tables/hapod_inner.tex}
-\end{table}
-
-\subsubsection{Heuristic range finder}
-
-\begin{figure}[!htb]
-\minipage{0.49\textwidth}
-  \includegraphics{./figures/beam/fig_proj_error_left_heuristic.pdf}
-  \caption{Projection error }\label{fig:proj_error_left_heuristic}
-\endminipage\hfill
-\minipage{0.49\textwidth}
-  \includegraphics{./figures/beam/fig_proj_error_right_heuristic.pdf}
-  \caption{Projection error }\label{fig:proj_error_right_heuristic}
-\endminipage\hfill\\
-\begin{center}
-\minipage{0.49\textwidth}%
-  \includegraphics{./figures/beam/fig_proj_error_inner_heuristic.pdf}
-  \caption{Projection error }\label{fig:proj_error_inner_heuristic}
-\endminipage
-\end{center}
-\end{figure}
-
-\begin{table}
-    \centering
-    \caption{Heuristic rrf inner}\label{tab:heuristic_inner}
-    \input{./src/beam/tables/heuristic_inner.tex}
-\end{table}
-
-\subsection{Localized ROM}
-
-\begin{figure}[!htb]
-    \centering
-    \includegraphics{./figures/beam/fig_loc_rom_error.pdf}
-    \caption{Local ROM error relative to FOM.}\label{fig:loc_rom_error}
-\end{figure}
-
-\subsection{Optimization problem}
-
-\begin{table}
-    \caption{Result of the optimization with FOM and ROM.}\label{tab:minimization_data}
-    \centering
-    \input{./src/beam/tables/minimization_data.tex}
-\end{table}
-
-\begin{table}
-    \caption{Comparison of reduced optimal solution $\mu_N^{\ast}$ and true optimal solution $\mu^{\ast}$.}\label{tab:minimization_comparison}
-    \centering
-    \input{./src/beam/tables/minimization_comparison.tex}
-\end{table}
+% \begin{figure}[!htb]
+% \minipage{0.49\textwidth}
+%   \includegraphics[]{./figures/beam/fig_loc_svals_left.pdf}
+%   \caption{Singular valus left}\label{fig:loc_svals_left}
+% \endminipage\hfill
+% \minipage{0.49\textwidth}
+%   \includegraphics[]{./figures/beam/fig_loc_svals_right.pdf}
+%   \caption{Singular valus right}\label{fig:loc_svals_right}
+% \endminipage\hfill\\%
+% \begin{center}
+% \minipage{0.49\textwidth}
+%   \includegraphics[]{./figures/beam/fig_loc_svals_inner.pdf}
+%   \caption{Singular valus inner}\label{fig:loc_svals_inner}
+% \endminipage
+% \end{center}
+% \end{figure}
 
 
-\section{FORMAT OF REFERENCES}
+% \begin{figure}[!htb]
+% \minipage{0.49\textwidth}
+%   \includegraphics{./figures/beam/fig_proj_error_left_hapod.pdf}
+%   \caption{Projection error hapod}\label{fig:proj_error_left_hapod}
+% \endminipage\hfill
+% \minipage{0.49\textwidth}
+%   \includegraphics{./figures/beam/fig_proj_error_right_hapod.pdf}
+%   \caption{Projection error hapod}\label{fig:proj_error_right_hapod}
+% \endminipage\hfill\\
+% \begin{center}
+% \minipage{0.49\textwidth}%
+%   \includegraphics{./figures/beam/fig_proj_error_inner_hapod.pdf}
+%   \caption{Projection error hapod}\label{fig:proj_error_inner_hapod}
+% \endminipage
+% \end{center}
+% \end{figure}
 
-References should be quoted in the text by superscript
-numbers \cite{McQuerry18,nssga,Oden18} and grouped together at the end of the Full Paper in numerical order as shown in these instructions.
+% \begin{table}
+%     \centering
+%     \caption{HAPOD inner}\label{tab:hapod_inner}
+%     \input{./src/beam/tables/hapod_inner.tex}
+% \end{table}
 
-\section{CONCLUSIONS}
+% \begin{figure}[!htb]
+% \minipage{0.49\textwidth}
+%   \includegraphics{./figures/beam/fig_proj_error_left_heuristic.pdf}
+%   \caption{Projection error }\label{fig:proj_error_left_heuristic}
+% \endminipage\hfill
+% \minipage{0.49\textwidth}
+%   \includegraphics{./figures/beam/fig_proj_error_right_heuristic.pdf}
+%   \caption{Projection error }\label{fig:proj_error_right_heuristic}
+% \endminipage\hfill\\
+% \begin{center}
+% \minipage{0.49\textwidth}%
+%   \includegraphics{./figures/beam/fig_proj_error_inner_heuristic.pdf}
+%   \caption{Projection error }\label{fig:proj_error_inner_heuristic}
+% \endminipage
+% \end{center}
+% \end{figure}
 
-\begin{itemize}
-\item[-] Full Papers in format for publication should be submitted electronically via the web page of the Conference, before \textbf{July 1st, 2024}. They must be converted to  Portable Document Format (PDF) before submission. The maximum size of the file is 4 Mb.
-\end{itemize}
+% \begin{table}
+%     \centering
+%     \caption{Heuristic rrf inner}\label{tab:heuristic_inner}
+%     \input{./src/beam/tables/heuristic_inner.tex}
+% \end{table}
 
+% \begin{figure}[!htb]
+%     \centering
+%     \includegraphics{./figures/beam/fig_loc_rom_error.pdf}
+%     \caption{Local ROM error relative to FOM.}\label{fig:loc_rom_error}
+% \end{figure}
+
+% \begin{table}
+%     \caption{Result of the optimization with FOM and ROM.}\label{tab:minimization_data}
+%     \centering
+%     \input{./src/beam/tables/minimization_data.tex}
+% \end{table}
+
+% \begin{table}
+%     \caption{Comparison of reduced optimal solution $\mu_N^{\ast}$ and true optimal solution $\mu^{\ast}$.}\label{tab:minimization_comparison}
+%     \centering
+%     \input{./src/beam/tables/minimization_comparison.tex}
+% \end{table}
+
+% TODO use biblatex instead if the template allows that
 \begin{thebibliography}{99}
 \bibitem{McQuerry18}  McQuerry, M. 2018. “Validation of a Clothing Heat Transfer Model in Nonisothermal Test Conditions.” J Test Eval 46, no. 1 (January/February): 1–7. http://doi.org/10.1520/JTE20170073
 

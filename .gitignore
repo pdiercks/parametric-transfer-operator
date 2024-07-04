@@ -4,9 +4,11 @@
 *.blg
 *.fdb_latexmk
 *.fls
+*.loc
 *.log
 *.out
 *.run.xml
+*.soc
 *.synctex.gz
 
 .doit.db.*
