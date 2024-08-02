@@ -178,9 +178,11 @@ class GlobalParaGeomOperator(Operator):
             _coeffs = solve(interpolation_matrix, A[rdofs, rdofs])
             λ = _coeffs.reshape(1, M)
 
-            subdomain_range = np.s_[indexptr[i - 1] : indexptr[i]]
+            subdomain_range = None
             if i == 0:
                 subdomain_range = np.s_[0 : indexptr[i]]
+            else:
+                subdomain_range = np.s_[indexptr[i - 1] : indexptr[i]]
             new[subdomain_range] = np.dot(λ, data[:, subdomain_range])
 
         K = coo_array((new, (self.rows, self.cols)), shape=self.shape)  # type: ignore
