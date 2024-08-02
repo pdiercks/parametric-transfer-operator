@@ -2,18 +2,34 @@
 
 \usepackage{graphicx}
 \usepackage{url}
-% \usepackage{hyperref}
 \usepackage{amsmath}
 \usepackage{amsfonts}
 \usepackage{amssymb}
 \usepackage{bm}
 \usepackage{physics}
-% \usepackage{siunitx}
 
 \usepackage{standalone}
 \usepackage{booktabs}
 \usepackage{pgfplotstable}
 \pgfplotsset{compat=1.18}
+
+\usepackage[%
+backend=biber,
+style=numeric, %alphabetic, numeric
+giveninits=true,
+natbib=true,
+url=false,
+doi=true,
+eprint=false,
+isbn=false,
+defernumbers=true,
+labelnumber,
+hyperref=false,
+maxbibnames=3,
+sorting=none,%remove this to have things sorted, e.g. use style=alphabetic
+]{biblatex}
+\addbibresource{main.bib}
+\addbibresource{references.bib}
 
 \usepackage[commentmarkup=uwave]{changes}
 \usepackage{xspace}
@@ -30,16 +46,17 @@
 
 \author{Philipp Diercks$^{1}$, Karen Veroy$^{2}$, Annika Robens-Radermacher$^{1}$ and Jörg F. Unger$^{1}$}
 
+% heading is supposed to contain only the authors (on all pages except the first page)
 \heading{Philipp Diercks, Karen Veroy, Annika Robens-Radermacher and Jörg F. Unger}
 
 \address{$^{1}$ Bundesanstalt für Materialforschung und -prüfung, Unter den Eichen 87, 12205 Berlin, \{philipp.diercks, annika.robens-radermacher, joerg.unger\}@bam.de, \url{www.bam.de}
 \and
 $^{2}$ Centre for Analysis, Scientific Computing and Applications (CASA), Department of Mathematics and Computer Science, TU Eindhoven, P.O. Box 513, 5600 MB Eindhoven, The Netherlands, k.p.veroy@tue.nl}
 
-\keywords{Multiscale methods, Domain decomposition methods, Model order reduction, parameterized PDEs}
+\keywords{Multiscale methods, Domain decomposition methods, Model order reduction, parameterized PDEs, Shape optimization}
 
 % TODO abstract
-\abstract{Add abstract.}
+\abstract{\comment[id=pd]{TODO: add abstract}.}
 
 \begin{document}
 \thispagestyle{empty}
@@ -50,24 +67,37 @@ $^{2}$ Centre for Analysis, Scientific Computing and Applications (CASA), Depart
 Additive manufacturing (AM), commonly known as 3D printing, is a manufacturing technique that allows for the production of a wide range of structures and complex geometries.
 The objects are build successively by adding material layer by layer from three-dimensional models.
 The technology offers numerous advantages over conventional manufacturing, including greater design flexibility, reduced material waste, and the possibility to produce complex structures with tailored material properties.
-It has been used in a wide range of applications, including aerospace, biomechanical, automotive, and construction industries \comment[id=pd]{TODO:  add citations}.%~\cite{duplessis2022properties,wu2016critical}.
+It has been used in a wide range of applications, including aerospace, biomechanical, automotive, and construction industries~\cite{Plessis2022Properties,Wu2016critical}.
 
 A common engineering practice is to optimize the geometry of a structure by an iterative process, in which an objective function is minimized by systematically choosing parameter values $\bm\mu$ (design variables) and computing the value of the function.
 In structural mechanics, a prominent example of an objective function is mass or compliance which is a function of the parameter-dependent displacement field $\bm{u}(\bm\mu)$.
 In each iteration of the optimization process, the geometry is manually changed in the CAD model and the high fidelity finite element (FE) model, also called full order model (FOM), is simply re-evaluated.
 While this approach is not only an ineffective use of resources, it is also infeasible when solving the FE model is a computationally demanding task, \eg{} in multiscale or large-scale industrial applications.
 Due to the prohibitive cost of even a single FOM solution, the iterative design process cannot be performed using direct numerical simulations.
-\comment[id=pd]{TODO: add suitable refs for localized MOR}
 Therefore, we propose a framework based on localized, also called component-based (CB), parametric model order reduction (pMOR).
 The main idea is to precompute, in a localized manner, empirical basis functions which approximate the solution for some part of the domain without the need to solve the global FOM even once.
 The global approximation is obtained by a suitable coupling of the local reduced spaces spanned by the aforementioned basis functions, in which one naturally relies on domain decomposition (DD) strategies.
+For a review of concepts in localized model order reduction it is referred to~\cite{BuhrReview}.
 In particular, regarding lattice structures, this approach allows to take advantage of the repetitiveness of the lattice, such that a computation of the local basis is required only for few components, \ie{} unit cells.
 
-The computation of the local basis is an essential task in localized pMOR and is often done using the concept of oversampling\comment[id=pd]{cite Hou}.
+The computation of the local basis is an essential task in localized pMOR and is often done using the concept of oversampling~\cite{Hou1997Multiscale}.
 In this approach, the target subdomain $\varOmega_{\mathrm{in}}$, \ie{} that part of the domain for which one would like to construct basis functions, is extended and boundary conditions are prescribed on the boundary of the larger so-called oversampling domain $\varOmega$ to explore possible solutions.
-In the literature, this oversampling problem is also expressed in terms of a \textit{transfer operator} that maps the values on the boundary $\partial\varOmega$ to the unknown solution restricted to the target subdomain $\bm{u}(\bm{\mu})\vert_{\varOmega_{\mathrm{in}}}$.
-% TODO continue with how to solve the oversampling problem, leading up to range finder
+In the literature, this oversampling problem is also expressed in terms of a \textit{transfer operator} $\bm{T}$ that maps the values on the boundary $\partial\varOmega$ to the unknown solution restricted to the target subdomain $\bm{u}(\bm{\mu})\vert_{\varOmega_{\mathrm{in}}}$.
+The construction of (optimal) local approximation spaces then comprises the calculation of the left singular vectors of this transfer operator~\cite{Babuska2011Optimal,Smetana2016Optimal}.
+The direct calculation via eigenvalue problems is, however, computationally expensive and the range of the transfer operator, and thus the optimal local approximation spaces can be efficiently approximated by random sampling~\cite{Buhr2018Randomized}.
+Here, the authors treat non-parametrized PDEs and to the authors knowledge the extension to the parametric setting for linear problems has not been done yet.
+In~\cite{Smetana2016Optimal}, the authors propose a spectral greedy algorithm to construct local approximation spaces.
+Taddei and Patera~\cite{Taddei2018Localization} propose a combination of transfer eigenproblems and proper orthogonal decomposition (POD).
+For parameterized nonlinear elliptic PDEs Smetana and Taddei~\cite{Smetana2023Localized} present a randomized local training procedure with global enrichment.
 
+The contributions of the present work are given as follows.
+First, as references~\cite{Smetana2016Optimal,Taddei2018Localization} do not make use of range approximation via random sampling, suitable training strategies to construct local approximation spaces for parameterized linear problems via random sampling are investigated.
+In particular, the approach given in~\cite{Taddei2018Localization}, identified as a \textit{distributed approximate POD} (see also~\cite{Himpe2018Hierarchical}), is compared to a \textit{heuristic randomized range finder} developed in this work.
+Second, a framework for the shape optimization of lattice structures is proposed.
+It combines the aforementioned algorithms to construct local approximation spaces with an auxiliary problem, as in~\cite{Guo2022Learning}, to facilitate geometrical parametrizations of the unit cell and the matrix version~\cite{Negri2015Efficient} of the empirical interpolation method (EIM)~\cite{Barrault2004‘empirical,Chaturantabut2010Nonlinear} to ensure online efficiency of the final reduced order model.
+Furthermore, the global approximation space is constructed from the local spaces using the generalized finite element method (GFEM)~\cite{Babuska2004Generalized}.
+
+% TODO add paragraph outlining structure of the text
 
 \section{METHOD}%
 \label{sec:method}
@@ -82,7 +112,7 @@ In the literature, this oversampling problem is also expressed in terms of a \te
 
 % subsection Construction of local approximation spaces (end)
 
-\subsubsection{Randomized range finder and POD} % (fold)
+\subsubsection{Randomized range finder and proper orthogonal decomposition} % (fold)
 \label{sec:Randomized range finder and POD}
 
 % subsubsection Randomized range finder and POD (end)
@@ -134,10 +164,10 @@ In the literature, this oversampling problem is also expressed in terms of a \te
 %
 % subsection Graded concrete slab (end)
 
-\subsection{Projection error} % (fold)
-\label{sub:Projection error}
+\subsection{Projection error study} % (fold)
+\label{sub:Projection error study}
 
-% subsection Projection error (end)
+% subsection Projection error study (end)
 
 \subsection{Reduced order model validation} % (fold)
 \label{sub:Reduced order model validation}
@@ -153,7 +183,6 @@ In the literature, this oversampling problem is also expressed in terms of a \te
 \label{sec:conclusions}
 
 % section CONCLUSION (end)
-
 
 % \begin{figure}[!htb]
 % \minipage{0.49\textwidth}
@@ -237,14 +266,7 @@ In the literature, this oversampling problem is also expressed in terms of a \te
 %     \input{./src/beam/tables/minimization_comparison.tex}
 % \end{table}
 
-% TODO use biblatex instead if the template allows that
-\begin{thebibliography}{99}
-\bibitem{McQuerry18}  McQuerry, M. 2018. “Validation of a Clothing Heat Transfer Model in Nonisothermal Test Conditions.” J Test Eval 46, no. 1 (January/February): 1–7. http://doi.org/10.1520/JTE20170073
-
-\bibitem{nssga}   National Stone, Sand, and Gravel Association (NSSGA). 2013. The Aggregates Handbook, 2nd ed. Englewood, CO: Society of Mining, Metallurgy, and Exploration.
-
-\bibitem{Oden18}  Oden, C. P., C. L. Ho, and H. F. Kashani. 2018. “Man-Portable Real-Time Ballast Inspection Device Using Ground-Penetrating Radar.” In Railroad Ballast Testing and Properties, edited by T. Stark, R. Swan, and R. Szecsy, 77–104. West Conshohocken, PA: ASTM International. http://doi.org/10.1520/STP160520170023
-
-\end{thebibliography}
+% references
+\printbibliography[title=REFERENCES]
 
 \end{document}
