@@ -281,7 +281,7 @@ def task_locrom():
                         }
 
 
-def task_plot_locrom_error():
+def task_fig_locrom_error():
     """ParaGeom: Plot ROM error"""
     module = "src.parageom.plot_romerr"
     nreal = 0
