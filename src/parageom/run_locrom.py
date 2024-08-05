@@ -57,10 +57,12 @@ def main(args):
         # FIXME
         # store data of deim somewhere
         with Timer("EI of subdomain operator") as t:
-            mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local, design="lhs", ntrain=201, rtol=1e-5)
+            mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local, design="uniform", ntrain=501, modes=30, atol=0., rtol=0.)
             logger.info(f"EI of subdomain operator took {t.elapsed()[0]}.")
-        restricted_op, _ = operator_local.restricted(magic_dofs, padding=1e-8)
-        wrapped_op = EISubdomainOperatorWrapper(restricted_op, mops, interpolation_matrix)
+        m_dofs, m_inv = np.unique(magic_dofs, return_inverse=True)
+        logger.debug(f"{magic_dofs=}")
+        restricted_op, _ = operator_local.restricted(m_dofs, padding=1e-8)
+        wrapped_op = EISubdomainOperatorWrapper(restricted_op, mops, interpolation_matrix, magic_dofs, m_inv)
 
         # convert `rhs_local` to NumPy
         vector = rhs_local.as_range_array().to_numpy()
@@ -102,13 +104,25 @@ def main(args):
     with new_rng(example.validation_set_seed):
         validation_set = P.sample_randomly(args.num_test)
 
+    # validation_set = []
+    # worst_mu = fom.parameters.parse([0.19628836838044644, 0.2143025578627486, 0.2828750466149146, 0.1101593240207409, 0.27095548069548, 0.29507875973479625, 0.1490535958710057, 0.2990766776269598, 0.2996352586268254, 0.2803501068366864])
+    # worst_mu = fom.parameters.parse([0.19628837, 0.21430256, 0.28287505, 0.11015932, 0.27095548, 0.29507876, 0.1490536 , 0.29907668, 0.29963526, 0.28035011]) # rounded values
+    # validation_set.append(worst_mu)
+
+    # ### this version yields value rel_errn = 0.65753078
+    # worst_mu = validation_set[7] # same as hardcoded above
+    # validation_set = []
+    # validation_set.append(worst_mu)
+
     # Functions to store FOM & ROM solution
     u_rb = df.fem.Function(fom.solution_space.V)
     u_loc = df.fem.Function(operator_local.source.V)
 
     Nmax = max_dofs_per_vert.max()
     ΔN = 10
-    num_modes_per_vertex = list(range(Nmax // ΔN, Nmax + 1, Nmax // ΔN))
+    # num_modes_per_vertex = list(range(Nmax // ΔN, Nmax + 1, Nmax // ΔN))
+    # num_modes_per_vertex = [50, ]
+    num_modes_per_vertex = [50, 60, ]
     logger.debug(f"{Nmax=}")
     logger.debug(f"{num_modes_per_vertex=}")
 
@@ -183,6 +197,7 @@ def main(args):
         err_norms = l_char * err.norm(h1_product)
         fom_norms = l_char * fom_solutions.norm(h1_product)
         rel_errn = err_norms / fom_norms
+        logger.info(f"{rel_errn=}")
 
         # Max norm (nodal absolute values)
         u_fom_vec = l_char * fom_solutions.amax()[1]

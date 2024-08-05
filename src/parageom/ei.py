@@ -1,5 +1,7 @@
 """empirical interpolation module"""
 
+from typing import Optional
+
 import numpy as np
 from scipy.sparse import csr_array
 
@@ -19,13 +21,15 @@ def vec2mat(A: csr_array):
     return mapping
 
 
-def interpolate_subdomain_operator(example, operator, design: str="lhs", ntrain: int=101, rtol: float=1e-5):
+def interpolate_subdomain_operator(example, operator, design: str="lhs", ntrain: int=101, modes: Optional[int] = None, atol: Optional[float] = None, rtol: Optional[float] = None):
     """EI of subdomain operator.
 
     Args:
         example: data class.
         operator: FenicsxMatrixBasedOperator to interpolate.
+        design: Design for the sampling of training set (choices: uniform, random, lhs).
         ntrain: Number of training samples for the DEIM.
+        modes: Use at most `modes` POD modes with DEIM.
         rtol: Relative tolerance for the POD with DEIM.
     """
     from pymor.vectorarrays.numpy import NumpyVectorSpace
@@ -37,6 +41,8 @@ def interpolate_subdomain_operator(example, operator, design: str="lhs", ntrain:
     parameter_name = list(example.parameters["subdomain"].keys())[0]
     if design == "uniform":
         training_set = parameter_space.sample_uniformly(ntrain)
+    elif design == "random":
+        training_set = parameter_space.sample_randomly(ntrain)
     elif design == "lhs":
         training_set = sample_lhs(
                 parameter_space,
@@ -61,18 +67,26 @@ def interpolate_subdomain_operator(example, operator, design: str="lhs", ntrain:
     Λ = vec_source.make_array(snapshots)
 
     # ### DEIM
-    interpolation_dofs, collateral_basis, deim_data = deim(Λ, rtol=rtol)
+    interpolation_dofs, collateral_basis, deim_data = deim(Λ, modes=modes, pod=True, atol=atol, rtol=rtol, product=None, pod_options={})
 
     # ### outputs/targets
-
     # reorder idofs and collateral basis
+    # this is necessary because the dofs are ordered in ascending order
+    # when the dof mapping from full mesh to the submesh space is computed
     ind = np.argsort(interpolation_dofs)
     idofs = interpolation_dofs[ind]
     collateral_basis = collateral_basis[ind]
 
     # interpolation dofs in the matrix format
-    magic_dofs = np.unique(index_map[idofs])
+    magic_dofs = index_map[idofs]
     interpolation_matrix = collateral_basis.dofs(idofs).T
+
+    # FIXME
+    # index_map[idofs] maps the index j in the vector format to a pair of row & col indices
+    # the user has to do map only unique magic dofs for evaluation in the restricted range
+    # (i.e. on the submesh) and use the `return_inverse` option with np.unique, to be able
+    # to reconstruct pairs of row & col indices in the restricted range.
+    # See __main__ below.
 
     # ### matrix operators (reverse vec operation)
     # collateral matrices
@@ -95,28 +109,40 @@ if __name__ == "__main__":
     from pymor.operators.constructions import LincombOperator
 
     operator, _ = discretize_subdomain_operators(example)
-    cb, interpmat, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator)
-    r_op, source_dofs = operator.restricted(magic_dofs)
+    cb, interpmat, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator, design="uniform", ntrain=501, modes=15, atol=0., rtol=0.)
+    m_dofs, m_inv = np.unique(magic_dofs, return_inverse=True)
+    r_op, source_dofs = operator.restricted(m_dofs)
+    range_dofs = r_op.restricted_range_dofs[m_inv].reshape(magic_dofs.shape)
 
     pspace = operator.parameters.space((0.1, 0.3))
-    test_set = pspace.sample_randomly(30)
+    test_set = pspace.sample_randomly(50)
+    # test_set = []
+    # worst_mu = [0.19628837, 0.21430256, 0.28287505, 0.11015932, 0.27095548,
+    #    0.29507876, 0.1490536 , 0.29907668, 0.29963526, 0.28035011]
+    # for val in worst_mu:
+    #     mu = operator.parameters.parse(val)
+    #     test_set.append(mu)
+
 
     abserr = []
     relerr = []
 
     for mu in test_set:
-        # ### Reference matrix
-        kref = csr_array(operator.assemble(mu).matrix.getValuesCSR()[::-1])
-
         # ### compare DEIM approximation
         # Note, need to get the matrix instead of vectorized entries, because
         # r_op.restricted_range_dofs points to dofs of V
         AU = csr_array(r_op.assemble(mu).matrix.getValuesCSR()[::-1])
-        AU_dofs = AU[r_op.restricted_range_dofs, r_op.restricted_range_dofs]
-        interpolation_coefficients = solve(interpmat, AU_dofs)
+        AU_dofs = AU[range_dofs[:, 0], range_dofs[:, 1]]
+        try:
+            interpolation_coefficients = solve(interpmat, AU_dofs)
+        except ValueError:
+            breakpoint()
 
         ei_approx = LincombOperator(cb, interpolation_coefficients)
         K = ei_approx.assemble().matrix
+
+        # ### Reference matrix
+        kref = csr_array(operator.assemble(mu).matrix.getValuesCSR()[::-1])
 
         abserr.append(norm(kref - K, ord="fro"))
         relerr.append(norm(kref - K, ord="fro") / norm(kref, ord="fro"))
