@@ -70,7 +70,7 @@ class BeamData:
     )
     training_set_seed: int = 767667058
     testing_set_seed: int = 545445836
-    validation_set_seed: int = 986718877
+    validation_set_seed: int = 9818890
     projerr_seed: int = 923719053
     configurations: tuple[str, str, str] = ("left", "inner", "right")
     distributions: tuple[str, ...] = ("normal",)
@@ -223,7 +223,7 @@ class BeamData:
             map = {"left": 60, "inner": 80, "right": 60}
             return map[config]
         elif self.run_mode == "PRODUCTION":
-            map = {"left": 40, "inner": 60, "right": 40}
+            map = {"left": 150, "inner": 200, "right": 150}
             return map[config]
         else:
             raise NotImplementedError
@@ -349,7 +349,6 @@ class BeamData:
     def config_to_omega_in(self, config: str, local=True) -> list[int]:
         """Maps config to cell local index/indices of oversampling domain that correspond to omega in."""
         global_indices = {"left": [0, 1], "right": [8, 9], "inner": [4, 5]}
-        # FIXME: this is not the case maybe?
         local_indices = {"left": [0, 1], "right": [1, 2], "inner": [1, 2]}
         if local:
             return local_indices[config]
