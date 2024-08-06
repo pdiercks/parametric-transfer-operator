@@ -57,7 +57,7 @@ def main(args):
         # FIXME
         # store data of deim somewhere
         with Timer("EI of subdomain operator") as t:
-            mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local, design="uniform", ntrain=501, modes=30, atol=0., rtol=0.)
+            mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local, design="uniform", ntrain=501, modes=None, atol=0., rtol=1e-12, method="method_of_snapshots")
             logger.info(f"EI of subdomain operator took {t.elapsed()[0]}.")
         m_dofs, m_inv = np.unique(magic_dofs, return_inverse=True)
         logger.debug(f"{magic_dofs=}")
@@ -104,25 +104,13 @@ def main(args):
     with new_rng(example.validation_set_seed):
         validation_set = P.sample_randomly(args.num_test)
 
-    # validation_set = []
-    # worst_mu = fom.parameters.parse([0.19628836838044644, 0.2143025578627486, 0.2828750466149146, 0.1101593240207409, 0.27095548069548, 0.29507875973479625, 0.1490535958710057, 0.2990766776269598, 0.2996352586268254, 0.2803501068366864])
-    # worst_mu = fom.parameters.parse([0.19628837, 0.21430256, 0.28287505, 0.11015932, 0.27095548, 0.29507876, 0.1490536 , 0.29907668, 0.29963526, 0.28035011]) # rounded values
-    # validation_set.append(worst_mu)
-
-    # ### this version yields value rel_errn = 0.65753078
-    # worst_mu = validation_set[7] # same as hardcoded above
-    # validation_set = []
-    # validation_set.append(worst_mu)
-
     # Functions to store FOM & ROM solution
     u_rb = df.fem.Function(fom.solution_space.V)
     u_loc = df.fem.Function(operator_local.source.V)
 
     Nmax = max_dofs_per_vert.max()
     ΔN = 10
-    # num_modes_per_vertex = list(range(Nmax // ΔN, Nmax + 1, Nmax // ΔN))
-    # num_modes_per_vertex = [50, ]
-    num_modes_per_vertex = [50, 60, ]
+    num_modes_per_vertex = list(range(Nmax // ΔN, Nmax + 1, Nmax // ΔN))
     logger.debug(f"{Nmax=}")
     logger.debug(f"{num_modes_per_vertex=}")
 
@@ -252,9 +240,11 @@ def main(args):
         import matplotlib.pyplot as plt
 
         plt.title("ROM error relative to FOM")
-        plt.semilogy(ndofs, max_relerr["h1_semi"], "k-o")
-        plt.ylabel("Rel. error")
+        plt.semilogy(ndofs, l2_err, "b-o", label="l2-mean")
+        plt.semilogy(ndofs, max_relerr["h1_semi"], "k-o", label="H1")
+        plt.ylabel("Error")
         plt.xlabel("Number of DOFs")
+        plt.legend()
         plt.show()
 
 
