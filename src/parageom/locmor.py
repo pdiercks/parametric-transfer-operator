@@ -40,7 +40,7 @@ from .dofmap_gfem import GFEMDofMap
 
 
 EISubdomainOperatorWrapper = namedtuple(
-    "EISubdomainOperator", ["rop", "cb", "interpolation_matrix"]
+    "EISubdomainOperator", ["rop", "cb", "interpolation_matrix", "magic_dofs", "m_inv"]
 )
 
 
@@ -163,7 +163,9 @@ class GlobalParaGeomOperator(Operator):
         assert mu is not None
 
         op = self.ei_sub_op.rop
-        rdofs = op.restricted_range_dofs
+        magic_dofs = self.ei_sub_op.magic_dofs
+        m_inv = self.ei_sub_op.m_inv
+        rdofs = op.restricted_range_dofs[m_inv].reshape(magic_dofs.shape)
         interpolation_matrix = self.ei_sub_op.interpolation_matrix
         indexptr = self.indexptr
         M = len(self.ei_sub_op.cb)
@@ -175,7 +177,7 @@ class GlobalParaGeomOperator(Operator):
             # restricted evaluation of the subdomain operator
             loc_mu = op.parameters.parse([mu_i])
             A = csr_array(op.assemble(loc_mu).matrix.getValuesCSR()[::-1])
-            _coeffs = solve(interpolation_matrix, A[rdofs, rdofs])
+            _coeffs = solve(interpolation_matrix, A[rdofs[:, 0], rdofs[:, 1]])
             λ = _coeffs.reshape(1, M)
 
             subdomain_range = None
@@ -490,7 +492,7 @@ def assemble_gfem_system_with_ei(
     cols = np.array(lhs["cols"])
     indexptr = np.array(lhs["indexptr"])
     shape = (Ndofs, Ndofs)
-    options = None
+    options = {"inverse": "scipy_lgmres"}
     op = GlobalParaGeomOperator(
         ei_sub_op,
         data,

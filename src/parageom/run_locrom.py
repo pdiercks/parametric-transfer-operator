@@ -57,10 +57,12 @@ def main(args):
         # FIXME
         # store data of deim somewhere
         with Timer("EI of subdomain operator") as t:
-            mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local, design="lhs", ntrain=201, rtol=1e-5)
+            mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local, design="uniform", ntrain=501, modes=None, atol=0., rtol=1e-12, method="method_of_snapshots")
             logger.info(f"EI of subdomain operator took {t.elapsed()[0]}.")
-        restricted_op, _ = operator_local.restricted(magic_dofs, padding=1e-8)
-        wrapped_op = EISubdomainOperatorWrapper(restricted_op, mops, interpolation_matrix)
+        m_dofs, m_inv = np.unique(magic_dofs, return_inverse=True)
+        logger.debug(f"{magic_dofs=}")
+        restricted_op, _ = operator_local.restricted(m_dofs, padding=1e-8)
+        wrapped_op = EISubdomainOperatorWrapper(restricted_op, mops, interpolation_matrix, magic_dofs, m_inv)
 
         # convert `rhs_local` to NumPy
         vector = rhs_local.as_range_array().to_numpy()
@@ -183,6 +185,7 @@ def main(args):
         err_norms = l_char * err.norm(h1_product)
         fom_norms = l_char * fom_solutions.norm(h1_product)
         rel_errn = err_norms / fom_norms
+        logger.info(f"{rel_errn=}")
 
         # Max norm (nodal absolute values)
         u_fom_vec = l_char * fom_solutions.amax()[1]
@@ -237,9 +240,11 @@ def main(args):
         import matplotlib.pyplot as plt
 
         plt.title("ROM error relative to FOM")
-        plt.semilogy(ndofs, max_relerr["h1_semi"], "k-o")
-        plt.ylabel("Rel. error")
+        plt.semilogy(ndofs, l2_err, "b-o", label="l2-mean")
+        plt.semilogy(ndofs, max_relerr["h1_semi"], "k-o", label="H1")
+        plt.ylabel("Error")
         plt.xlabel("Number of DOFs")
+        plt.legend()
         plt.show()
 
 
