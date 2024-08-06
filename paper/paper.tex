@@ -7,6 +7,7 @@
 \usepackage{amssymb}
 \usepackage{bm}
 \usepackage{physics}
+\usepackage{cleveref}
 
 \usepackage{standalone}
 \usepackage{booktabs}
@@ -85,9 +86,8 @@ In this approach, the target subdomain $\varOmega_{\mathrm{in}}$, \ie{} that par
 In the literature, this oversampling problem is also expressed in terms of a \textit{transfer operator} $\bm{T}$ that maps the values on the boundary $\partial\varOmega$ to the unknown solution restricted to the target subdomain $\bm{u}(\bm{\mu})\vert_{\varOmega_{\mathrm{in}}}$.
 The construction of (optimal) local approximation spaces then comprises the calculation of the left singular vectors of this transfer operator~\cite{Babuska2011Optimal,Smetana2016Optimal}.
 The direct calculation via eigenvalue problems is, however, computationally expensive and the range of the transfer operator, and thus the optimal local approximation spaces can be efficiently approximated by random sampling~\cite{Buhr2018Randomized}.
-Here, the authors treat non-parametrized PDEs and to the authors knowledge the extension to the parametric setting for linear problems has not been done yet.
-In~\cite{Smetana2016Optimal}, the authors propose a spectral greedy algorithm to construct local approximation spaces.
-Taddei and Patera~\cite{Taddei2018Localization} propose a combination of transfer eigenproblems and proper orthogonal decomposition (POD).
+Here, the authors treat non-parametrized partial differential equations (PDEs) and to the authors knowledge the extension to the parametric setting for linear problems has not been done yet.
+In~\cite{Smetana2016Optimal}, the authors propose a spectral greedy algorithm to construct parameter-independent local approximation spaces and Taddei and Patera~\cite{Taddei2018Localization} propose a combination of transfer eigenproblems and proper orthogonal decomposition (POD).
 For parameterized nonlinear elliptic PDEs Smetana and Taddei~\cite{Smetana2023Localized} present a randomized local training procedure with global enrichment.
 
 The contributions of the present work are given as follows.
@@ -97,7 +97,12 @@ Second, a framework for the shape optimization of lattice structures is proposed
 It combines the aforementioned algorithms to construct local approximation spaces with an auxiliary problem, as in~\cite{Guo2022Learning}, to facilitate geometrical parametrizations of the unit cell and the matrix version~\cite{Negri2015Efficient} of the empirical interpolation method (EIM)~\cite{Barrault2004‘empirical,Chaturantabut2010Nonlinear} to ensure online efficiency of the final reduced order model.
 Furthermore, the global approximation space is constructed from the local spaces using the generalized finite element method (GFEM)~\cite{Babuska2004Generalized}.
 
-% TODO add paragraph outlining structure of the text
+The rest of the article is organized as follows.
+In~\cref{sec:method}, the building blocks of the shape optimization framework are described.
+In particular, the aforementioned two different strategies for the construction of local approximation spaces are presented.
+\Cref{sec:numerical experiments} comprises the numerical experiments.
+Based on the example of a graded concrete slab, the methods for the construction of local approximation spaces described in~\cref{sec:Randomized range finder and POD,sec:Heuristic randomized range finder} are compared, the proposed reduced order model (ROM) is validated, and results for the solution of a shape optimization problem are presented.
+Finally, conclusions are given in~\cref{sec:conclusions}.
 
 \section{METHOD}%
 \label{sec:method}
