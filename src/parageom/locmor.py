@@ -492,7 +492,7 @@ def assemble_gfem_system_with_ei(
     cols = np.array(lhs["cols"])
     indexptr = np.array(lhs["indexptr"])
     shape = (Ndofs, Ndofs)
-    options = None
+    options = {"inverse": "scipy_lgmres"}
     op = GlobalParaGeomOperator(
         ei_sub_op,
         data,
