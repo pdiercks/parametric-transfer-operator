@@ -21,7 +21,7 @@ def vec2mat(A: csr_array):
     return mapping
 
 
-def interpolate_subdomain_operator(example, operator, design: str="lhs", ntrain: int=101, modes: Optional[int] = None, atol: Optional[float] = None, rtol: Optional[float] = None):
+def interpolate_subdomain_operator(example, operator, design: str="lhs", ntrain: int=101, modes: Optional[int] = None, atol: Optional[float] = None, rtol: Optional[float] = None, method: Optional[str] = "method_of_snapshots"):
     """EI of subdomain operator.
 
     Args:
@@ -30,7 +30,9 @@ def interpolate_subdomain_operator(example, operator, design: str="lhs", ntrain:
         design: Design for the sampling of training set (choices: uniform, random, lhs).
         ntrain: Number of training samples for the DEIM.
         modes: Use at most `modes` POD modes with DEIM.
+        atol: Absolute tolerance for the POD with DEIM.
         rtol: Relative tolerance for the POD with DEIM.
+        method: POD method (choices: method_of_snapshots, qr_svd).
     """
     from pymor.vectorarrays.numpy import NumpyVectorSpace
     from pymor.operators.numpy import NumpyMatrixOperator
@@ -67,7 +69,8 @@ def interpolate_subdomain_operator(example, operator, design: str="lhs", ntrain:
     Λ = vec_source.make_array(snapshots)
 
     # ### DEIM
-    interpolation_dofs, collateral_basis, deim_data = deim(Λ, modes=modes, pod=True, atol=atol, rtol=rtol, product=None, pod_options={})
+    pod_options = {"method": method}
+    interpolation_dofs, collateral_basis, deim_data = deim(Λ, modes=modes, pod=True, atol=atol, rtol=rtol, product=None, pod_options=pod_options)
 
     # ### outputs/targets
     # reorder idofs and collateral basis
@@ -109,20 +112,13 @@ if __name__ == "__main__":
     from pymor.operators.constructions import LincombOperator
 
     operator, _ = discretize_subdomain_operators(example)
-    cb, interpmat, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator, design="uniform", ntrain=501, modes=15, atol=0., rtol=0.)
+    cb, interpmat, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator, design="uniform", ntrain=501, modes=None, atol=0., rtol=1e-12)
     m_dofs, m_inv = np.unique(magic_dofs, return_inverse=True)
     r_op, source_dofs = operator.restricted(m_dofs)
     range_dofs = r_op.restricted_range_dofs[m_inv].reshape(magic_dofs.shape)
 
     pspace = operator.parameters.space((0.1, 0.3))
     test_set = pspace.sample_randomly(50)
-    # test_set = []
-    # worst_mu = [0.19628837, 0.21430256, 0.28287505, 0.11015932, 0.27095548,
-    #    0.29507876, 0.1490536 , 0.29907668, 0.29963526, 0.28035011]
-    # for val in worst_mu:
-    #     mu = operator.parameters.parse(val)
-    #     test_set.append(mu)
-
 
     abserr = []
     relerr = []
