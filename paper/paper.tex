@@ -14,6 +14,7 @@
 \usepackage{booktabs}
 \usepackage{pgfplotstable}
 \pgfplotsset{compat=1.18}
+\usepackage{bamcolors}
 
 \usepackage[%
 backend=biber,
@@ -116,33 +117,37 @@ Finally, the necessity and use of hyperreduction (in the form of empirical inter
 
 \subsection{Auxiliary Problem} % (fold)
 \label{sub:Auxiliary Problem}
-The approach adopted in this work to facilitate geometrical parametrizations belongs to the class of surface-based deformations~\cite{Botsch2010Polygon} and is based on transformations $\Phi_{\mu}$ that map each material point $\bm{x}_{\mathrm{p}}$ of a parameter-independent reference or parent domain $\varOmega^{\mathrm{p}}$ to a point $\bm{x}_{\mu}$ in the parameter-dependent current or physical domain $\varOmega^{\mu}$\comment[id=pd]{Add figure and reference to figure}.
+The approach adopted in this work to facilitate geometrical parametrizations belongs to the class of surface-based deformations~\cite{Botsch2010Polygon} and is based on transformations $\Phi_{\bm\mu}$ that map each material point $\bm{x}_{\mathrm{p}}$ of a parameter-independent reference or parent domain $\varOmega^{\mathrm{p}}$ to a point $\bm{x}_{\bm\mu}$ in the parameter-dependent current or physical domain $\varOmega^{\bm\mu}$.
+In the context of shape optimization of lattice structures, our objective is to determine the mapping $\Phi_{\bm\mu}$ for a single unit cell, see~\cref{fig:transformationmap}, and use it to describe the change in geometry of each unit cell throughout the structure.
 An auxiliary problem based on the equations of linear elasticity is solved to obtain such domain transformations, following the approach outlined in~\cite{Guo2022Learning}, and briefly repeated here for completeness.
 
-The transformation map $\Phi_{\mu}$ from parent to physical domain $\Phi_{\mu}: \varOmega^{\mathrm{p}}\mapsto\varOmega^{\mu}$ is given by $\bm{x}_{\mu}=\Phi_{\mu}(\bm{x}_{\mathrm{p}}) = \bm{x}_{\mathrm{p}} + \bm{d}(\bm{x}_{\mathrm{p}}; \mu)$, 
-% \begin{align}
-%     \Phi_{\mu}&: \varOmega^{\mathrm{p}}\mapsto\varOmega^{\mu}\,,\\\bm{x}_{\mu}&=\Phi_{\mu}(\bm{x}_{\mathrm{p}}) = \bm{x}_{\mathrm{p}} + \bm{d}(\bm{x}_{\mathrm{p}}; \mu)\,,
-%     \label{eq:trafo}
-% \end{align}
+The transformation map $\Phi_{\bm\mu}$ from parent to physical domain $\Phi_{\bm\mu}: \varOmega^{\mathrm{p}}\mapsto\varOmega^{\bm\mu}$ is given by $\bm{x}_{\bm\mu}=\Phi_{\bm\mu}(\bm{x}_{\mathrm{p}}) = \bm{x}_{\mathrm{p}} + \bm{d}(\bm{x}_{\mathrm{p}}; \bm\mu)$, 
 with $\bm{d}(\bm{x}_{\mathrm{p}}; \bm{\mu})$ being the transformation displacement field.
-\comment[id=pd]{Consistent notation for $\mu$ and its components. Suffix must also be bold then?}
 The transformation displacement is determined by solving the following linear elastostatic auxiliary problem.
 \begin{align}
-    \div{\left(\mathbb{C}\vdot\!\vdot\frac{1}{2}\left(
+    \label{eq:aux_1}\div{\left(\hat{\mathbb{C}}\vdot\!\vdot\frac{1}{2}\left(
             \bm{d}\otimes\grad + \grad\otimes\bm{d}
 \right)\right)}
             = \bm{0}\,,\quad&\mathrm{in}\;\varOmega^{\mathrm{p}}\,,\\
-    \bm{d} = \bm{0}\,,\quad&\mathrm{on}\;\partial\varOmega^{\mathrm{p}}\,,\\
-    \bm{d} = \bm{x}_{\mu} - \bm{x}_{\mathrm{p}}\,,\quad&\mathrm{on}\;\partial\varOmega^{\mathrm{p}}_{\mathrm{int}}\,.
-    \label{eq:aux}
+    \label{eq:aux_2}\bm{d} = \bm{0}\,,\quad&\mathrm{on}\;\partial\varOmega^{\mathrm{p}}\,,\\
+    \label{eq:aux_3}\bm{d} = \bm{x}_{\mu} - \bm{x}_{\mathrm{p}}\,,\quad&\mathrm{on}\;\partial\varOmega^{\mathrm{p}}_{\mathrm{int}}\,.
 \end{align}
-\comment[id=pd]{Nabla should be explicitly defined?}
+The stiffness tetrad of the auxiliary problem is defined as
+\begin{equation}
+    \hat{\mathbb{C}} = \hat{\lambda} \bm{I}\otimes\bm{I} + 2\hat{\mu}\mathbb{I}\,,\quad\mathrm{with}\quad \hat{\lambda}=\frac{\nu}{(1+\nu)(1-2\nu)}\quad\mathrm{and}\quad\hat{\mu}=\frac{1}{2(1+\nu)}\,.
+    \label{eq:aux_tetrad}
+\end{equation}
+With $\bm{x}_{\bm\mu}$ known for all points on the parent interface $\partial\varOmega^{\mathrm{p}}_{\mathrm{int}}$, the desired transformation (\eg{} enlarging/shrinking of the voids radius) is enforced by prescribing~\cref{eq:aux_2,eq:aux_3}.
+
+Given the transformation displacement $\bm{d}(\bm{x}_{\mathrm{p}};\bm\mu)$, the variational formulation is formulated over the parameter-independent parent domain $\varOmega^{\mathrm{p}}$ instead of the parameter-dependent physical domain $\varOmega^{\bm\mu}$.
+This introduces the parameter dependence in the variational formulation as shown in the following subsections, but has the advantage that all computations (integrations) can be carried out over the fixed parent domain and thus no re-meshing is required.
+However, for each new parameter value $\bm\mu$ for which the model is to be evaluated, we first need to solve the auxiliary problem.
+Nevertheless, this does not pose a problem, since the solution of the auxiliary problem is well amenable to acceleration via established MOR techniques and it is referred to~\cite{Guo2022Learning} for further details.
 
 \begin{figure}
-    \begin{center}
-        \includegraphics[width=0.95\textwidth]{./img/transformationmap.pdf}
-    \end{center}
-    \caption{Mapping.}\label{fig:transformationmap}
+    \centering
+    \include{./img/transformationmap.tex}
+    \caption{Transformation map $\Phi_{\bm\mu}$ from parent to physical domain on the example of the unit square domain with a circular void placed in the center. The parameter $\bm\mu$ controls the radius of the void.}\label{fig:transformationmap}
 \end{figure}
 
 % TODO move these equation to proper section (3 or 4)

@@ -6,8 +6,8 @@
 \usepackage{bm}
 
 \begin{document}
-\begin{tikzpicture}[scale=0.9]
-    \pgfmathsetmacro{\a}{5}
+\begin{tikzpicture}[scale=1.0]
+    \pgfmathsetmacro{\a}{4}
     \pgfmathsetmacro{\R}{\a * 0.2}
     \pgfmathsetmacro{\Rlower}{\a * 0.1}
     \pgfmathsetmacro{\Rgreater}{\a * 0.3}
@@ -23,12 +23,13 @@
     \draw[thick] (S) rectangle +(\a, \a);
     \draw[thick,->] (\a+0.2, \a/2) -- (\xshift-0.2, \a/2) node[midway,above] {$\Phi_{\bm\mu}$};
     \draw[thick,dashed,BAMred1] (Cshifted) circle (\Rlower);
+    \node[right] at (\xshift+\a/2+0.707*\R*0.6, \a/2+0.707*\R*0.6) {\textcolor{BAMred1}{$\partial\varOmega^{\bm\mu_1}_{\mathrm{int}}$}};
     \draw[thick,dashed,BAMblue1] (Cshifted) circle (\Rgreater);
+    \node[right] at (\xshift+\a/2+0.707*\R*1.5, \a/2-0.707*\R*1.5) {\textcolor{BAMblue1}{$\partial\varOmega^{\bm\mu_2}_{\mathrm{int}}$}};
     \node[left] at (\xshift+\a/2-\Rlower, \a/2) {\textcolor{BAMred1}{$\bm\mu_1$}};
     \node[left] at (\xshift+\a/2-\Rgreater, \a/2) {\textcolor{BAMblue1}{$\bm\mu_2$}};
 
-    \node at (0.5, 0.5) {$\varOmega^{\mathrm{p}}$};
-    \node at (\xshift+0.5, 0.5) {$\varOmega^{\bm\mu}$};
+    \node at (\a/2, -0.5) {Parent domain $\varOmega^{\mathrm{p}}$};
+    \node at (\xshift+\a/2, -0.5) {Physical domain $\varOmega^{\bm\mu}$};
 \end{tikzpicture}
-
 \end{document}
