@@ -15,6 +15,7 @@
 \usepackage{pgfplotstable}
 \pgfplotsset{compat=1.18}
 \usepackage{bamcolors}
+\usepackage{algorithm, algorithmicx, algpseudocode}
 
 \usepackage[%
 backend=biber,
@@ -180,15 +181,73 @@ Nevertheless, this does not pose a problem, since the solution of the auxiliary 
 \subsection{Construction of local approximation spaces} % (fold)
 \label{sub:Construction of local approximation spaces}
 
+% - setting, global domain = union of non overlapping subdomains = unit cells
+% - introduction of coarse grid where each cell corresponds to unit cell subdomain
+% - goal of constructing local spaces for only parts of the domain
+% - definition of oversampling problem and transfer operator
+% - the oversampling problem should be formulated for union of parent unit cells
+% - weak formulation is not required here? Should be first introduced in section 2.3?
+% - comment on number of archetypes/configurations
+
 % subsection Construction of local approximation spaces (end)
 
 \subsubsection{Randomized range finder and proper orthogonal decomposition} % (fold)
 \label{sec:Randomized range finder and POD}
 
+\begin{algorithm}
+    \caption{RRFPOD caption.}%
+    \label{algo:rrfpod}
+    \begin{algorithmic}[1]
+        \Function{HapodRangeApproximation}{$\bm{T}$, $\texttt{tol}$, $n_t$, $\varepsilon_{\mathrm{algofail}}$, $N_{\mathrm{train}}$}
+    \Statex{\textbf{Input:} Operator $\bm{T}_{\bm\mu}$, target tolerance $\texttt{tol}$, number of testvectors $n_t$, maximum failure probability $\varepsilon_{\mathrm{algofail}}$, number of parameter samples $N_{\mathrm{train}}$}
+    \Statex{\textbf{Output:} space $X^n$}
+
+    \State{$\bm{S}$ $\gets\;\emptyset$}\Comment{initialize snapshot set}
+    \State{$\bm{S}_{\mathrm{train}}\gets\;\{\bm\mu_1,\ldots,\bm\mu_{N_\mathrm{train}}\}$}\Comment{initialize training set}
+    \For{$\bm\mu_j$ in $\bm{S}_{\mathrm{train}}$}
+    \State{$\bm{R}\gets$ \textsc{AdaptiveRandomizedRangeApproximation}($\bm{T}_{\bm\mu_j}$, $\texttt{tol}$, $n_t$, $\varepsilon_{\mathrm{algofail}}$)}
+    \State{$\bm{u}_{\mathrm{Neumann}}(\bm\mu_j)\gets \bm{T}_{\bm\mu_j}(\bm{0})$}\Comment{solve additional Neumann problem if $\varGamma_{\mathrm{N}}\ne\emptyset$}
+    \State{$\bm{R}\gets \bm{R}\cup\left(\bm{u}_{\mathrm{Neumann}}(\bm\mu_j)\right)$}
+    \State{$\bm{S}\gets \bm{S}\cup\left(\mathrm{orthonormalize}\left(\bm{R}\right)\right)$}
+    \EndFor%
+    \State{$\bm{B}\gets\textsc{POD}(\bm{S})$}
+    \State{\textbf{return} {$X^n=\mathrm{span}\left(\bm{B}\right)$}}
+    \EndFunction%
+    \end{algorithmic} 
+\end{algorithm}
+
+test
+\comment[id=pd]{TODO: check how/when Neumann data is added in case of RRFPOD. This can also be done outside the loop and even after POD of spectral basis.}
+
 % subsubsection Randomized range finder and POD (end)
 
 \subsubsection{Heuristic randomized range finder} % (fold)
 \label{sec:Heuristic randomized range finder}
+
+\begin{algorithm}
+    \caption{HRRF caption.}%
+    \label{algo:hrrf}
+    \begin{algorithmic}[1]
+        \Function{HeuristicRangeApproximation}{$\bm{T}$, $\texttt{tol}$, $n_t$, $\varepsilon_{\mathrm{algofail}}$, $N_{\mathrm{train}}$, $N_{\mathrm{test}}$}
+    \Statex{\textbf{Input:} Operator $\bm{T}_{\bm\mu}$, target tolerance $\texttt{tol}$, number of testvectors $n_t$, maximum failure probability $\varepsilon_{\mathrm{algofail}}$, number of parameter samples $N_{\mathrm{train}}$, number of parameter samples $N_{\mathrm{test}}$}
+    \Statex{\textbf{Output:} space $X^n$}
+
+    \State{$\bm{B}$ $\gets\;\emptyset$}\Comment{initialize basis}
+    \State{$\bm{S}_{\mathrm{train}}\gets\;\{\bm\mu_1,\ldots,\bm\mu_{N_\mathrm{train}}\}$}\Comment{initialize training set}
+    \State{$\bm{S}_{\mathrm{test}}\gets\;\{\bm\mu_1,\ldots,\bm\mu_{N_\mathrm{test}}\}$}\Comment{initialize testing set}
+    \State{$\bm{M}\gets\{\bm{T}_{\bm\mu_1}(\bm{g}^1),\ldots,\bm{T}_{\bm\mu_1}(\bm{g}^{n_t}),\ldots,\bm{T}_{\bm\mu_{N_{\mathrm{test}}}}(\bm{g}^1),\ldots,\bm{T}_{\bm\mu_{N_{\mathrm{test}}}}(\bm{g}^{n_t})\}$}\Comment{initialize $N_{\mathrm{test}}\cdot\,n_t$ test vectors}
+    \State{$\varepsilon_{\mathrm{testfail}}\gets\varepsilon_{\mathrm{algofail}}/N_{\bm{T}}$}
+    \State{$c_{\mathrm{est}}\gets{\left[\sqrt{2\lambda^{M_S}_{\min}}\mathrm{erf}^{-1}\left(\sqrt[n_t]{\varepsilon_{\mathrm{testfail}}}\right)\right]}^{-1}$}\Comment{determine error estimator factor}
+    \While{$\left(\max_{t\in \bm{M}} \norm{t}_R\right) \vdot c_{\mathrm{est}} > \texttt{tol}$}
+        \State{$\bm\mu_j\gets\mathrm{random.choice}(\bm{S}_{\mathrm{train}})$}
+        \State{$\bm{B}\gets \bm{B}\cup\left(\bm{T}_{\bm\mu_j}(\bm{g})\right)$}
+        \State{$\bm{B}\gets \mathrm{orthonormalize}\left(\bm{B}\right)$}
+        \State{$\bm{M}\gets\{t-P_{\mathrm{span}(\bm{B})}t \mid t\in \bm{M}\}$}\Comment{orthogonalize test vectors to $\mathrm{span}(\bm{B})$}
+    \EndWhile{}
+    \State{\textbf{return} {$X^n=\mathrm{span}\left(\bm{B}\right)$}}
+    \EndFunction%
+    \end{algorithmic} 
+\end{algorithm}
 
 % subsubsection Heuristic randomized range finder (end)
 
