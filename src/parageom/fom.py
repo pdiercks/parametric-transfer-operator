@@ -3,7 +3,6 @@ import ufl
 
 from mpi4py import MPI
 import dolfinx as df
-import dolfinx.fem.petsc
 import numpy as np
 
 from multi.domain import Domain, RectangularDomain, StructuredQuadGrid
@@ -240,25 +239,6 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
     product_l2 = "l2"
     l2_product = FenicsxMatrixOperator(product_mat, V, V, name=product_l2)
 
-    # u = ufl.TrialFunction(V)
-    # v = ufl.TestFunction(V)
-    # l_char = df.fem.Constant(V.mesh, df.default_scalar_type(100. ** 2))
-    # scaled_h1_0_semi = l_char * ufl.inner(ufl.grad(u), ufl.grad(v)) * ufl.dx
-    # a_cpp = df.fem.form(scaled_h1_0_semi)
-    # A = dolfinx.fem.petsc.create_matrix(a_cpp)
-    # A.zeroEntries()
-    # dolfinx.fem.petsc.assemble_matrix(A, a_cpp, bcs=bcs)
-    # A.assemble()
-    # scaled_h1_product = FenicsxMatrixOperator(A, V, V, name="scaled_h1_0_semi")
-
-    # scaled_l2 = l_char * ufl.inner(u, v) * ufl.dx
-    # l2_cpp = df.fem.form(scaled_l2)
-    # P = dolfinx.fem.petsc.create_matrix(l2_cpp)
-    # P.zeroEntries()
-    # dolfinx.fem.petsc.assemble_matrix(P, l2_cpp, bcs=bcs)
-    # P.assemble()
-    # scaled_l2_product = FenicsxMatrixOperator(P, V, V, name="scaled_l2")
-
     # ### Visualizer
     viz = FenicsxVisualizer(FenicsxVectorSpace(V))
 
@@ -314,4 +294,13 @@ if __name__ == "__main__":
     total_load = np.sum(fom.rhs.as_range_array().to_numpy())  # type: ignore
     assert np.isclose(total_load, -example.traction_y / example.youngs_modulus * 10)
 
-    fom.visualize(U, filename="fom_mu_bar.xdmf")
+    # fom.visualize(U, filename="fom_mu_bar.xdmf")
+
+    from .stress_analysis import *
+
+    u = df.fem.Function(auxp.problem.V)
+    u.x.array[:] = D.to_numpy().flatten()
+    q_degree = 2
+    mat = LinearElasticMaterial(gdim=2, E=example.youngs_modulus, NU=example.poisson_ratio)
+    principal_stress_2d(u, q_degree, mat)
+    breakpoint()
