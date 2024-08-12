@@ -4,6 +4,7 @@ import ufl
 from mpi4py import MPI
 import dolfinx as df
 import numpy as np
+import basix
 
 from multi.domain import Domain, RectangularDomain, StructuredQuadGrid
 from multi.problems import LinearProblem
@@ -13,13 +14,15 @@ from multi.preprocessing import create_meshtags
 from multi.product import InnerProduct
 from multi.io import read_mesh
 
-from pymor.basic import VectorOperator, StationaryModel
+from pymor.basic import VectorOperator, StationaryModel, GenericParameterFunctional, NumpyVectorSpace
+from pymor.operators.constructions import ConstantOperator, LincombOperator
 from pymor.bindings.fenicsx import (
     FenicsxVectorSpace,
     FenicsxVisualizer,
     FenicsxMatrixOperator,
 )
 from .definitions import BeamData
+
 
 class ParaGeomLinEla(LinearProblem):
     """Represents a geometrically parametrized linear elastic problem."""
@@ -76,6 +79,15 @@ class ParaGeomLinEla(LinearProblem):
         grad_u_ml = w[m].dx(p) * Finv[p, l]  # type: ignore
         sigma_ij = ufl.as_tensor(tetrad_ikml * grad_u_ml * FinvT[k, j] * detF, (i, j))  # type: ignore
         return sigma_ij
+
+    @property
+    def form_volume(self):
+        gdim = self.domain.gdim
+        Id = ufl.Identity(gdim)
+        F = Id + ufl.grad(self.d)  # type: ignore
+        detF = ufl.det(F)
+        c = df.fem.Constant(self.domain.grid, df.default_scalar_type(1.))
+        return c * detF * self.dx # type: ignore
 
     @property
     def form_lhs(self):
@@ -174,27 +186,34 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
     assert dirichlet_right is not None
 
     # Dirichlet BCs
-    entities_left = df.mesh.locate_entities_boundary(
-        domain, fdim, dirichlet_left["boundary"]
-    )
-    bc_left = BCTopo(
-        df.fem.Constant(V.mesh, dirichlet_left["value"]),
-        entities_left,
-        fdim,
-        V,
-        sub=dirichlet_left["sub"],
-    )
-    entities_right = df.mesh.locate_entities_boundary(
-        domain, fdim, dirichlet_right["boundary"]
-    )
-    bc_right = BCTopo(
-        df.fem.Constant(V.mesh, dirichlet_right["value"]),
-        entities_right,
-        fdim,
-        V,
-        sub=dirichlet_right["sub"],
-    )
-    bcs = _create_dirichlet_bcs((bc_left, bc_right))
+    dirichlet_bcs = []
+    for bc_spec in dirichlet_left:
+        entities_left = df.mesh.locate_entities_boundary(
+            domain, fdim, bc_spec["boundary"]
+        )
+        bc_left = BCTopo(
+            df.fem.Constant(V.mesh, bc_spec["value"]),
+            entities_left,
+            fdim,
+            V,
+            sub=bc_spec["sub"],
+        )
+        dirichlet_bcs.append(bc_left)
+
+    for bc_spec in dirichlet_right:
+        entities_right = df.mesh.locate_entities_boundary(
+            domain, fdim, bc_spec["boundary"]
+        )
+        bc_right = BCTopo(
+            df.fem.Constant(V.mesh, bc_spec["value"]),
+            entities_right,
+            fdim,
+            V,
+            sub=bc_spec["sub"],
+        )
+        dirichlet_bcs.append(bc_right)
+
+    bcs = _create_dirichlet_bcs(tuple(dirichlet_bcs))
 
     # Neumann BCs
     TY = -example.traction_y / EMOD
@@ -219,7 +238,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
         problem.form_lhs,
         params,
         param_setter=param_setter,
-        bcs=(bc_left, bc_right),
+        bcs=tuple(dirichlet_bcs),
         name="ParaGeom",
     )
 
@@ -242,12 +261,21 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
     # ### Visualizer
     viz = FenicsxVisualizer(FenicsxVectorSpace(V))
 
-    # TODO
-    # output functional !!!
+    def compute_volume(mu):
+        param_setter(mu)
+
+        vcpp = df.fem.form(problem.form_volume)
+        vol = df.fem.assemble_scalar(vcpp) # type: ignore
+        return vol
+
+    theta = GenericParameterFunctional(compute_volume, params)
+    one_op = ConstantOperator(NumpyVectorSpace(1).ones(1), source=operator.source)
+    volume_output = LincombOperator([one_op], [theta])
 
     fom = StationaryModel(
         operator,
         rhs,
+        output_functional=volume_output,
         products={product_name: h1_product, product_l2: l2_product},
         visualizer=viz,
         name="FOM",
@@ -277,7 +305,7 @@ if __name__ == "__main__":
 
     parameter_space = auxp.parameters.space(example.mu_range)
     mu = parameter_space.parameters.parse(
-        [0.2 * example.unit_length for _ in range(10)]
+        [0.3 * example.unit_length for _ in range(10)]
     )
     U = fom.solve(mu) # dimensionless solution U, real displacement D=l_char * U
     # with characteristic length l_char = 100. mm (unit length)
@@ -294,13 +322,77 @@ if __name__ == "__main__":
     total_load = np.sum(fom.rhs.as_range_array().to_numpy())  # type: ignore
     assert np.isclose(total_load, -example.traction_y / example.youngs_modulus * 10)
 
-    # fom.visualize(U, filename="fom_mu_bar.xdmf")
+    fom.visualize(U, filename="fom_mu_bar.xdmf")
+    mu_star = fom.parameters.parse([0.28104574327598486, 0.29999999984917336, 0.2803686495572847, 0.3, 0.28945329693580574, 0.2984318556624101, 0.2931130858155756, 0.3, 0.29999999980733805, 0.2875151370572895])
+    U_star = fom.solve(mu_star)
+    D_star = fom.solution_space.make_array([d.x.petsc_vec.copy()])
+    fom.visualize(D_star, filename="fom_mu_star.xdmf")
 
     from .stress_analysis import *
 
     u = df.fem.Function(auxp.problem.V)
-    u.x.array[:] = D.to_numpy().flatten()
+    # u.x.array[:] = U.to_numpy().flatten()
+
+    mesh = u.function_space.mesh
+    map_c = mesh.topology.index_map(mesh.topology.dim)
+    num_cells = map_c.size_local + map_c.num_ghosts
+    cells = np.arange(0, num_cells, dtype=np.int32)
+
+    V = fom.solution_space.V
+    basix_celltype = getattr(basix.CellType, V.mesh.topology.cell_type.name)
     q_degree = 2
+    QVe = basix.ufl.quadrature_element(basix_celltype, value_shape=(4,), scheme="default", degree=q_degree)
+    QV = df.fem.functionspace(V.mesh, QVe)
+    stress = df.fem.Function(QV, name="Cauchy")
+
     mat = LinearElasticMaterial(gdim=2, E=example.youngs_modulus, NU=example.poisson_ratio)
-    principal_stress_2d(u, q_degree, mat)
-    breakpoint()
+    # s1, s2 = principal_stress_2d(u, q_degree, mat, stress.x.array.reshape(cells.size, -1))
+
+    def vol_exact(mu):
+        radii = mu.to_numpy()
+        pi = np.pi * np.ones_like(radii)
+        rect = example.height * example.length
+        vol = rect - np.dot(pi, radii ** 2)
+        return vol
+
+    # test volume output
+    # assert np.isclose(vol_exact(mu), fom.output(mu))
+    # test_vol = parameter_space.sample_randomly(3)
+    # for mu in test_vol:
+    #     assert np.isclose(vol_exact(mu), fom.output(mu))
+
+    def risk_factor(s):
+        lower_bound = -20
+        upper_bound = 2.2
+        compression = np.max(s / lower_bound)
+        tension = np.max(s / upper_bound)
+        return 1. - max(compression, tension)
+
+    # analyze risk factors for some value of mu
+    obj = []
+    rfs = []
+    risk_set = []
+    risk_set.append(fom.parameters.parse([0.1 for _ in range(10)]))
+    risk_set.append(fom.parameters.parse([0.15 for _ in range(10)]))
+    risk_set.append(fom.parameters.parse([0.2 for _ in range(10)]))
+    risk_set.append(fom.parameters.parse([0.3 for _ in range(10)]))
+    risk_set.append(fom.parameters.parse([0.1, 0.1, 0.2, 0.2, 0.3, 0.3, 0.2, 0.2, 0.1, 0.1]))
+    # risk_set.append(fom.parameters.parse([0.23016442074567037, 0.2723051465005729, 0.267990588281505, 0.29230231713343474, 0.24718372229157942, 0.3, 0.29432740767308657, 0.26897395853343675, 0.27479182925259354, 0.2283256924786881]))
+    # risk_set.extend(parameter_space.sample_randomly(1))
+
+    # current optimum
+    # E = 30e3, ty = 0.0225
+    mu_star = fom.parameters.parse([0.2246864682321433, 0.2654481570260998, 0.2706042377543608, 0.28348322968875095, 0.285486146013244, 0.2891233659389231, 0.28360839135399113, 0.2707122905273762, 0.2656934609347168, 0.22417479580486357])
+    risk_set.append(mu_star)
+
+    for mu in risk_set:
+        U = fom.solve(mu)
+        obj.append(fom.output(mu)[0, 0])
+        u.x.array[:] = U.to_numpy().flatten()
+        s1, s2 = principal_stress_2d(u, q_degree, mat, stress.x.array.reshape(cells.size, -1))
+        rfs.append(
+                (risk_factor(s1), risk_factor(s2))
+                )
+    print(obj)
+    print(rfs)
+

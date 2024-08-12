@@ -57,8 +57,8 @@ class BeamData:
     geom_deg: int = 2
     fe_deg: int = 2
     poisson_ratio: float = 0.2
-    youngs_modulus: float = 20e3  # [MPa]
-    traction_y: float = 5.0  # [MPa]
+    youngs_modulus: float = 30e3  # [MPa]
+    traction_y: float = 0.0225  # [MPa]
     parameters: dict = field(
         default_factory=lambda: {
             "subdomain": Parameters({"R": 1}),
@@ -252,11 +252,11 @@ class BeamData:
         else:
             return dir / f"locrom_error_{distr}.npz"
 
-    # @property
-    # def fom_minimization_data(self) -> Path:
-    #     """FOM minimization data"""
-    #     return self.rf / "fom_minimization_data.out"
-    #
+    @property
+    def fom_minimization_data(self) -> Path:
+        """FOM minimization data"""
+        return self.rf / "fom_minimization_data.out"
+
     # def rom_minimization_data(self, distr: str, name: str) -> Path:
     #     """ROM minimization data"""
     #     return self.rf / f"rom_minimization_data_{distr}_{name}.out"
@@ -396,8 +396,10 @@ class BeamData:
         a = self.unit_length
         xmin = np.amin(x, axis=0)
         xmax = np.amax(x, axis=0)
+        cell_size = a / self.num_intervals
 
         return {
+            "origin" : (int(103), within_range([xmin[0], xmin[1], xmin[2]], [cell_size + 1e-2, xmin[1], xmin[2]])),
             "support_left": (
                 int(101),
                 within_range([xmin[0], xmin[1], xmin[2]], [a / 2, xmin[1], xmin[2]]),
@@ -412,36 +414,47 @@ class BeamData:
 
     def get_dirichlet(
             self, domain: df.mesh.Mesh, config: str
-    ) -> Optional[dict]:
-        boundaries = self.boundaries(domain)
-        _, left = boundaries["support_left"]
-        _, right = boundaries["support_right"]
-
+    ) -> Optional[list[dict]]:
         # NOTE
         # this only defines markers using `within_range`
         # code needs to use df.mesh.locate_entities_boundary
+        boundaries = self.boundaries(domain)
+        _, left = boundaries["support_left"]
+        _, right = boundaries["support_right"]
+        _, origin = boundaries["origin"]
+
+        bcs = []
+        zero = df.default_scalar_type(0.0)
 
         if config == "left":
-            u_origin = (df.default_scalar_type(0.0), df.default_scalar_type(0.0))
-            dirichlet = {
-                "value": u_origin,
+            fix_ux = {
+                "value": zero,
+                "boundary": origin,
+                "entity_dim": 1,
+                "sub": 0,
+            }
+            fix_uy = {
+                "value": zero,
                 "boundary": left,
                 "entity_dim": 1,
-                "sub": None,
+                "sub": 1,
             }
+            bcs.append(fix_ux)
+            bcs.append(fix_uy)
+            return bcs
         elif config == "inner":
-            dirichlet = None
+            return None
         elif config == "right":
-            u_bottom_right = df.default_scalar_type(0.0)
-            dirichlet = {
-                "value": u_bottom_right,
+            fix_uy = {
+                "value": zero,
                 "boundary": right,
                 "entity_dim": 1,
                 "sub": 1,
             }
+            bcs.append(fix_uy)
+            return bcs
         else:
             raise NotImplementedError
-        return dirichlet
 
     @property
     def get_neumann(self) -> None:
