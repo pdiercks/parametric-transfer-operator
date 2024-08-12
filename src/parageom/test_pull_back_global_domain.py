@@ -4,6 +4,8 @@ from mpi4py import MPI
 import dolfinx as df
 from dolfinx.io import gmshio
 from dolfinx.io.utils import XDMFFile
+import ufl
+import basix
 
 from multi.boundary import plane_at
 from multi.preprocessing import create_meshtags
@@ -60,12 +62,13 @@ def compute_reference_solution(example: BeamData, mshfile, degree, d):
     assert dirichlet_right is not None
 
     # Dirichlet BCs
-    entities_left = df.mesh.locate_entities_boundary(domain, fdim, dirichlet_left["boundary"])
-    entities_right = df.mesh.locate_entities_boundary(domain, fdim, dirichlet_right["boundary"])
+    dirichlet_bcs = []
+    for spec in dirichlet_left + dirichlet_right:
+        entities = df.mesh.locate_entities_boundary(domain, fdim, spec["boundary"])
+        bc = BCTopo(df.fem.Constant(V.mesh, spec["value"]), entities, fdim, V, sub=spec["sub"])
+        dirichlet_bcs.append(bc)
 
-    bc_left = BCTopo(df.fem.Constant(V.mesh, dirichlet_left["value"]), entities_left, fdim, V, sub=dirichlet_left["sub"])
-    bc_right = BCTopo(df.fem.Constant(V.mesh, dirichlet_right["value"]), entities_right, fdim, V, sub=dirichlet_right["sub"])
-    bcs = _create_dirichlet_bcs((bc_left, bc_right))
+    bcs = _create_dirichlet_bcs(tuple(dirichlet_bcs))
     for bc in bcs:
         problem.add_dirichlet_bc(bc)
 
@@ -79,13 +82,32 @@ def compute_reference_solution(example: BeamData, mshfile, degree, d):
     # solve
     problem.setup_solver()
     u = problem.solve()
-    return u
+
+    # stress analysis
+    mesh = u.function_space.mesh
+    map_c = mesh.topology.index_map(mesh.topology.dim)
+    num_cells = map_c.size_local + map_c.num_ghosts
+    cells = np.arange(0, num_cells, dtype=np.int32)
+
+    q_degree = 2
+    basix_celltype = getattr(basix.CellType, domain.topology.cell_type.name)
+    q_points, _ = basix.make_quadrature(basix_celltype, q_degree)
+    QVe = basix.ufl.quadrature_element(basix_celltype, value_shape=(3,), scheme="default", degree=q_degree)
+    QV = df.fem.functionspace(V.mesh, QVe)
+    stress = df.fem.Function(QV, name="Cauchy")
+
+    σ = material.sigma(u) # type: ignore
+    sigma_voigt = ufl.as_vector([σ[0, 0], σ[1, 1], σ[0, 1]])
+    stress_expr = df.fem.Expression(sigma_voigt, q_points)
+    stress_expr.eval(domain, entities=cells, values=stress.x.array.reshape(cells.size, -1))
+
+    return u, stress
 
 
 def main():
     from .tasks import example
     from .auxiliary_problem import discretize_auxiliary_problem
-    from .fom import discretize_fom
+    from .fom import discretize_fom, ParaGeomLinEla
 
     coarse_grid_path = example.coarse_grid("global").as_posix()
     parent_domain_path = example.parent_domain("global").as_posix()
@@ -96,13 +118,14 @@ def main():
         parent_domain_path, degree, interface_tags, example.parameters["global"], coarse_grid=coarse_grid_path
     )
     parameter_space = aux.parameters.space(example.mu_range)
-    mu = parameter_space.sample_randomly(1)[0]
+    # mu = parameter_space.sample_randomly(1)[0]
+    mu = parameter_space.parameters.parse([0.2 for _ in range(10)])
     d = df.fem.Function(aux.problem.V, name="d_trafo")
     fom = discretize_fom(example, aux, d)
     U = fom.solve(mu)
 
     # ### reference displacement solution on the physical mesh
-    u_phys = compute_reference_solution(example, parent_domain_path, degree, d)
+    u_phys, stress_phys = compute_reference_solution(example, parent_domain_path, degree, d)
 
     # u on physical mesh
     with XDMFFile(u_phys.function_space.mesh.comm, "uphys.xdmf", "w") as xdmf:
@@ -127,8 +150,65 @@ def main():
 
     abs_err = absolute_error(U_ref, U, product)
     rel_err = relative_error(U_ref, U, product)
-    print(f"{abs_err=}")
-    print(f"{rel_err=}")
+
+    mesh = u_phys.function_space.mesh
+    map_c = mesh.topology.index_map(mesh.topology.dim)
+    num_cells = map_c.size_local + map_c.num_ghosts
+    cells = np.arange(0, num_cells, dtype=np.int32)
+
+    def compute_principal_components(f):
+        values = f.reshape(cells.size, 4, 3)
+        fxx = values[:, :, 0]
+        fyy = values[:, :, 1]
+        fxy = values[:, :, 2]
+        fmin = (fxx+fyy) / 2 - np.sqrt(((fxx-fyy)/2)**2 + fxy**2)
+        fmax = (fxx+fyy) / 2 + np.sqrt(((fxx-fyy)/2)**2 + fxy**2)
+        return fmin, fmax
+
+    def risk_factor(s):
+        lower_bound = -20.0
+        upper_bound = 2.2
+        compression = np.max(s / lower_bound)
+        tension = np.max(s / upper_bound)
+        return 1. - max(compression, tension)
+
+    s1, s2 = compute_principal_components(stress_phys.x.array)
+    # print(risk_factor(s1))
+    # print(risk_factor(s2))
+
+    parageom = ParaGeomLinEla(aux.problem.domain, d.function_space, E=example.youngs_modulus, NU=example.poisson_ratio, d=d)
+    u_parent = df.fem.Function(d.function_space)
+    u_parent.x.array[:] = U.to_numpy().flatten()
+    ws = parageom.weighted_stress(u_parent)
+    sigma_voigt = ufl.as_vector([ws[0, 0], ws[1, 1], ws[0, 1]])
+
+    q_degree = 2
+    basix_celltype = getattr(basix.CellType, d.function_space.mesh.topology.cell_type.name)
+    q_points, _ = basix.make_quadrature(basix_celltype, q_degree)
+    QVe = basix.ufl.quadrature_element(basix_celltype, value_shape=(3,), scheme="default", degree=q_degree)
+    QV = df.fem.functionspace(d.function_space.mesh, QVe)
+    stress = df.fem.Function(QV, name="Cauchy")
+
+    stress_expr = df.fem.Expression(sigma_voigt, q_points)
+    stress_expr.eval(d.function_space.mesh, entities=cells, values=stress.x.array.reshape(cells.size, -1))
+
+    ws1, ws2 = compute_principal_components(stress.x.array)
+    # print(risk_factor(ws1))
+    # print(risk_factor(ws2))
+
+    stress_error = stress_phys.x.array - stress.x.array
+    stress_error_relative = stress_error / stress_phys.x.array
+
+    print(f"""\nSummary
+          Displacement Error
+          ==================
+          absolute: {abs_err}
+          relative: {rel_err}
+
+          Stress Error
+          ============
+          absolute: {np.linalg.norm(stress_error)}
+          relative: {np.linalg.norm(stress_error_relative)}""")
 
 
 if __name__ == "__main__":
