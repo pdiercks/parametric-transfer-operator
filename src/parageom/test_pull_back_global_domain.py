@@ -45,7 +45,7 @@ def compute_reference_solution(example: BeamData, mshfile, degree, d):
     # Problem
     EMOD = example.youngs_modulus
     POISSON = example.poisson_ratio
-    material = LinearElasticMaterial(gdim=omega.gdim, E=EMOD, NU=POISSON)
+    material = LinearElasticMaterial(gdim=omega.gdim, E=EMOD, NU=POISSON, plane_stress=example.plane_stress)
     V = df.fem.functionspace(domain, ("P", degree, (omega.gdim,)))
     problem = LinearElasticityProblem(omega, V, phases=material)
 
@@ -92,12 +92,12 @@ def compute_reference_solution(example: BeamData, mshfile, degree, d):
     q_degree = 2
     basix_celltype = getattr(basix.CellType, domain.topology.cell_type.name)
     q_points, _ = basix.make_quadrature(basix_celltype, q_degree)
-    QVe = basix.ufl.quadrature_element(basix_celltype, value_shape=(3,), scheme="default", degree=q_degree)
+    QVe = basix.ufl.quadrature_element(basix_celltype, value_shape=(4,), scheme="default", degree=q_degree)
     QV = df.fem.functionspace(V.mesh, QVe)
     stress = df.fem.Function(QV, name="Cauchy")
 
     σ = material.sigma(u) # type: ignore
-    sigma_voigt = ufl.as_vector([σ[0, 0], σ[1, 1], σ[0, 1]])
+    sigma_voigt = ufl.as_vector([σ[0, 0], σ[1, 1], σ[2, 2], σ[0, 1]])
     stress_expr = df.fem.Expression(sigma_voigt, q_points)
     stress_expr.eval(domain, entities=cells, values=stress.x.array.reshape(cells.size, -1))
 
@@ -118,7 +118,6 @@ def main():
         parent_domain_path, degree, interface_tags, example.parameters["global"], coarse_grid=coarse_grid_path
     )
     parameter_space = aux.parameters.space(example.mu_range)
-    # mu = parameter_space.sample_randomly(1)[0]
     mu = parameter_space.parameters.parse([0.2 for _ in range(10)])
     d = df.fem.Function(aux.problem.V, name="d_trafo")
     fom = discretize_fom(example, aux, d)
@@ -157,10 +156,10 @@ def main():
     cells = np.arange(0, num_cells, dtype=np.int32)
 
     def compute_principal_components(f):
-        values = f.reshape(cells.size, 4, 3)
+        values = f.reshape(cells.size, 4, 4)
         fxx = values[:, :, 0]
         fyy = values[:, :, 1]
-        fxy = values[:, :, 2]
+        fxy = values[:, :, 3]
         fmin = (fxx+fyy) / 2 - np.sqrt(((fxx-fyy)/2)**2 + fxy**2)
         fmax = (fxx+fyy) / 2 + np.sqrt(((fxx-fyy)/2)**2 + fxy**2)
         return fmin, fmax
@@ -173,42 +172,66 @@ def main():
         return 1. - max(compression, tension)
 
     s1, s2 = compute_principal_components(stress_phys.x.array)
-    # print(risk_factor(s1))
-    # print(risk_factor(s2))
+    print(risk_factor(s1))
+    print(risk_factor(s2))
 
-    parageom = ParaGeomLinEla(aux.problem.domain, d.function_space, E=example.youngs_modulus, NU=example.poisson_ratio, d=d)
+    matparam = {"gdim": aux.problem.domain.gdim, "E": example.youngs_modulus, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
+    parageom = ParaGeomLinEla(aux.problem.domain, d.function_space, d, matparam)
     u_parent = df.fem.Function(d.function_space)
     u_parent.x.array[:] = U.to_numpy().flatten()
     ws = parageom.weighted_stress(u_parent)
-    sigma_voigt = ufl.as_vector([ws[0, 0], ws[1, 1], ws[0, 1]])
+    sigma_voigt = ufl.as_vector([ws[0, 0], ws[1, 1], ws[2, 2], ws[0, 1]])
 
     q_degree = 2
     basix_celltype = getattr(basix.CellType, d.function_space.mesh.topology.cell_type.name)
     q_points, _ = basix.make_quadrature(basix_celltype, q_degree)
-    QVe = basix.ufl.quadrature_element(basix_celltype, value_shape=(3,), scheme="default", degree=q_degree)
+    QVe = basix.ufl.quadrature_element(basix_celltype, value_shape=(4,), scheme="default", degree=q_degree)
     QV = df.fem.functionspace(d.function_space.mesh, QVe)
     stress = df.fem.Function(QV, name="Cauchy")
 
     stress_expr = df.fem.Expression(sigma_voigt, q_points)
     stress_expr.eval(d.function_space.mesh, entities=cells, values=stress.x.array.reshape(cells.size, -1))
 
-    ws1, ws2 = compute_principal_components(stress.x.array)
-    # print(risk_factor(ws1))
-    # print(risk_factor(ws2))
 
-    stress_error = stress_phys.x.array - stress.x.array
-    stress_error_relative = stress_error / stress_phys.x.array
+    ws1, ws2 = compute_principal_components(stress.x.array)
+    print(risk_factor(ws1))
+    print(risk_factor(ws2))
+
+    def compute_stress_error(ref, sh):
+        rxx = ref[:, :, 0]
+        ryy = ref[:, :, 1]
+        rzz = ref[:, :, 2]
+        rxy = ref[:, :, 3]
+
+        err = ref - sh
+        exx = err[:, :, 0]
+        eyy = err[:, :, 1]
+        ezz = err[:, :, 2]
+        exy = err[:, :, 3]
+
+        abs = []
+        rel = []
+        for e, r in zip([exx, eyy, ezz, exy], [rxx, ryy, rzz, rxy]):
+            ae = np.linalg.norm(e)
+            abs.append(ae)
+            if np.abs(np.linalg.norm(r)) < 1e-12:
+                rel.append(0.0)
+            else:
+                rel.append(ae / np.linalg.norm(r))
+        return abs, rel
+
+    sa, sr = compute_stress_error(stress_phys.x.array.reshape(cells.size, 4, 4), stress.x.array.reshape(cells.size, 4, 4))
 
     print(f"""\nSummary
-          Displacement Error
-          ==================
+          Displacement Error (H1-norm)
+          ============================
           absolute: {abs_err}
           relative: {rel_err}
 
-          Stress Error
-          ============
-          absolute: {np.linalg.norm(stress_error)}
-          relative: {np.linalg.norm(stress_error_relative)}""")
+          Stress Error (Euclidean) per Component
+          ======================================
+          absolute: {sa}
+          relative: {sr}""")
 
 
 if __name__ == "__main__":

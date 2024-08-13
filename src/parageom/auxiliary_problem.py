@@ -269,7 +269,7 @@ def discretize_auxiliary_problem(fine_grid: str, degree: int, facet_tags: Union[
     # linear elasticity problem
     emod = df.fem.Constant(omega.grid, df.default_scalar_type(1.0))
     nu = df.fem.Constant(omega.grid, df.default_scalar_type(0.25))
-    mat = LinearElasticMaterial(gdim, E=emod, NU=nu)
+    mat = LinearElasticMaterial(gdim, E=emod, NU=nu, plane_stress=True)
     ve = element("P", domain.basix_cell(), degree, shape=(gdim,))
     V = df.fem.functionspace(domain, ve)
     problem = LinearElasticityProblem(omega, V, phases=mat)

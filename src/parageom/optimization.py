@@ -18,7 +18,7 @@ def main(args):
     """solve optimization problem for different models"""
     from .tasks import example
     from .auxiliary_problem import discretize_auxiliary_problem
-    from .fom import discretize_fom
+    from .fom import discretize_fom, ParaGeomLinEla
 
     # ### Build FOM
     coarse_grid_path = example.coarse_grid("global").as_posix()
@@ -86,12 +86,12 @@ def main(args):
 
     # Constraint definition moved to `solve_optimization_problem` ...
     gdim = fom.solution_space.V.mesh.geometry.dim
-    material = LinearElasticMaterial(gdim, E=example.youngs_modulus, NU=example.poisson_ratio)
+    matparam = {"gdim": gdim, "E": example.youngs_modulus, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
+    parageom = ParaGeomLinEla(auxiliary_problem.problem.domain, V, d_trafo, matparam)
 
     # ### Solve optimization problem using FOM
-    breakpoint()
     opt_fom_result = solve_optimization_problem(
-        args, initial_guess, bounds, displacement, stress, fom, material, fom_minimization_data, gradient=False
+        args, initial_guess, bounds, displacement, stress, fom, parageom, fom_minimization_data, gradient=False
     )
     mu_ref = opt_fom_result.x
     fom_minimization_data["num_iter"] = opt_fom_result.nit
@@ -208,7 +208,7 @@ def report(result, parse, data, reference_mu=None):
 
 
 def solve_optimization_problem(
-    cli, initial_guess, bounds, displacement, stress, model, material, minimization_data, gradient=False
+    cli, initial_guess, bounds, displacement, stress, model, parageom, minimization_data, gradient=False
 ):
     """solve optimization problem"""
 
@@ -234,7 +234,7 @@ def solve_optimization_problem(
         mu = model.parameters.parse(x)
         U = model.solve(mu) # retrieve from cache or compute?
         displacement.x.array[:] = U.to_numpy().flatten()
-        s1, _ = principal_stress_2d(displacement, q_degree=2, mat=material, values=stress.x.array.reshape(cells.size, -1))
+        s1, _ = principal_stress_2d(displacement, parageom, q_degree=2, values=stress.x.array.reshape(cells.size, -1))
         compression = np.max(s1 / lower_bound)
         tension = np.max(s1 / upper_bound)
         return 1. - max(compression, tension)
@@ -243,7 +243,7 @@ def solve_optimization_problem(
         mu = model.parameters.parse(x)
         U = model.solve(mu) # retrieve from cache or compute?
         displacement.x.array[:] = U.to_numpy().flatten()
-        _, s2 = principal_stress_2d(displacement, q_degree=2, mat=material, values=stress.x.array.reshape(cells.size, -1))
+        _, s2 = principal_stress_2d(displacement, parageom, q_degree=2, values=stress.x.array.reshape(cells.size, -1))
         compression = np.max(s2 / lower_bound)
         tension = np.max(s2 / upper_bound)
         return 1. - max(compression, tension)
@@ -255,7 +255,7 @@ def solve_optimization_problem(
 
     method = cli.method
     if method == "COBYLA":
-        options = {"ftol": 1e-2, "gtol": 1e-3}
+        options = {"tol": 1e-2, "catol": 1e-2}
     elif method == "SLSQP":
         options = {"ftol": 1e-2}
     else:
@@ -277,6 +277,9 @@ def solve_optimization_problem(
         options=options,
     )
     minimization_data["time"] = perf_counter() - tic
+
+    breakpoint()
+    print("check constraint for optimal solution")
 
     return opt_result
 

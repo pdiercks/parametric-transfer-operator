@@ -1,10 +1,10 @@
 import typing
-import ufl
 
 from mpi4py import MPI
 import dolfinx as df
 import numpy as np
 import basix
+import ufl
 
 from multi.domain import Domain, RectangularDomain, StructuredQuadGrid
 from multi.problems import LinearProblem
@@ -31,23 +31,57 @@ class ParaGeomLinEla(LinearProblem):
         self,
         domain: Domain,
         V: df.fem.FunctionSpace,
-        E: typing.Union[float, df.fem.Constant],
-        NU: typing.Union[float, df.fem.Constant],
         d: df.fem.Function,
+        matparam: dict,
     ):
         """Initialize linear elastic model with pull back.
 
         Args:
             domain: The parent domain.
             V: FE space.
-            E: Young's modulus.
-            NU: Poisson ratio.
             d: parametric transformation displacement field.
+            matparam: parameters defining the material.
+              See `multi.materials.LinearElasticMaterial`.
         """
         super().__init__(domain, V)
-        self.mat = LinearElasticMaterial(gdim=domain.gdim, E=E, NU=NU)
+        self.mat = LinearElasticMaterial(**matparam)
         self.d = d
         self.dx = ufl.Measure("dx", domain=domain.grid)
+
+    def displacement_gradient(self, u: typing.Union[ufl.TrialFunction, df.fem.Function]):
+        """Returns weighted displacement gradient."""
+        F = self.deformation_gradient(self.d)
+        Finv = ufl.inv(F)
+        grad_u = self.transformation_gradient(u)
+        H = ufl.dot(grad_u, Finv)
+        if self.mat.plane_stress:
+            lame_1 = self.mat.lambda_1
+            lame_2 = self.mat.lambda_2
+            Hzz = -lame_1 / (2.*lame_2+lame_1) * (H[0, 0] + H[1, 1])
+            return ufl.as_tensor([
+                [H[0, 0], H[0, 1], 0.0],
+                [H[1, 0], H[1, 1], 0.0],
+                [0.0, 0.0, Hzz],
+                ])
+        else:
+            return ufl.as_tensor([
+                [H[0, 0], H[0, 1], 0.0],
+                [H[1, 0], H[1, 1], 0.0],
+                [0.0, 0.0, 0.0],
+                ])
+
+    def transformation_gradient(self, d: df.fem.Function):
+        H = ufl.grad(d)
+        return ufl.as_tensor([
+            [H[0, 0], H[0, 1], 0.0],
+            [H[1, 0], H[1, 1], 0.0],
+            [0.0, 0.0, 0.0],
+            ])
+
+    def deformation_gradient(self, d: df.fem.Function):
+        Id = ufl.Identity(3)
+        F = Id + self.transformation_gradient(d) # type: ignore
+        return F
 
     def weighted_stress(self, w: ufl.TrialFunction):  # type: ignore
         """Returns weighted stress as UFL form.
@@ -62,38 +96,30 @@ class ParaGeomLinEla(LinearProblem):
         """
         lame_1 = self.mat.lambda_1
         lame_2 = self.mat.lambda_2
+        Id = ufl.Identity(3)
 
-        gdim = self.domain.gdim
-        Id = ufl.Identity(gdim)
-
-        # pull back
-        F = Id + ufl.grad(self.d)  # type: ignore
-        detF = ufl.det(F)
-        Finv = ufl.inv(F)
-        FinvT = ufl.inv(F.T)
-
-        i, j, k, l, m, p = ufl.indices(6)
-        tetrad_ikml = lame_1 * Id[i, k] * Id[m, l] + lame_2 * (
-            Id[i, m] * Id[k, l] + Id[i, l] * Id[k, m]  # type: ignore
+        i, j, k, l = ufl.indices(4)
+        tetrad_ijkl = lame_1 * Id[i, j] * Id[k, l] + lame_2 * (
+            Id[i, k] * Id[j, l] + Id[i, l] * Id[j, k]  # type: ignore
         )
-        grad_u_ml = w[m].dx(p) * Finv[p, l]  # type: ignore
-        sigma_ij = ufl.as_tensor(tetrad_ikml * grad_u_ml * FinvT[k, j] * detF, (i, j))  # type: ignore
+        grad_u_kl = self.displacement_gradient(w)[k, l] # type: ignore
+        sigma_ij = ufl.as_tensor(tetrad_ijkl * grad_u_kl, (i, j))  # type: ignore
         return sigma_ij
 
     @property
     def form_volume(self):
-        gdim = self.domain.gdim
-        Id = ufl.Identity(gdim)
-        F = Id + ufl.grad(self.d)  # type: ignore
+        F = self.deformation_gradient(self.d)
         detF = ufl.det(F)
         c = df.fem.Constant(self.domain.grid, df.default_scalar_type(1.))
         return c * detF * self.dx # type: ignore
 
     @property
     def form_lhs(self):
-        grad_v_ij = ufl.grad(self.test)
+        grad_v_ij = self.displacement_gradient(self.test)
         sigma_ij = self.weighted_stress(self.trial)
-        return ufl.inner(grad_v_ij, sigma_ij) * self.dx
+        F = self.deformation_gradient(self.d)
+        detF = ufl.det(F)
+        return ufl.inner(grad_v_ij, sigma_ij) * detF * self.dx # type: ignore
 
     @property
     def form_rhs(self):
@@ -122,9 +148,9 @@ def discretize_subdomain_operators(example):
     )
     d = df.fem.Function(aux.problem.V, name="d_trafo")
 
-    POISSON = example.poisson_ratio
     omega = aux.problem.domain
-    problem = ParaGeomLinEla(omega, aux.problem.V, E=1.0, NU=POISSON, d=d)
+    matparam = {"gdim": omega.gdim, "E": 1.0, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
+    problem = ParaGeomLinEla(omega, aux.problem.V, d, matparam)
 
     # ### wrap stiffness matrix as pymor operator
     def param_setter(mu):
@@ -168,10 +194,9 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
     facet_tags, _ = create_meshtags(domain, fdim, {"top": (top_marker, top_locator)})
     omega = RectangularDomain(domain, facet_tags=facet_tags)
 
-    EMOD = example.youngs_modulus
-    POISSON = example.poisson_ratio
     V = trafo_disp.function_space
-    problem = ParaGeomLinEla(omega, V, E=1.0, NU=POISSON, d=trafo_disp)
+    matparam = {"gdim": omega.gdim, "E": 1.0, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
+    problem = ParaGeomLinEla(omega, auxiliary_problem.problem.V, trafo_disp, matparam)
 
     # ### Dirichlet bcs are defined globally
     grid, _, _ = read_mesh(
@@ -216,6 +241,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
     bcs = _create_dirichlet_bcs(tuple(dirichlet_bcs))
 
     # Neumann BCs
+    EMOD = example.youngs_modulus
     TY = -example.traction_y / EMOD
     traction = df.fem.Constant(
         domain, (df.default_scalar_type(0.0), df.default_scalar_type(TY))
@@ -286,6 +312,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
 if __name__ == "__main__":
     from .tasks import example
     from .auxiliary_problem import discretize_auxiliary_problem
+    from .stress_analysis import principal_stress_2d
 
     coarse_grid_path = example.coarse_grid("global").as_posix()
     parent_domain_path = example.parent_domain("global").as_posix()
@@ -328,11 +355,8 @@ if __name__ == "__main__":
     D_star = fom.solution_space.make_array([d.x.petsc_vec.copy()])
     fom.visualize(D_star, filename="fom_mu_star.xdmf")
 
-    from .stress_analysis import *
 
     u = df.fem.Function(auxp.problem.V)
-    # u.x.array[:] = U.to_numpy().flatten()
-
     mesh = u.function_space.mesh
     map_c = mesh.topology.index_map(mesh.topology.dim)
     num_cells = map_c.size_local + map_c.num_ghosts
@@ -344,9 +368,6 @@ if __name__ == "__main__":
     QVe = basix.ufl.quadrature_element(basix_celltype, value_shape=(4,), scheme="default", degree=q_degree)
     QV = df.fem.functionspace(V.mesh, QVe)
     stress = df.fem.Function(QV, name="Cauchy")
-
-    mat = LinearElasticMaterial(gdim=2, E=example.youngs_modulus, NU=example.poisson_ratio)
-    # s1, s2 = principal_stress_2d(u, q_degree, mat, stress.x.array.reshape(cells.size, -1))
 
     def vol_exact(mu):
         radii = mu.to_numpy()
@@ -362,7 +383,7 @@ if __name__ == "__main__":
     #     assert np.isclose(vol_exact(mu), fom.output(mu))
 
     def risk_factor(s):
-        lower_bound = -20
+        lower_bound = -20.0
         upper_bound = 2.2
         compression = np.max(s / lower_bound)
         tension = np.max(s / upper_bound)
@@ -373,26 +394,32 @@ if __name__ == "__main__":
     rfs = []
     risk_set = []
     risk_set.append(fom.parameters.parse([0.1 for _ in range(10)]))
-    risk_set.append(fom.parameters.parse([0.15 for _ in range(10)]))
     risk_set.append(fom.parameters.parse([0.2 for _ in range(10)]))
     risk_set.append(fom.parameters.parse([0.3 for _ in range(10)]))
-    risk_set.append(fom.parameters.parse([0.1, 0.1, 0.2, 0.2, 0.3, 0.3, 0.2, 0.2, 0.1, 0.1]))
+    # risk_set.append(fom.parameters.parse([0.1, 0.1, 0.2, 0.2, 0.3, 0.3, 0.2, 0.2, 0.1, 0.1]))
     # risk_set.append(fom.parameters.parse([0.23016442074567037, 0.2723051465005729, 0.267990588281505, 0.29230231713343474, 0.24718372229157942, 0.3, 0.29432740767308657, 0.26897395853343675, 0.27479182925259354, 0.2283256924786881]))
     # risk_set.extend(parameter_space.sample_randomly(1))
 
     # current optimum
     # E = 30e3, ty = 0.0225
-    mu_star = fom.parameters.parse([0.2246864682321433, 0.2654481570260998, 0.2706042377543608, 0.28348322968875095, 0.285486146013244, 0.2891233659389231, 0.28360839135399113, 0.2707122905273762, 0.2656934609347168, 0.22417479580486357])
+    # mu_star = fom.parameters.parse([0.2246864682321433, 0.2654481570260998, 0.2706042377543608, 0.28348322968875095, 0.285486146013244, 0.2891233659389231, 0.28360839135399113, 0.2707122905273762, 0.2656934609347168, 0.22417479580486357])
+    mu_star = fom.parameters.parse([0.24608454494648874, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.24615440901882416])
     risk_set.append(mu_star)
 
+    matparam = {"gdim": 2, "E": example.youngs_modulus, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
+    parageom_physical = ParaGeomLinEla(auxp.problem.domain, auxp.problem.V, d, matparam)
+
     for mu in risk_set:
+        u.x.array[:] = 0.0
+        stress.x.array[:] = 0.0
+
         U = fom.solve(mu)
         obj.append(fom.output(mu)[0, 0])
         u.x.array[:] = U.to_numpy().flatten()
-        s1, s2 = principal_stress_2d(u, q_degree, mat, stress.x.array.reshape(cells.size, -1))
+        s1, s2 = principal_stress_2d(u, parageom_physical, q_degree, stress.x.array.reshape(cells.size, -1))
         rfs.append(
                 (risk_factor(s1), risk_factor(s2))
                 )
     print(obj)
     print(rfs)
-
+    breakpoint()

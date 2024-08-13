@@ -58,7 +58,8 @@ class BeamData:
     fe_deg: int = 2
     poisson_ratio: float = 0.2
     youngs_modulus: float = 30e3  # [MPa]
-    traction_y: float = 0.0225  # [MPa]
+    plane_stress: bool = True
+    traction_y: float = 0.025  # [MPa]
     parameters: dict = field(
         default_factory=lambda: {
             "subdomain": Parameters({"R": 1}),
