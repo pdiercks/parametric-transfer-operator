@@ -68,10 +68,6 @@ def main(args):
         "time": np.inf,
     }
 
-    num_subdomains = example.nx * example.ny
-    initial_guess = fom.parameters.parse([0.2 for _ in range(num_subdomains)])
-    parameter_space = fom.parameters.space(example.mu_range)
-    bounds = [parameter_space.ranges["R"] for _ in range(num_subdomains)]
     # ### Stress constraints
     # (C1) s_min < s_1 < s_max
     # (C2) s_min < s_2 < s_max
@@ -90,8 +86,12 @@ def main(args):
     parageom = ParaGeomLinEla(auxiliary_problem.problem.domain, V, d_trafo, matparam)
 
     # ### Solve optimization problem using FOM
+    num_subdomains = example.nx * example.ny
+    initial_guess = fom.parameters.parse([0.15 for _ in range(num_subdomains)])
+    parameter_space = fom.parameters.space(example.mu_range)
+    mu_range = parameter_space.ranges["R"]
     opt_fom_result = solve_optimization_problem(
-        args, initial_guess, bounds, displacement, stress, fom, parageom, fom_minimization_data, gradient=False
+        args, initial_guess, mu_range, displacement, stress, fom, parageom, fom_minimization_data, gradient=False
     )
     mu_ref = opt_fom_result.x
     fom_minimization_data["num_iter"] = opt_fom_result.nit
@@ -185,6 +185,8 @@ def record_results(function, parse, data, mu):
 
 
 def report(result, parse, data, reference_mu=None):
+    # FIXME
+    # attributes of result depend on solver
     if result.status != 0:
         print("\n failed!")
     else:
@@ -208,12 +210,12 @@ def report(result, parse, data, reference_mu=None):
 
 
 def solve_optimization_problem(
-    cli, initial_guess, bounds, displacement, stress, model, parageom, minimization_data, gradient=False
+    cli, initial_guess, mu_range, displacement, stress, model, parageom, minimization_data, gradient=False
 ):
     """solve optimization problem"""
 
     from functools import partial
-    from scipy.optimize import minimize
+    from scipy.optimize import minimize, NonlinearConstraint, Bounds
     from time import perf_counter
     from .stress_analysis import principal_stress_2d
 
@@ -221,6 +223,7 @@ def solve_optimization_problem(
     # see https://doi.org/10.1016/j.compstruc.2019.106104
     lower_bound = -20.0 # [MPa]
     upper_bound = 2.2 # [MPa]
+    confidence = 1.
 
     mesh = displacement.function_space.mesh
     map_c = mesh.topology.index_map(mesh.topology.dim)
@@ -231,33 +234,45 @@ def solve_optimization_problem(
         return model.output(mu)[0, 0]
 
     def eval_rf_1(x):
+        """RF for compression"""
         mu = model.parameters.parse(x)
         U = model.solve(mu) # retrieve from cache or compute?
         displacement.x.array[:] = U.to_numpy().flatten()
         s1, _ = principal_stress_2d(displacement, parageom, q_degree=2, values=stress.x.array.reshape(cells.size, -1))
-        compression = np.max(s1 / lower_bound)
-        tension = np.max(s1 / upper_bound)
-        return 1. - max(compression, tension)
+        compression = s1.flatten() / lower_bound
+        return confidence - compression
 
     def eval_rf_2(x):
+        """RF for tension"""
         mu = model.parameters.parse(x)
         U = model.solve(mu) # retrieve from cache or compute?
         displacement.x.array[:] = U.to_numpy().flatten()
         _, s2 = principal_stress_2d(displacement, parageom, q_degree=2, values=stress.x.array.reshape(cells.size, -1))
-        compression = np.max(s2 / lower_bound)
-        tension = np.max(s2 / upper_bound)
-        return 1. - max(compression, tension)
+        tension = s2.flatten() / upper_bound
+        return confidence - tension
 
-    constraints = (
-            {"type": "ineq", "fun": eval_rf_1},
-            {"type": "ineq", "fun": eval_rf_2}
-            )
+    lower = mu_range[0] * np.ones(10)
+    upper = mu_range[1] * np.ones(10)
+    bounds = Bounds(lower, upper, keep_feasible=True)
+
 
     method = cli.method
     if method == "COBYLA":
         options = {"tol": 1e-2, "catol": 1e-2}
+    elif method == "COBYQA":
+        options = {"f_target": 0.8}
     elif method == "SLSQP":
-        options = {"ftol": 1e-2}
+        options = {"ftol": 1e-4, "eps": 0.001}
+    elif method == "trust-constr":
+        options = {"gtol": 1e-4, "xtol": 1e-4}
+    else:
+        raise NotImplementedError
+
+    constraints = None
+    if method in ("COBYLA", "SLSQP"):
+        constraints = {"type": "ineq", "fun": eval_rf_2}
+    elif method in ("trust-constr", "COBYQA"):
+        constraints = NonlinearConstraint(eval_rf_2, 0., np.inf, keep_feasible=True)
     else:
         raise NotImplementedError
 
@@ -278,8 +293,13 @@ def solve_optimization_problem(
     )
     minimization_data["time"] = perf_counter() - tic
 
+    # check constraint is actually satisfied
+    c1 = eval_rf_1(opt_result.x)
+    c2 = eval_rf_2(opt_result.x)
+    c1_okay = np.all(c1 >= 0.)
+    c2_okay = np.all(c2 >= 0.)
     breakpoint()
-    print("check constraint for optimal solution")
+    print("c2 okay?")
 
     return opt_result
 
@@ -315,7 +335,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--method",
         type=str,
-        choices=("COBYLA", "SLSQP"),
+        choices=("COBYLA", "COBYQA", "SLSQP", "trust-constr"),
         help="The solver to use for the minimization problem.",
         default="SLSQP",
     )

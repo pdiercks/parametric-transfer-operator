@@ -14,7 +14,7 @@ from multi.preprocessing import create_meshtags
 from multi.product import InnerProduct
 from multi.io import read_mesh
 
-from pymor.basic import VectorOperator, StationaryModel, GenericParameterFunctional, NumpyVectorSpace
+from pymor.basic import VectorOperator, StationaryModel, GenericParameterFunctional, NumpyVectorSpace, VectorFunctional
 from pymor.operators.constructions import ConstantOperator, LincombOperator
 from pymor.bindings.fenicsx import (
     FenicsxVectorSpace,
@@ -271,7 +271,8 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
     # NOTE
     # without b.copy(), fom.rhs.as_range_array() does not return correct data
     # problem goes out of scope and problem.b is deleted
-    rhs = VectorOperator(operator.range.make_array([problem.b.copy()]))  # type: ignore
+    F_ext = operator.range.make_array([problem.b.copy()]) # type: ignore
+    rhs = VectorOperator(F_ext)  # type: ignore
 
     # ### Inner products
     inner_product = InnerProduct(V, product="h1-semi", bcs=bcs)
@@ -294,14 +295,35 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
         vol = df.fem.assemble_scalar(vcpp) # type: ignore
         return vol
 
-    theta = GenericParameterFunctional(compute_volume, params)
-    one_op = ConstantOperator(NumpyVectorSpace(1).ones(1), source=operator.source)
-    volume_output = LincombOperator([one_op], [theta])
+    # ### Output definition
+    # solve FOM for initial mu
+
+    # initial mu that should be used to normalize?
+    # 0.1 --> max value for mass
+    initial_mu = params.parse([0.1 for _ in range(10)])
+    vol_ref = compute_volume(initial_mu)
+    U_ref = operator.apply_inverse(rhs.as_range_array(), mu=initial_mu)
+
+    # mass/volume
+    ω = 0.05
+    volume = GenericParameterFunctional(compute_volume, params)
+    vol_va = NumpyVectorSpace(1).ones(1)
+    vol_va.scal( (1. - ω) / vol_ref)
+    one_op = ConstantOperator(vol_va, source=operator.source)
+
+    # compliance
+    compl_ref = F_ext.inner(U_ref).item()
+    scaled_fext = F_ext.copy()
+    scaled_fext.scal(1 / compl_ref)
+    compliance = VectorFunctional(scaled_fext, product=None, name="compliance")
+
+    # output J = mass + compliance
+    output = LincombOperator([one_op, compliance], [volume, ω])
 
     fom = StationaryModel(
         operator,
         rhs,
-        output_functional=volume_output,
+        output_functional=output,
         products={product_name: h1_product, product_l2: l2_product},
         visualizer=viz,
         name="FOM",
@@ -376,6 +398,7 @@ if __name__ == "__main__":
         vol = rect - np.dot(pi, radii ** 2)
         return vol
 
+    breakpoint()
     # test volume output
     # assert np.isclose(vol_exact(mu), fom.output(mu))
     # test_vol = parameter_space.sample_randomly(3)
