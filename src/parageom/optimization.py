@@ -9,7 +9,6 @@ import dolfinx as df
 import basix
 
 import numpy as np
-from multi.materials import LinearElasticMaterial
 from pymor.models.basic import StationaryModel
 from pymor.core.pickle import dump
 
@@ -19,6 +18,8 @@ def main(args):
     from .tasks import example
     from .auxiliary_problem import discretize_auxiliary_problem
     from .fom import discretize_fom, ParaGeomLinEla
+
+    # TODO add logger
 
     # ### Build FOM
     coarse_grid_path = example.coarse_grid("global").as_posix()
@@ -185,14 +186,17 @@ def record_results(function, parse, data, mu):
 
 
 def report(result, parse, data, reference_mu=None):
-    # FIXME
-    # attributes of result depend on solver
+
+    def volume(x):
+        return 10. - np.sum(np.pi * x ** 2)
+
     if result.status != 0:
         print("\n failed!")
     else:
         print("\n succeeded!")
         print("  mu_min:    {}".format(parse(result.x)))
         print("  J(mu_min): {}".format(result.fun))
+        print("  Vol(mu_min): {}".format(volume(result.x)))
         if reference_mu is not None:
             print(
                 "  absolute error in mu_min w.r.t. reference solution: {:.2e}".format(
@@ -221,9 +225,9 @@ def solve_optimization_problem(
 
     # ### Lower & upper bounds for principal Cauchy stress
     # see https://doi.org/10.1016/j.compstruc.2019.106104
-    lower_bound = -20.0 # [MPa]
+    # lower_bound = -20.0 # [MPa]
     upper_bound = 2.2 # [MPa]
-    confidence = 1.
+    confidence = cli.confidence
 
     mesh = displacement.function_space.mesh
     map_c = mesh.topology.index_map(mesh.topology.dim)
@@ -233,14 +237,14 @@ def solve_optimization_problem(
     def eval_objective_functional(mu):
         return model.output(mu)[0, 0]
 
-    def eval_rf_1(x):
-        """RF for compression"""
-        mu = model.parameters.parse(x)
-        U = model.solve(mu) # retrieve from cache or compute?
-        displacement.x.array[:] = U.to_numpy().flatten()
-        s1, _ = principal_stress_2d(displacement, parageom, q_degree=2, values=stress.x.array.reshape(cells.size, -1))
-        compression = s1.flatten() / lower_bound
-        return confidence - compression
+    # def eval_rf_1(x):
+    #     """RF for compression"""
+    #     mu = model.parameters.parse(x)
+    #     U = model.solve(mu) # retrieve from cache or compute?
+    #     displacement.x.array[:] = U.to_numpy().flatten()
+    #     s1, _ = principal_stress_2d(displacement, parageom, q_degree=2, values=stress.x.array.reshape(cells.size, -1))
+    #     compression = s1.flatten() / lower_bound
+    #     return confidence - compression
 
     def eval_rf_2(x):
         """RF for tension"""
@@ -293,15 +297,16 @@ def solve_optimization_problem(
     )
     minimization_data["time"] = perf_counter() - tic
 
-    # check constraint is actually satisfied
-    c1 = eval_rf_1(opt_result.x)
     c2 = eval_rf_2(opt_result.x)
-    c1_okay = np.all(c1 >= 0.)
-    c2_okay = np.all(c2 >= 0.)
-    breakpoint()
-    print("c2 okay?")
-
-    return opt_result
+    strictly_positive = np.all(c2 >= 0.)
+    negative_vals = c2[c2 < 0.]
+    nearly_zero = np.all(np.isclose(negative_vals, 0., atol=1e-4))
+    if strictly_positive:
+        return opt_result
+    elif nearly_zero:
+        return opt_result
+    else:
+        raise ValueError("Constraint not satisfied by optimal solution!")
 
 
 def build_localized_rom(cli, beam, parameters) -> StationaryModel:
@@ -309,7 +314,8 @@ def build_localized_rom(cli, beam, parameters) -> StationaryModel:
 
 
 if __name__ == "__main__":
-    import sys, argparse
+    import sys
+    import argparse
 
     parser = argparse.ArgumentParser(
         description="Minimize mass (QoI) using FOM and localized ROM.",
@@ -339,6 +345,12 @@ if __name__ == "__main__":
         help="The solver to use for the minimization problem.",
         default="SLSQP",
     )
+    parser.add_argument(
+            "--confidence",
+            type=float,
+            help="Confidence (0 <= c <= 1) interval for stress constraint.",
+            default=1.0
+            )
     parser.add_argument("--show", action="store_true", help="Show QoI over iterations.")
     args = parser.parse_args(sys.argv[1:])
     main(args)
