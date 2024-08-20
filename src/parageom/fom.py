@@ -334,7 +334,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
 if __name__ == "__main__":
     from .tasks import example
     from .auxiliary_problem import discretize_auxiliary_problem
-    from .stress_analysis import principal_stress_2d
+    from .stress_analysis import principal_stress_2d, project
 
     coarse_grid_path = example.coarse_grid("global").as_posix()
     parent_domain_path = example.parent_domain("global").as_posix()
@@ -398,7 +398,6 @@ if __name__ == "__main__":
         vol = rect - np.dot(pi, radii ** 2)
         return vol
 
-    breakpoint()
     # test volume output
     # assert np.isclose(vol_exact(mu), fom.output(mu))
     # test_vol = parameter_space.sample_randomly(3)
@@ -432,17 +431,48 @@ if __name__ == "__main__":
     matparam = {"gdim": 2, "E": example.youngs_modulus, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
     parageom_physical = ParaGeomLinEla(auxp.problem.domain, auxp.problem.V, d, matparam)
 
-    for mu in risk_set:
+    # for mu in risk_set:
+    #     u.x.array[:] = 0.0
+    #     stress.x.array[:] = 0.0
+    #
+    #     U = fom.solve(mu)
+    #     obj.append(fom.output(mu)[0, 0])
+    #     u.x.array[:] = U.to_numpy().flatten()
+    #     s1, s2 = principal_stress_2d(u, parageom_physical, q_degree, stress.x.array.reshape(cells.size, -1))
+    #     rfs.append(
+    #             (risk_factor(s1), risk_factor(s2))
+    #             )
+    # print(obj)
+    # print(rfs)
+    # breakpoint()
+    # mu = mu_star
+
+    # scalar quadrature space
+    qs = basix.ufl.quadrature_element(basix_celltype, value_shape=(), scheme="default", degree=q_degree)
+    Q = df.fem.functionspace(V.mesh, qs)
+    sigma_q = df.fem.Function(Q, name="s1")
+    W = df.fem.functionspace(V.mesh, ("P", 2)) # target space, linear Lagrange elements
+    sigma_p = df.fem.Function(W, name="s1")
+
+    designs = {
+            "trivial": fom.parameters.parse([0.3 for _ in range(10)]),
+            "conf_1": fom.parameters.parse([0.22932051859506594, 0.2999999999999985, 0.2999999999999988, 0.29999999999999916, 0.2999999999999993, 0.29999999999999905, 0.29999999999999805, 0.29999999999999877, 0.29999999999999927, 0.22940472452156227]),
+            "conf_0.9": fom.parameters.parse([0.21856925936189525, 0.2999999999999984, 0.3, 0.24196825361845933, 0.21902404444183984, 0.218975926629281, 0.23178532785205397, 0.24871942382233242, 0.25377347107372933, 0.21744772911706084]),
+            }
+    for name, mu in designs.items():
         u.x.array[:] = 0.0
         stress.x.array[:] = 0.0
+        sigma_q.x.array[:] = 0.0
 
         U = fom.solve(mu)
-        obj.append(fom.output(mu)[0, 0])
         u.x.array[:] = U.to_numpy().flatten()
         s1, s2 = principal_stress_2d(u, parageom_physical, q_degree, stress.x.array.reshape(cells.size, -1))
-        rfs.append(
-                (risk_factor(s1), risk_factor(s2))
-                )
-    print(obj)
-    print(rfs)
-    breakpoint()
+
+        sigma_q.x.array[:] = s2.flatten()
+        project(sigma_q, sigma_p)
+
+        with df.io.XDMFFile(W.mesh.comm, f"output/{name}.xdmf", "w") as xdmf:
+            xdmf.write_mesh(W.mesh)
+            xdmf.write_function(sigma_p)
+
+
