@@ -4,6 +4,8 @@ import basix
 import ufl
 import numpy as np
 import dolfinx as df
+from dolfinx.fem.petsc import apply_lifting, assemble_matrix, assemble_vector, set_bc
+from petsc4py import PETSc
 from .fom import ParaGeomLinEla
 
 
@@ -53,3 +55,48 @@ def principal_stress_2d(u: df.fem.Function, parageom: ParaGeomLinEla, q_degree: 
     # Compute principal stress
     smin, smax = compute_principal_components(values)
     return smin, smax
+
+
+# credit
+# https://github.com/fenics-dolfiny/dolfiny/blob/main/src/dolfiny/projection.py
+def project(e, target_func, bcs=[]):
+    """Project UFL expression.
+
+    Note
+    ----
+    This method solves a linear system (using KSP defaults).
+
+    """
+
+    # Ensure we have a mesh and attach to measure
+    V = target_func.function_space
+    dx = ufl.dx(V.mesh)
+
+    # Define variational problem for projection
+    w = ufl.TestFunction(V)
+    v = ufl.TrialFunction(V)
+    a = df.fem.form(ufl.inner(v, w) * dx)
+    L = df.fem.form(ufl.inner(e, w) * dx)
+
+    # Assemble linear system
+    A = assemble_matrix(a, bcs)
+    A.assemble()
+    b = assemble_vector(L)
+    apply_lifting(b, [a], [bcs])
+    b.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+    set_bc(b, bcs)
+
+    # Solve linear system
+    solver = PETSc.KSP().create(A.getComm())
+    solver.setType("bcgs")
+    solver.getPC().setType("bjacobi")
+    solver.rtol = 1.0e-05
+    solver.setOperators(A)
+    solver.solve(b, target_func.vector)
+    assert solver.reason > 0
+    target_func.x.scatter_forward()
+
+    # Destroy PETSc linear algebra objects and solver
+    solver.destroy()
+    A.destroy()
+    b.destroy()
