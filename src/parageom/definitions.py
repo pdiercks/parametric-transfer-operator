@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import dolfinx as df
-from multi.boundary import within_range
+from multi.boundary import within_range, plane_at, point_at
 import numpy as np
 from pymor.parameters.base import Parameters
 
@@ -59,7 +59,7 @@ class BeamData:
     poisson_ratio: float = 0.2
     youngs_modulus: float = 30e3  # [MPa]
     plane_stress: bool = True
-    traction_y: float = 0.025  # [MPa]
+    traction_y: float = 0.0375 # [MPa]
     parameters: dict = field(
         default_factory=lambda: {
             "subdomain": Parameters({"R": 1}),
@@ -383,7 +383,7 @@ class BeamData:
         return cells
 
     def boundaries(self, domain: df.mesh.Mesh):
-        """Returns Dirichlet boundaries of the global domain.
+        """Returns boundaries (Dirichlet, Neumann) of the global domain.
 
         Args:
             domain: The global domain.
@@ -397,20 +397,20 @@ class BeamData:
         a = self.unit_length
         xmin = np.amin(x, axis=0)
         xmax = np.amax(x, axis=0)
-        cell_size = a / self.num_intervals
 
         return {
-            "origin" : (int(103), within_range([xmin[0], xmin[1], xmin[2]], [cell_size + 1e-2, xmin[1], xmin[2]])),
             "support_left": (
                 int(101),
-                within_range([xmin[0], xmin[1], xmin[2]], [a / 2, xmin[1], xmin[2]]),
+                plane_at(xmin[0], "x"),
             ),
             "support_right": (
                 int(102),
-                within_range(
-                    [xmax[0] - a / 2, xmin[1], xmin[2]], [xmax[0], xmin[1], xmin[2]]
-                ),
+                point_at([xmax[0], xmin[1], xmin[2]])
             ),
+            "support_top": (
+                int(194),
+                within_range([xmin[0], xmax[1], xmin[2]], [a, xmax[1], xmin[2]]),
+                ),
         }
 
     def get_dirichlet(
@@ -422,7 +422,6 @@ class BeamData:
         boundaries = self.boundaries(domain)
         _, left = boundaries["support_left"]
         _, right = boundaries["support_right"]
-        _, origin = boundaries["origin"]
 
         bcs = []
         zero = df.default_scalar_type(0.0)
@@ -430,18 +429,11 @@ class BeamData:
         if config == "left":
             fix_ux = {
                 "value": zero,
-                "boundary": origin,
+                "boundary": left,
                 "entity_dim": 1,
                 "sub": 0,
             }
-            fix_uy = {
-                "value": zero,
-                "boundary": left,
-                "entity_dim": 1,
-                "sub": 1,
-            }
             bcs.append(fix_ux)
-            bcs.append(fix_uy)
             return bcs
         elif config == "inner":
             return None
@@ -449,7 +441,7 @@ class BeamData:
             fix_uy = {
                 "value": zero,
                 "boundary": right,
-                "entity_dim": 1,
+                "entity_dim": 0,
                 "sub": 1,
             }
             bcs.append(fix_uy)
@@ -457,9 +449,18 @@ class BeamData:
         else:
             raise NotImplementedError
 
-    @property
-    def get_neumann(self) -> None:
-        return None
+    def get_neumann(self, domain: df.mesh.Mesh, config: str) -> Optional[tuple[int, Callable]]:
+        boundaries = self.boundaries(domain)
+        tag, marker = boundaries["support_top"]
+
+        if config == "left":
+            return (tag, marker)
+        elif config == "inner":
+            return None
+        elif config == "right":
+            return None
+        else:
+            raise NotImplementedError
 
     def get_kernel_set(self, cell_index: int) -> tuple[int, ...]:
         """return indices of rigid body modes to be used"""
