@@ -9,13 +9,14 @@ from petsc4py import PETSc
 from .fom import ParaGeomLinEla
 
 
-def principal_stress_2d(u: df.fem.Function, parageom: ParaGeomLinEla, q_degree: int, values: np.ndarray):
+def principal_stress_2d(u: df.fem.Function, parageom: ParaGeomLinEla, q_degree: int, cells: np.ndarray, values: np.ndarray):
     """Computes principal Cauchy stress.
 
     Args:
         u: The displacement field.
         parageom: Geometrically parametrized linear problem.
         q_degree: The quadrature degree.
+        cells: The cells for which to evaluate.
         values: Array to fill with values. 
 
     """
@@ -23,11 +24,8 @@ def principal_stress_2d(u: df.fem.Function, parageom: ParaGeomLinEla, q_degree: 
     # Note that class ParaGeomLinEla has transformation displacement d
     # as attribute. d is automatically updated for each call to fom.solve(mu).
 
-    # Mesh and cells
+    # Mesh
     mesh = u.function_space.mesh
-    map_c = mesh.topology.index_map(mesh.topology.dim)
-    num_cells = map_c.size_local + map_c.num_ghosts
-    cells = np.arange(0, num_cells, dtype=np.int32)
 
     # Quadrature space and Function for Cauchy stress
     basix_celltype = getattr(basix.CellType, mesh.topology.cell_type.name)
