@@ -37,22 +37,13 @@ def main(args):
     )
     V = auxiliary_problem.problem.V
     d_trafo = df.fem.Function(V, name="d_trafo")
-    fom = discretize_fom(example, auxiliary_problem, d_trafo)
+    fom = discretize_fom(example, auxiliary_problem, d_trafo, ω=args.omega)
 
     # ### Build localized ROM
     # rom = build_localized_rom(args, beam, fom.parameters)
 
-    # ### Global Functions for displacement and Cauchy stress
+    # ### Global Function for displacement solution
     displacement = df.fem.Function(V, name="u")
-    basix_celltype = getattr(basix.CellType, V.mesh.topology.cell_type.name)
-    q_degree = 2
-    QVe = basix.ufl.quadrature_element(basix_celltype, value_shape=(4,), scheme="default", degree=q_degree)
-    QV = df.fem.functionspace(V.mesh, QVe)
-    stress = df.fem.Function(QV, name="Cauchy")
-
-    # after U <-- model.solve(mu)
-    # displacement is updated with values of U independent of which model was used
-    # and the stress analysis is carried out over the full mesh
 
     # ### Dict's to gather minimization data
     fom_minimization_data = {
@@ -69,30 +60,18 @@ def main(args):
         "time": np.inf,
     }
 
-    # ### Stress constraints
-    # (C1) s_min < s_1 < s_max
-    # (C2) s_min < s_2 < s_max
-    # RF1: max( s_1 / s_max, s_1 / s_min)
-    # RF2: max( s_2 / s_max, s_2 / s_min)
-    # RF1 or RF2 not equal to 1 means that (C1), (C2) respectively, are satisfied
-    # The risk factor constraint can thus be posed as inequality constraint
-    # (COBYLA only supports inequality constraints)
-    # okay: RF1 <= 1, RF2 <= 1, failure: RF_i > 1
-    # constraint function result is expected to be non-negative, r > 0
-    # constraint_rf_1 = lambda x: 1 - RF1
-
-    # Constraint definition moved to `solve_optimization_problem` ...
+    # ParaGeomLinEla for stress computation
     gdim = fom.solution_space.V.mesh.geometry.dim
     matparam = {"gdim": gdim, "E": example.youngs_modulus, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
     parageom = ParaGeomLinEla(auxiliary_problem.problem.domain, V, d_trafo, matparam)
 
     # ### Solve optimization problem using FOM
     num_subdomains = example.nx * example.ny
-    initial_guess = fom.parameters.parse([0.15 for _ in range(num_subdomains)])
+    initial_guess = fom.parameters.parse([0.1 for _ in range(num_subdomains)])
     parameter_space = fom.parameters.space(example.mu_range)
     mu_range = parameter_space.ranges["R"]
     opt_fom_result = solve_optimization_problem(
-        args, initial_guess, mu_range, displacement, stress, fom, parageom, fom_minimization_data, gradient=False
+        args, initial_guess, mu_range, displacement, fom, parageom, fom_minimization_data, gradient=False
     )
     mu_ref = opt_fom_result.x
     fom_minimization_data["num_iter"] = opt_fom_result.nit
@@ -214,7 +193,7 @@ def report(result, parse, data, reference_mu=None):
 
 
 def solve_optimization_problem(
-    cli, initial_guess, mu_range, displacement, stress, model, parageom, minimization_data, gradient=False
+    cli, initial_guess, mu_range, displacement, model, parageom, minimization_data, gradient=False
 ):
     """solve optimization problem"""
 
@@ -229,29 +208,46 @@ def solve_optimization_problem(
     upper_bound = 2.2 # [MPa]
     confidence = cli.confidence
 
-    mesh = displacement.function_space.mesh
-    map_c = mesh.topology.index_map(mesh.topology.dim)
-    num_cells = map_c.size_local + map_c.num_ghosts
-    cells = np.arange(0, num_cells, dtype=np.int32)
-
     def eval_objective_functional(mu):
         return model.output(mu)[0, 0]
 
-    # def eval_rf_1(x):
-    #     """RF for compression"""
-    #     mu = model.parameters.parse(x)
-    #     U = model.solve(mu) # retrieve from cache or compute?
-    #     displacement.x.array[:] = U.to_numpy().flatten()
-    #     s1, _ = principal_stress_2d(displacement, parageom, q_degree=2, values=stress.x.array.reshape(cells.size, -1))
-    #     compression = s1.flatten() / lower_bound
-    #     return confidence - compression
+    def active_cells(domain):
+        # get active cells to deactivate constrain function
+        # in some part of the domain (near the support)
+
+        def exclude(x):
+            radius = 0.3
+            center = np.array([[10.0], [0.0], [0.0]])
+            distance = np.linalg.norm(np.abs(x - center), axis=0)
+            return distance < radius
+
+        tdim = domain.topology.dim
+        map_c = domain.topology.index_map(tdim)
+        num_cells = map_c.size_local + map_c.num_ghosts
+        allcells = np.arange(0, num_cells, dtype=np.int32)
+
+        nonactive = df.mesh.locate_entities(domain, tdim, exclude)
+        active = np.setdiff1d(allcells, nonactive)
+        return active
+
+    V = displacement.function_space
+    # active region for the stress constraint
+    constrained = active_cells(V.mesh)
+    tdim = V.mesh.topology.dim
+    submesh, cell_map, _, _ = df.mesh.create_submesh(V.mesh, tdim, constrained)
+
+    basix_celltype = getattr(basix.CellType, V.mesh.topology.cell_type.name)
+    q_degree = 2
+    QVe = basix.ufl.quadrature_element(basix_celltype, value_shape=(4,), scheme="default", degree=q_degree)
+    QV = df.fem.functionspace(submesh, QVe)
+    stress = df.fem.Function(QV, name="Cauchy")
 
     def eval_rf_2(x):
-        """RF for tension"""
+        """risk factor for tension"""
         mu = model.parameters.parse(x)
-        U = model.solve(mu) # retrieve from cache or compute?
+        U = model.solve(mu)
         displacement.x.array[:] = U.to_numpy().flatten()
-        _, s2 = principal_stress_2d(displacement, parageom, q_degree=2, values=stress.x.array.reshape(cells.size, -1))
+        _, s2 = principal_stress_2d(displacement, parageom, q_degree=2, cells=cell_map, values=stress.x.array.reshape(cell_map.size, -1))
         tension = s2.flatten() / upper_bound
         return confidence - tension
 
@@ -266,13 +262,13 @@ def solve_optimization_problem(
     elif method == "COBYQA":
         options = {"f_target": 0.8}
     elif method == "SLSQP":
-        options = {"ftol": 1e-4, "eps": 0.001}
+        options = {"ftol": 1e-4, "eps": 0.005}
     elif method == "trust-constr":
-        options = {"gtol": 1e-4, "xtol": 1e-4}
+        options = {"gtol": 1e-4, "xtol": 1e-4, "barrier_tol": 1e-4, "finite_diff_rel_step": 5e-3}
     else:
         raise NotImplementedError
 
-    constraints = None
+    constraints = ()
     if method in ("COBYLA", "SLSQP"):
         constraints = {"type": "ineq", "fun": eval_rf_2}
     elif method in ("trust-constr", "COBYQA"):
@@ -350,6 +346,12 @@ if __name__ == "__main__":
             type=float,
             help="Confidence (0 <= c <= 1) interval for stress constraint.",
             default=1.0
+            )
+    parser.add_argument(
+            "--omega",
+            type=float,
+            help="Weighting factor for output functional.",
+            default=0.5
             )
     parser.add_argument("--show", action="store_true", help="Show QoI over iterations.")
     args = parser.parse_args(sys.argv[1:])

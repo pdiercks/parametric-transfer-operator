@@ -9,7 +9,6 @@ import ufl
 from multi.domain import Domain, RectangularDomain, StructuredQuadGrid
 from multi.problems import LinearProblem
 from multi.materials import LinearElasticMaterial
-from multi.boundary import plane_at
 from multi.preprocessing import create_meshtags
 from multi.product import InnerProduct
 from multi.io import read_mesh
@@ -98,7 +97,7 @@ class ParaGeomLinEla(LinearProblem):
         lame_2 = self.mat.lambda_2
         Id = ufl.Identity(3)
 
-        i, j, k, l = ufl.indices(4)
+        i, j, k, l = ufl.indices(4) # noqa
         tetrad_ijkl = lame_1 * Id[i, j] * Id[k, l] + lame_2 * (
             Id[i, k] * Id[j, l] + Id[i, l] * Id[j, k]  # type: ignore
         )
@@ -177,7 +176,7 @@ def discretize_subdomain_operators(example):
     return operator, rhs
 
 
-def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
+def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
     """Discretize FOM with Pull Back"""
     from .fom import ParaGeomLinEla
     from .matrix_based_operator import (
@@ -189,37 +188,41 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
     domain = auxiliary_problem.problem.domain.grid
     tdim = domain.topology.dim
     fdim = tdim - 1
-    top_marker = int(194)
-    top_locator = plane_at(example.height, "y")
-    facet_tags, _ = create_meshtags(domain, fdim, {"top": (top_marker, top_locator)})
-    omega = RectangularDomain(domain, facet_tags=facet_tags)
-
     V = trafo_disp.function_space
-    matparam = {"gdim": omega.gdim, "E": 1.0, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
-    problem = ParaGeomLinEla(omega, auxiliary_problem.problem.V, trafo_disp, matparam)
 
-    # ### Dirichlet bcs are defined globally
+    # ### Initialize global coarse grid
+    # required for definition of Dirichlet & Neumann BCs
     grid, _, _ = read_mesh(
         example.coarse_grid("global"),
         MPI.COMM_SELF,
         kwargs={"gdim": example.gdim},
     )
     coarse_grid = StructuredQuadGrid(grid)
+
+    # Neumann BCs
+    neumann = example.get_neumann(coarse_grid.grid, "left")
+    assert neumann is not None
+    facet_tags, _ = create_meshtags(domain, fdim, {"top": neumann})
+    omega = RectangularDomain(domain, facet_tags=facet_tags)
+    matparam = {"gdim": omega.gdim, "E": 1.0, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
+    problem = ParaGeomLinEla(omega, auxiliary_problem.problem.V, trafo_disp, matparam)
+
+    # Dirichlet BCs
     dirichlet_left = example.get_dirichlet(coarse_grid.grid, "left")
     dirichlet_right = example.get_dirichlet(coarse_grid.grid, "right")
     assert dirichlet_left is not None
     assert dirichlet_right is not None
 
-    # Dirichlet BCs
     dirichlet_bcs = []
     for bc_spec in dirichlet_left:
         entities_left = df.mesh.locate_entities_boundary(
-            domain, fdim, bc_spec["boundary"]
+            domain, bc_spec["entity_dim"], bc_spec["boundary"]
         )
+        assert entities_left.size > 0
         bc_left = BCTopo(
             df.fem.Constant(V.mesh, bc_spec["value"]),
             entities_left,
-            fdim,
+            bc_spec["entity_dim"],
             V,
             sub=bc_spec["sub"],
         )
@@ -227,12 +230,13 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
 
     for bc_spec in dirichlet_right:
         entities_right = df.mesh.locate_entities_boundary(
-            domain, fdim, bc_spec["boundary"]
+            domain, bc_spec["entity_dim"], bc_spec["boundary"]
         )
+        assert entities_right.size > 0
         bc_right = BCTopo(
             df.fem.Constant(V.mesh, bc_spec["value"]),
             entities_right,
-            fdim,
+            bc_spec["entity_dim"],
             V,
             sub=bc_spec["sub"],
         )
@@ -246,7 +250,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
     traction = df.fem.Constant(
         domain, (df.default_scalar_type(0.0), df.default_scalar_type(TY))
     )
-    problem.add_neumann_bc(top_marker, traction)
+    problem.add_neumann_bc(neumann[0], traction)
 
     problem.setup_solver()
     problem.assemble_vector(bcs=bcs)
@@ -297,15 +301,11 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
 
     # ### Output definition
     # solve FOM for initial mu
-
-    # initial mu that should be used to normalize?
-    # 0.1 --> max value for mass
     initial_mu = params.parse([0.1 for _ in range(10)])
     vol_ref = compute_volume(initial_mu)
     U_ref = operator.apply_inverse(rhs.as_range_array(), mu=initial_mu)
 
     # mass/volume
-    ω = 0.05
     volume = GenericParameterFunctional(compute_volume, params)
     vol_va = NumpyVectorSpace(1).ones(1)
     vol_va.scal( (1. - ω) / vol_ref)
@@ -317,7 +317,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp):
     scaled_fext.scal(1 / compl_ref)
     compliance = VectorFunctional(scaled_fext, product=None, name="compliance")
 
-    # output J = mass + compliance
+    # output J = (1 - ω) mass + ω compliance
     output = LincombOperator([one_op, compliance], [volume, ω])
 
     fom = StationaryModel(
@@ -369,14 +369,7 @@ if __name__ == "__main__":
 
     # check load
     total_load = np.sum(fom.rhs.as_range_array().to_numpy())  # type: ignore
-    assert np.isclose(total_load, -example.traction_y / example.youngs_modulus * 10)
-
-    fom.visualize(U, filename="fom_mu_bar.xdmf")
-    mu_star = fom.parameters.parse([0.28104574327598486, 0.29999999984917336, 0.2803686495572847, 0.3, 0.28945329693580574, 0.2984318556624101, 0.2931130858155756, 0.3, 0.29999999980733805, 0.2875151370572895])
-    U_star = fom.solve(mu_star)
-    D_star = fom.solution_space.make_array([d.x.petsc_vec.copy()])
-    fom.visualize(D_star, filename="fom_mu_star.xdmf")
-
+    assert np.isclose(total_load, -example.traction_y / example.youngs_modulus)
 
     u = df.fem.Function(auxp.problem.V)
     mesh = u.function_space.mesh
@@ -391,73 +384,31 @@ if __name__ == "__main__":
     QV = df.fem.functionspace(V.mesh, QVe)
     stress = df.fem.Function(QV, name="Cauchy")
 
-    def vol_exact(mu):
-        radii = mu.to_numpy()
-        pi = np.pi * np.ones_like(radii)
-        rect = example.height * example.length
-        vol = rect - np.dot(pi, radii ** 2)
-        return vol
-
-    # test volume output
-    # assert np.isclose(vol_exact(mu), fom.output(mu))
-    # test_vol = parameter_space.sample_randomly(3)
-    # for mu in test_vol:
-    #     assert np.isclose(vol_exact(mu), fom.output(mu))
-
-    def risk_factor(s):
-        lower_bound = -20.0
-        upper_bound = 2.2
-        compression = np.max(s / lower_bound)
-        tension = np.max(s / upper_bound)
-        return 1. - max(compression, tension)
-
-    # analyze risk factors for some value of mu
-    obj = []
-    rfs = []
-    risk_set = []
-    risk_set.append(fom.parameters.parse([0.1 for _ in range(10)]))
-    risk_set.append(fom.parameters.parse([0.2 for _ in range(10)]))
-    risk_set.append(fom.parameters.parse([0.3 for _ in range(10)]))
-    # risk_set.append(fom.parameters.parse([0.1, 0.1, 0.2, 0.2, 0.3, 0.3, 0.2, 0.2, 0.1, 0.1]))
-    # risk_set.append(fom.parameters.parse([0.23016442074567037, 0.2723051465005729, 0.267990588281505, 0.29230231713343474, 0.24718372229157942, 0.3, 0.29432740767308657, 0.26897395853343675, 0.27479182925259354, 0.2283256924786881]))
-    # risk_set.extend(parameter_space.sample_randomly(1))
-
-    # current optimum
-    # E = 30e3, ty = 0.0225
-    # mu_star = fom.parameters.parse([0.2246864682321433, 0.2654481570260998, 0.2706042377543608, 0.28348322968875095, 0.285486146013244, 0.2891233659389231, 0.28360839135399113, 0.2707122905273762, 0.2656934609347168, 0.22417479580486357])
-    mu_star = fom.parameters.parse([0.24608454494648874, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.24615440901882416])
-    risk_set.append(mu_star)
-
     matparam = {"gdim": 2, "E": example.youngs_modulus, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
     parageom_physical = ParaGeomLinEla(auxp.problem.domain, auxp.problem.V, d, matparam)
 
-    # for mu in risk_set:
-    #     u.x.array[:] = 0.0
-    #     stress.x.array[:] = 0.0
-    #
-    #     U = fom.solve(mu)
-    #     obj.append(fom.output(mu)[0, 0])
-    #     u.x.array[:] = U.to_numpy().flatten()
-    #     s1, s2 = principal_stress_2d(u, parageom_physical, q_degree, stress.x.array.reshape(cells.size, -1))
-    #     rfs.append(
-    #             (risk_factor(s1), risk_factor(s2))
-    #             )
-    # print(obj)
-    # print(rfs)
-    # breakpoint()
-    # mu = mu_star
-
     # scalar quadrature space
-    qs = basix.ufl.quadrature_element(basix_celltype, value_shape=(), scheme="default", degree=q_degree)
+    qs = basix.ufl.quadrature_element(basix_celltype, value_shape=(2,), scheme="default", degree=q_degree)
     Q = df.fem.functionspace(V.mesh, qs)
-    sigma_q = df.fem.Function(Q, name="s1")
-    W = df.fem.functionspace(V.mesh, ("P", 2)) # target space, linear Lagrange elements
-    sigma_p = df.fem.Function(W, name="s1")
+    sigma_q = df.fem.Function(Q, name="sp")
+    W = df.fem.functionspace(V.mesh, ("P", 2, (2,))) # target space, linear Lagrange elements, store both s1 and s2 as components
+    sigma_p = df.fem.Function(W, name="sp")
+
+
+    tdim = V.mesh.topology.dim
+    map_c = V.mesh.topology.index_map(tdim)
+    num_cells = map_c.size_local + map_c.num_ghosts
+    cells = np.arange(0, num_cells, dtype=np.int32)
+    f_quad = lambda x: (0.1 - 0.3) / 81 * x ** 2 + 0.3 # noqa
 
     designs = {
-            "trivial": fom.parameters.parse([0.3 for _ in range(10)]),
-            "conf_1": fom.parameters.parse([0.22932051859506594, 0.2999999999999985, 0.2999999999999988, 0.29999999999999916, 0.2999999999999993, 0.29999999999999905, 0.29999999999999805, 0.29999999999999877, 0.29999999999999927, 0.22940472452156227]),
-            "conf_0.9": fom.parameters.parse([0.21856925936189525, 0.2999999999999984, 0.3, 0.24196825361845933, 0.21902404444183984, 0.218975926629281, 0.23178532785205397, 0.24871942382233242, 0.25377347107372933, 0.21744772911706084]),
+            "max_vol": fom.parameters.parse([0.1 for _ in range(10)]),
+            "reference": fom.parameters.parse([0.2 for _ in range(10)]),
+            "min_vol": fom.parameters.parse([0.3 for _ in range(10)]),
+            "random": parameter_space.sample_randomly(1)[0],
+            "linear": fom.parameters.parse(np.linspace(0.3, 0.1, num=10)),
+            "quadratic": fom.parameters.parse(f_quad(np.linspace(0, 10, num=10, endpoint=False))),
+            "optimum": fom.parameters.parse([0.28793595814454276, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3]),
             }
     for name, mu in designs.items():
         u.x.array[:] = 0.0
@@ -465,14 +416,17 @@ if __name__ == "__main__":
         sigma_q.x.array[:] = 0.0
 
         U = fom.solve(mu)
+        # fom.visualize(U, filename=f"output/{name}_u.xdmf")
         u.x.array[:] = U.to_numpy().flatten()
-        s1, s2 = principal_stress_2d(u, parageom_physical, q_degree, stress.x.array.reshape(cells.size, -1))
+        s1, s2 = principal_stress_2d(u, parageom_physical, q_degree, cells, stress.x.array.reshape(cells.size, -1))
 
-        sigma_q.x.array[:] = s2.flatten()
+        print(f"{name=}")
+        print(f"{s1.flatten().min()} <= s1 <= {s1.flatten().max()}")
+        print(f"{s2.flatten().min()} <= s2 <= {s2.flatten().max()}")
+        sigma_q.x.array[::2] = s1.flatten()
+        sigma_q.x.array[1::2] = s2.flatten()
         project(sigma_q, sigma_p)
 
-        with df.io.XDMFFile(W.mesh.comm, f"output/{name}.xdmf", "w") as xdmf:
-            xdmf.write_mesh(W.mesh)
-            xdmf.write_function(sigma_p)
-
-
+        # with df.io.XDMFFile(W.mesh.comm, f"output/{name}_s.xdmf", "w") as xdmf:
+        #     xdmf.write_mesh(W.mesh)
+        #     xdmf.write_function(sigma_p)
