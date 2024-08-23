@@ -139,11 +139,9 @@ def discretize_subdomain_operators(example):
     from .matrix_based_operator import FenicsxMatrixBasedOperator
 
     parent_subdomain_msh = example.parent_unit_cell.as_posix()
-    degree = example.geom_deg
-
     ftags = {"bottom": 11, "left": 12, "right": 13, "top": 14, "interface": 15}
     aux = discretize_auxiliary_problem(
-        parent_subdomain_msh, degree, ftags, example.parameters["subdomain"]
+        example, parent_subdomain_msh, ftags, example.parameters["subdomain"]
     )
     d = df.fem.Function(aux.problem.V, name="d_trafo")
 

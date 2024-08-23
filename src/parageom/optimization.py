@@ -24,13 +24,12 @@ def main(args):
     # ### Build FOM
     coarse_grid_path = example.coarse_grid("global").as_posix()
     parent_domain_path = example.parent_domain("global").as_posix()
-    degree = example.geom_deg
     interface_tags = [
         i for i in range(15, 25)
     ]
     auxiliary_problem = discretize_auxiliary_problem(
+        example,
         parent_domain_path,
-        degree,
         interface_tags,
         example.parameters["global"],
         coarse_grid=coarse_grid_path,
