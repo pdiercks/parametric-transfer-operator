@@ -75,7 +75,7 @@ class BeamData:
     projerr_seed: int = 923719053
     configurations: tuple[str, str, str] = ("left", "inner", "right")
     distributions: tuple[str, ...] = ("normal",)
-    methods: tuple[str, ...] = ("hapod", "heuristic")
+    methods: tuple[str, ...] = ("hapod", ) # "heuristic")
     epsilon_star: dict = field(
             default_factory=lambda: {
                 "heuristic": 0.01,
@@ -464,17 +464,19 @@ class BeamData:
 
     def get_kernel_set(self, cell_index: int) -> tuple[int, ...]:
         """return indices of rigid body modes to be used"""
+        assert cell_index in (0, 1, 4, 5, 8, 9)
+
+        kernel = set([0, 1, 2])
         if cell_index in (0, 1):
-            # left, only rotation is free
-            return (2,)
-        elif cell_index in (4, 5):
-            # inner, use all rigid body modes
-            return (0, 1, 2)
+            # left: u_x is fixed for left boundary
+            kernel.remove(0)
+        # elif cell_index in (4, 5):
+        #     # inner, use all rigid body modes
         elif cell_index in (8, 9):
             # right, only trans y is constrained
-            return (0, 2)
-        else:
-            raise NotImplementedError
+            # right: u_y is fixed for a single point
+            kernel.remove(1)
+        return tuple(kernel)
 
     def get_gamma_out(self, cell_index: Optional[int] = None) -> Callable:
         unit_length = self.unit_length
