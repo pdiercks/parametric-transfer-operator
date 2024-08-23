@@ -131,19 +131,7 @@ def main(args):
     if not orthonormal:
         raise ValueError("Basis is not orthonormal wrt range product.")
 
-    # Definition of validation set
-    # make sure that this is always the same set of parameters
-    # and also same set of boundary data
-    # but different from μ and g used in the training
-    # purely random testing would be better ??
-    # test_set = sample_lhs(
-    #     parameter_space,
-    #     name=parameter_name,
-    #     samples=30,
-    #     criterion="center",
-    #     random_state=example.projerr_seed,
-    # )
-
+    # Definition of test set (μ) and test data (g)
     test_set = parameter_space.sample_randomly(50)
     test_data = transfer.range.empty(reserve=len(test_set))
 
@@ -193,20 +181,6 @@ def main(args):
             aerrs[k].append(np.max(error_norm))
             rerrs[k].append(np.max(rel_err))
             l2errs[k].append(l2_err)
-
-    # Summary
-    # epsilon_star = 0.1
-    # aerrs['max'][-1] = 0.0634 (in mm, because norm is scaled with lc)
-    # rerrs['max'][-1] = 0.0613
-    # aerrs['h1-semi'][-1] = 0.198
-    # l2errs['h1-semi'][-1] = 0.0078 (<1e-2=epsilon_star**2)
-
-    # Summary
-    # epsilon_star = 0.01
-    # aerrs['max'][-1] = 0.0035 (in mm, because norm is scaled with lc)
-    # rerrs['max'][-1] = 0.00523
-    # aerrs['h1-semi'][-1] = 0.018
-    # l2errs['h1-semi'][-1] = 5.7e-05 (<1e-4=epsilon_star**2)
 
     if args.output is not None:
         np.savez(
