@@ -306,10 +306,18 @@ def assemble_gfem_system(
         local_basis = select_modes(bases[ci], dofs_per_vert[ci], max_dofs_per_vert[ci])
         local_bases.append(local_basis)
         B = A.source.from_numpy(local_basis)  # type: ignore
+
+        # local stiffness matrix
         A_local = project(A, B, B)
-        b_local = project(b, B, None)
         element_matrix = A_local.matrix  # type: ignore
-        element_vector = b_local.matrix  # type: ignore
+
+        # local external force vector
+        if ci == 0:
+            b_local = project(b, B, None)
+            element_vector = b_local.matrix # type: ignore
+        else:
+            b_local = A_local.range.zeros(1)
+            element_vector = b_local.to_numpy().transpose()
 
         for ld, x in enumerate(dofs):
             if x in bc_dofs:
@@ -427,8 +435,12 @@ def assemble_gfem_system_with_ei(
         element_matrices = [a_local.matrix for a_local in mops_local]  # type: ignore
 
         # projected rhs
-        b_local = project(b, B, None)
-        element_vector = b_local.matrix  # type: ignore
+        if ci == 0:
+            b_local = project(b, B, None)
+            element_vector = b_local.matrix  # type: ignore
+        else:
+            b_local = mops_local[0].range.zeros(1)
+            element_vector = b_local.to_numpy().transpose()
 
         for ld, x in enumerate(dofs):
             if x in bc_dofs:
@@ -640,6 +652,7 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
     from .fom import ParaGeomLinEla
     from .auxiliary_problem import GlobalAuxiliaryProblem
     from .matrix_based_operator import FenicsxMatrixBasedOperator, BCGeom, BCTopo, _create_dirichlet_bcs
+    from multi.preprocessing import create_meshtags
 
     global_coarse_domain, _, _ = read_mesh(example.coarse_grid("global"), MPI.COMM_WORLD,
                                            kwargs={"gdim": example.gdim})
@@ -669,14 +682,36 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
         kwargs={"gdim": example.gdim},
     )
     omega = RectangularDomain(domain, cell_tags=ct, facet_tags=ft)
-    ft_def = {"bottom": int(11), "left": int(12), "right": int(13), "top": int(14)}
-    omega.create_facet_tags(ft_def)
+
+    # ### Neumann data and Facet tag definition
+    neumann_data = example.get_neumann(global_coarse_grid.grid, configuration)
+    ft_def = {}
+    for tag, key in zip([int(11), int(12), int(13)], ["bottom", "left", "right"]):
+        ft_def[key] = (tag, omega.str_to_marker(key))
+
+    top_tag = None
+    top_locator = None
+    if configuration == "left":
+        assert neumann_data is not None
+        top_tag, top_locator = neumann_data
+        ft_def["top"] = (top_tag, top_locator)
+    elif configuration == "inner":
+        assert neumann_data is None
+    elif configuration == "right":
+        assert neumann_data is None
+    else:
+        raise NotImplementedError
+
+    new_facet_tags, _ = create_meshtags(omega.grid, omega.tdim-1, ft_def, tags=omega.facet_tags)
+    omega.facet_tags = new_facet_tags
+
+    # Define tags for auxiliary problem and check facet tags
     aux_tags = None
     if configuration == "inner":
         assert omega.facet_tags.find(11).size == example.num_intervals * 4  # bottom
         assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
         assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
-        assert omega.facet_tags.find(14).size == example.num_intervals * 4  # top
+        assert omega.facet_tags.find(14).size == example.num_intervals * 0  # top
         assert omega.facet_tags.find(15).size == example.num_intervals * 4  # void 1
         assert omega.facet_tags.find(16).size == example.num_intervals * 4  # void 2
         assert omega.facet_tags.find(17).size == example.num_intervals * 4  # void 3
@@ -687,7 +722,7 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
         assert omega.facet_tags.find(11).size == example.num_intervals * 3  # bottom
         assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
         assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
-        assert omega.facet_tags.find(14).size == example.num_intervals * 3  # top
+        assert omega.facet_tags.find(top_tag).size == example.num_intervals * 1  # top
         assert omega.facet_tags.find(15).size == example.num_intervals * 4  # void 1
         assert omega.facet_tags.find(16).size == example.num_intervals * 4  # void 2
         assert omega.facet_tags.find(17).size == example.num_intervals * 4  # void 3
@@ -697,7 +732,7 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
         assert omega.facet_tags.find(11).size == example.num_intervals * 3  # bottom
         assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
         assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
-        assert omega.facet_tags.find(14).size == example.num_intervals * 3  # top
+        assert omega.facet_tags.find(14).size == example.num_intervals * 0  # top
         assert omega.facet_tags.find(15).size == example.num_intervals * 4  # void 1
         assert omega.facet_tags.find(16).size == example.num_intervals * 4  # void 2
         assert omega.facet_tags.find(17).size == example.num_intervals * 4  # void 3
@@ -738,29 +773,30 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
     bcs_range_product = []
     hom_dirichlet = example.get_dirichlet(global_coarse_grid.grid, configuration)
     if hom_dirichlet is not None:
-        # determine entities and define BCTopo
-        entities_omega = df.mesh.locate_entities_boundary(
-            V.mesh, hom_dirichlet["entity_dim"], hom_dirichlet["boundary"]
-        )
-        entities_omega_in = df.mesh.locate_entities_boundary(
-            V_in.mesh, hom_dirichlet["entity_dim"], hom_dirichlet["boundary"]
-        )
-        bc = BCTopo(
-            df.fem.Constant(V.mesh, hom_dirichlet["value"]),
-            entities_omega,
-            hom_dirichlet["entity_dim"],
-            V,
-            sub=hom_dirichlet["sub"],
-        )
-        bc_rp = BCTopo(
-            df.fem.Constant(V_in.mesh, hom_dirichlet["value"]),
-            entities_omega_in,
-            hom_dirichlet["entity_dim"],
-            V_in,
-            sub=hom_dirichlet["sub"],
-        )
-        bcs_op.append(bc)
-        bcs_range_product.append(bc_rp)
+        for bc_spec in hom_dirichlet:
+            # determine entities and define BCTopo
+            entities_omega = df.mesh.locate_entities_boundary(
+                V.mesh, bc_spec["entity_dim"], bc_spec["boundary"]
+            )
+            entities_omega_in = df.mesh.locate_entities_boundary(
+                V_in.mesh, bc_spec["entity_dim"], bc_spec["boundary"]
+            )
+            bc = BCTopo(
+                df.fem.Constant(V.mesh, bc_spec["value"]),
+                entities_omega,
+                bc_spec["entity_dim"],
+                V,
+                sub=bc_spec["sub"],
+            )
+            bc_rp = BCTopo(
+                df.fem.Constant(V_in.mesh, bc_spec["value"]),
+                entities_omega_in,
+                bc_spec["entity_dim"],
+                V_in,
+                sub=bc_spec["sub"],
+            )
+            bcs_op.append(bc)
+            bcs_range_product.append(bc_rp)
     bcs_op = tuple(bcs_op)
     bcs_range_product = _create_dirichlet_bcs(tuple(bcs_range_product))
     assert len(bcs_op) - 1 == len(bcs_range_product)
@@ -768,7 +804,7 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
     # ### Auxiliary Problem
     emod = df.fem.Constant(omega.grid, df.default_scalar_type(1.0))
     nu = df.fem.Constant(omega.grid, df.default_scalar_type(0.25))
-    mat = LinearElasticMaterial(example.gdim, E=emod, NU=nu)
+    mat = LinearElasticMaterial(example.gdim, E=emod, NU=nu, plane_stress=example.plane_stress)
     problem = LinearElasticityProblem(omega, V, phases=mat)
     auxiliary_problem = GlobalAuxiliaryProblem(
         problem, aux_tags, example.parameters[configuration], coarse_grid, interface_locators=interface_locators
@@ -779,10 +815,9 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
     parageom = ParaGeomLinEla(
         omega,
         V,
-        E=1.,
-        NU=example.poisson_ratio,
         d=d_trafo,  # type: ignore
-    )  # type: ignore
+        matparam={"gdim": example.gdim, "E": 1.0, "NU": example.poisson_ratio, "plane_stress": example.plane_stress},
+    )
     params = example.parameters[configuration]
 
     def param_setter(mu):
@@ -852,27 +887,32 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
     )
 
     # ### Discretize Neumann Data
-    dA = ufl.Measure("ds", domain=omega.grid, subdomain_data=omega.facet_tags)
-    t_y = -example.traction_y / example.youngs_modulus
-    traction = df.fem.Constant(
-        omega.grid,
-        (df.default_scalar_type(0.0), df.default_scalar_type(t_y)),
-    )
-    v = ufl.TestFunction(V)
-    L = ufl.inner(v, traction) * dA(ft_def["top"])
-    Lcpp = df.fem.form(L)
-    f_ext = dolfinx.fem.petsc.create_vector(Lcpp)  # type: ignore
+    if configuration == "left":
+        dA = ufl.Measure("ds", domain=omega.grid, subdomain_data=omega.facet_tags)
+        t_y = -example.traction_y / example.youngs_modulus
+        traction = df.fem.Constant(
+            omega.grid,
+            (df.default_scalar_type(0.0), df.default_scalar_type(t_y)),
+        )
+        v = ufl.TestFunction(V)
+        L = ufl.inner(v, traction) * dA(ft_def["top"][0])
+        Lcpp = df.fem.form(L)
+        f_ext = dolfinx.fem.petsc.create_vector(Lcpp)  # type: ignore
 
-    with f_ext.localForm() as b_loc:
-        b_loc.set(0)
-    dolfinx.fem.petsc.assemble_vector(f_ext, Lcpp)
+        with f_ext.localForm() as b_loc:
+            b_loc.set(0)
+        dolfinx.fem.petsc.assemble_vector(f_ext, Lcpp)
 
-    # Apply boundary conditions to the rhs
-    bcs_neumann = _create_dirichlet_bcs(bcs_op)
-    dolfinx.fem.petsc.apply_lifting(f_ext, [operator.compiled_form], bcs=[bcs_neumann])  # type: ignore
-    f_ext.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
-    dolfinx.fem.petsc.set_bc(f_ext, bcs_neumann)
-    F_ext = operator.range.make_array([f_ext])  # type: ignore
+        # Apply boundary conditions to the rhs
+        bcs_neumann = _create_dirichlet_bcs(bcs_op)
+        dolfinx.fem.petsc.apply_lifting(f_ext, [operator.compiled_form], bcs=[bcs_neumann])  # type: ignore
+        f_ext.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
+        dolfinx.fem.petsc.set_bc(f_ext, bcs_neumann)
+
+        assert np.isclose(np.sum(f_ext.array), -example.traction_y / example.youngs_modulus)
+        F_ext = operator.range.make_array([f_ext])  # type: ignore
+    else:
+        F_ext = operator.range.zeros(1)
 
     return transfer, F_ext
 
@@ -880,5 +920,5 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
 if __name__ == "__main__":
     from .tasks import example
     # discretize_transfer_problem(example, "left")
-    # discretize_transfer_problem(example, "right")
-    discretize_transfer_problem(example, "inner")
+    discretize_transfer_problem(example, "right")
+    # discretize_transfer_problem(example, "inner")

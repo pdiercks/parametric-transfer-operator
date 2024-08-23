@@ -139,12 +139,17 @@ def main(args):
     from .lhs import sample_lhs
     from .locmor import discretize_transfer_problem
 
+    if args.debug:
+        loglevel = 10
+    else:
+        loglevel = 20
+
     method = Path(__file__).stem  # heuristic
     logfilename = example.log_basis_construction(
         args.nreal, method, args.distribution, args.configuration
     ).as_posix()
     set_defaults({"pymor.core.logger.getLogger.filename": logfilename})
-    logger = getLogger(method, level="DEBUG")
+    logger = getLogger(method, level=loglevel)
 
     # ### Generate training and testing seed for each configuration
     training_seeds = {}
@@ -202,6 +207,11 @@ def main(args):
     seed_seqs_rrf = np.random.SeedSequence(this).generate_state(1)
 
     transfer, FEXT = discretize_transfer_problem(example, args.configuration)
+    require_neumann_data = np.any(np.nonzero(FEXT.to_numpy())[1])
+    if args.configuration == "left":
+        assert require_neumann_data
+    else:
+        assert not require_neumann_data
 
     # ### Heuristic range approximation
     epsilon_star = example.epsilon_star["heuristic"] / example.l_char
@@ -221,43 +231,48 @@ def main(args):
         )
 
     # ### Compute Neumann Modes
-    neumann_snapshots = spectral_basis.space.empty(reserve=len(training_set))
-    for mu in training_set:
-        transfer.assemble_operator(mu)
-        U_neumann = transfer.op.apply_inverse(FEXT)
-        U_in_neumann = transfer.range.from_numpy(U_neumann.dofs(transfer._restriction))
-
-        # ### Remove kernel after restriction to target subdomain
-        U_orth = orthogonal_part(
-            U_in_neumann, transfer.kernel, product=None, orthonormal=True
-        )
-        neumann_snapshots.append(U_orth)
-
-    with logger.block("Computing POD of Neumann snapshots ..."):
-        neumann_modes = pod(neumann_snapshots, product=transfer.range_product, rtol=example.neumann_rtol)[0]
-
-    logger.info("Extending spectral basis by Neumann modes via GS ...")
     basis_length = len(spectral_basis)
-    spectral_basis.append(neumann_modes)
-    gram_schmidt(
-        spectral_basis,
-        product=transfer.range_product,
-        offset=basis_length,
-        check=False,
-        copy=False,
-    )
+    if require_neumann_data:
+        neumann_snapshots = spectral_basis.space.empty(reserve=len(training_set))
+        for mu in training_set:
+            transfer.assemble_operator(mu)
+            U_neumann = transfer.op.apply_inverse(FEXT)
+            U_in_neumann = transfer.range.from_numpy(U_neumann.dofs(transfer._restriction))
+
+            # ### Remove kernel after restriction to target subdomain
+            U_orth = orthogonal_part(
+                U_in_neumann, transfer.kernel, product=None, orthonormal=True
+            )
+            neumann_snapshots.append(U_orth)
+
+        with logger.block("Computing POD of Neumann snapshots ..."):
+            neumann_modes = pod(neumann_snapshots, product=transfer.range_product, rtol=example.neumann_rtol)[0]
+
+        logger.info("Extending spectral basis by Neumann modes via GS ...")
+        spectral_basis.append(neumann_modes)
+        gram_schmidt(
+            spectral_basis,
+            product=transfer.range_product,
+            offset=basis_length,
+            check=False,
+            copy=False,
+        )
+    else:
+        neumann_modes = []
+        neumann_snapshots = []
 
     logger.info(f"Spectral basis size: {basis_length}.")
     logger.info(f"Neumann modes/snapshots: {len(neumann_modes)}/{len(neumann_snapshots)}")
     logger.info(f"Final basis length: {len(spectral_basis)}.")
 
-    viz = FenicsxVisualizer(spectral_basis.space)
-    viz.visualize(
-        spectral_basis,
-        filename=example.heuristic_modes_xdmf(
-            args.nreal, args.distribution, args.configuration
-        ),
-    )
+    if logger.level == 10: # DEBUG
+        viz = FenicsxVisualizer(spectral_basis.space)
+        viz.visualize(
+            spectral_basis,
+            filename=example.heuristic_modes_xdmf(
+                args.nreal, args.distribution, args.configuration
+            ),
+        )
     np.save(
         example.heuristic_modes_npy(args.nreal, args.distribution, args.configuration),
         spectral_basis.to_numpy(),
@@ -282,5 +297,6 @@ if __name__ == "__main__":
         choices=("inner", "left", "right"),
     )
     parser.add_argument("nreal", type=int, help="The n-th realization of the problem.")
+    parser.add_argument("--debug", action='store_true', help="Run in debug mode.")
     args = parser.parse_args(sys.argv[1:])
     main(args)

@@ -1,9 +1,7 @@
 import sys
 
-# from itertools import repeat
 from pathlib import Path
 
-# import concurrent.futures
 import numpy as np
 from scipy.sparse.linalg import LinearOperator, eigsh
 from scipy.special import erfinv
@@ -169,12 +167,17 @@ def main(args):
     from .lhs import sample_lhs
     from .locmor import discretize_transfer_problem
 
+    if args.debug:
+        loglevel = 10
+    else:
+        loglevel = 20
+
     method = Path(__file__).stem  # hapod
     logfilename = example.log_basis_construction(
         args.nreal, method, args.distribution, args.configuration
     ).as_posix()
     set_defaults({"pymor.core.logger.getLogger.filename": logfilename})
-    logger = getLogger(method, level="DEBUG")
+    logger = getLogger(method, level=loglevel)
 
     # ### Generate training seed for each configuration
     training_seeds = {}
@@ -203,23 +206,17 @@ def main(args):
         f" for training set of size {len(training_set)}."
     )
 
-    # with concurrent.futures.ProcessPoolExecutor(
-    #     max_workers=args.max_workers
-    # ) as executor:
-    #     results = executor.map(
-    #         spawn_rng(approximate_range),
-    #         repeat(beam),
-    #         training_set,
-    #         repeat(args.configuration),
-    #         repeat(args.distribution),
-    #     )
-
     # ### Generate random seed for each specific mu in the training set
     realizations = np.load(example.realizations)
     this = realizations[args.nreal]
     seed_seqs_rrf = np.random.SeedSequence(this).generate_state(ntrain)
 
     transfer, FEXT = discretize_transfer_problem(example, args.configuration)
+    require_neumann_data = np.any(np.nonzero(FEXT.to_numpy())[1])
+    if args.configuration == "left":
+        assert require_neumann_data
+    else:
+        assert not require_neumann_data
 
     assert len(training_set) == len(seed_seqs_rrf)
     snapshots = transfer.range.empty()
@@ -248,24 +245,24 @@ def main(args):
                 sampling_options={"scale": 0.1},
             )
             logger.info(f"\nSpectral Basis length: {len(basis)}.")
-            logger.info("\nSolving for additional Neumann mode ...")
             spectral_basis_sizes.append(len(basis))
+            snapshots.append(basis)  # type: ignore
 
-            U_neumann = transfer.op.apply_inverse(FEXT)
-            U_in_neumann = transfer.range.from_numpy(
-                U_neumann.dofs(transfer._restriction)
-            )
+            if require_neumann_data:
+                logger.info("\nSolving for additional Neumann mode ...")
+                U_neumann = transfer.op.apply_inverse(FEXT)
+                U_in_neumann = transfer.range.from_numpy(
+                    U_neumann.dofs(transfer._restriction)
+                )
 
-            # ### Remove kernel after restriction to target subdomain
-            U_orth = orthogonal_part(
-                U_in_neumann,
-                transfer.kernel,
-                product=None,
-                orthonormal=True,
-            )
-
-        neumann_snapshots.append(U_orth) # type: ignore
-        snapshots.append(basis)  # type: ignore
+                # ### Remove kernel after restriction to target subdomain
+                U_orth = orthogonal_part(
+                    U_in_neumann,
+                    transfer.kernel,
+                    product=None,
+                    orthonormal=True,
+                )
+                neumann_snapshots.append(U_orth) # type: ignore
 
     logger.info(
         f"Average length of spectral basis: {np.average(spectral_basis_sizes)}."
@@ -274,24 +271,33 @@ def main(args):
         spectral_modes, spectral_svals = pod(snapshots, product=transfer.range_product,
                                              l2_err=epsilon_pod)
 
-    with logger.block("Computing POD of neumann snapshots ..."):
-        neumann_modes, neumann_svals = pod(neumann_snapshots, product=transfer.range_product,
-                                           rtol=example.neumann_rtol)
+    basis_length = len(spectral_modes)
+    if require_neumann_data:
+        with logger.block("Computing POD of neumann snapshots ..."):
+            neumann_modes, neumann_svals = pod(neumann_snapshots, product=transfer.range_product,
+                                               rtol=example.neumann_rtol)
 
-    with logger.block("Extending spectral basis by Neumann modes via GS ..."):
-        basis_length = len(spectral_modes)
-        spectral_modes.append(neumann_modes)
-        gram_schmidt(
-                spectral_modes,
-                product=transfer.range_product,
-                offset=basis_length,
-                check=False,
-                copy=False
-                )
+        with logger.block("Extending spectral basis by Neumann modes via GS ..."):
+            spectral_modes.append(neumann_modes)
+            gram_schmidt(
+                    spectral_modes,
+                    product=transfer.range_product,
+                    offset=basis_length,
+                    check=False,
+                    copy=False
+                    )
+    else:
+        neumann_modes = []
+        neumann_snapshots = []
 
     logger.info(f"Spectral basis size (after POD): {basis_length}.")
     logger.info(f"Neumann modes/snapshots: {len(neumann_modes)}/{len(neumann_snapshots)}")
     logger.info(f"Final basis length: {len(spectral_modes)}.")
+
+    if logger.level == 10: # DEBUG
+        from pymor.bindings.fenicsx import FenicsxVisualizer
+        viz = FenicsxVisualizer(transfer.range)
+        viz.visualize(spectral_modes, filename=f"hapod_{args.configuration}.xdmf")
 
     np.save(
         example.hapod_modes_npy(args.nreal, args.distribution, args.configuration),
@@ -326,5 +332,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--max_workers", type=int, default=4, help="The max number of workers."
     )
+    parser.add_argument("--debug", action='store_true', help="Run in debug mode.")
     args = parser.parse_args(sys.argv[1:])
     main(args)

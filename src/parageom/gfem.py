@@ -54,18 +54,18 @@ def main(args):
 
     global_quad_grid = StructuredQuadGrid(global_coarse_grid)
     vertex_to_basis = {
-        0: "left",
-        1: "left",
-        2: "left",
-        3: "left",
-        4: "inner_enriched",
-        5: "inner_enriched",
-        6: "inner_enriched",
-        7: "inner_enriched",
-        8: "right",
-        9: "right",
-        10: "right",
-        11: "right",
+        0: "left_enriched_y",
+        1: "left_enriched_xy",
+        2: "left_enriched_y",
+        3: "left_enriched_xy",
+        4: "inner_enriched_xy",
+        5: "inner_enriched_xy",
+        6: "inner_enriched_xy",
+        7: "inner_enriched_xy",
+        8: "right_enriched_xy",
+        9: "right_enriched_xy",
+        10: "right_enriched_x",
+        11: "right_enriched_xy",
             }
     vertex_to_config = {
         0: "left",
@@ -142,17 +142,25 @@ def main(args):
     bases["inner"] = np.load(fpath_modes_npy(args.nreal, distr, "inner"))
     bases["right"] = np.load(fpath_modes_npy(args.nreal, distr, "right"))
 
-    def enrich_with_constant(rb):
+    def enrich_with_constant(rb, x=False, y=False):
         dim = rb.shape[1]
         xmode = np.ones((1, dim), dtype=np.float32)
         xmode[:, 1::2 ] *= 0.
         ymode = np.ones((1, dim), dtype=np.float32)
         ymode[:, ::2] *= 0.
-        return np.vstack([xmode, ymode, rb])
+        basis = rb.copy()
+        if y:
+            basis = np.vstack([ymode, basis])
+        if x:
+            basis = np.vstack([xmode, basis])
 
-    bases["left_enriched"] = enrich_with_constant(bases["left"])
-    bases["inner_enriched"] = enrich_with_constant(bases["inner"])
-    bases["right_enriched"] = enrich_with_constant(bases["right"])
+        return basis
+
+    bases["left_enriched_y"] = enrich_with_constant(bases["left"], y=True)
+    bases["left_enriched_xy"] = enrich_with_constant(bases["left"], x=True, y=True)
+    bases["inner_enriched_xy"] = enrich_with_constant(bases["inner"], x=True, y=True)
+    bases["right_enriched_xy"] = enrich_with_constant(bases["right"], x=True, y=True)
+    bases["right_enriched_x"] = enrich_with_constant(bases["right"], x=True)
 
     for k, v in bases.items():
         bases_length[k] = len(v)

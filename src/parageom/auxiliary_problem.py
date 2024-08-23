@@ -15,6 +15,8 @@ from multi.problems import LinearElasticityProblem
 
 from pymor.parameters.base import Mu, Parameters
 
+from .definitions import BeamData
+
 
 class GlobalAuxiliaryProblem:
     """Represents auxiliary problem on global parent domain."""
@@ -250,18 +252,20 @@ class AuxiliaryProblem:
         solver.solve(p.b, u.vector)
 
 
-def discretize_auxiliary_problem(fine_grid: str, degree: int, facet_tags: Union[dict[str, int], list[int]], param: dict[str, int], gdim: int = 2, coarse_grid: Optional[str] = None):
+def discretize_auxiliary_problem(example: BeamData, fine_grid: str, facet_tags: Union[dict[str, int], list[int]], param: dict[str, int], coarse_grid: Optional[str] = None):
     """Discretizes the auxiliary problem to compute transformation displacement.
 
     Args:
+        example: The example data class.
         fine_grid: The parent domain.
-        degree: Polynomial degree of geometry interpolation.
         facet_tags: Tags for all boundaries (AuxiliaryProblem) or several interfaces (GlobalAuxiliaryProblem).
         param: Dictionary mapping parameter names to parameter dimensions.
-        gdim: Geometrical dimension of the mesh.
         coarse_grid: Optional provide coarse grid.
 
     """
+    degree = example.geom_deg
+    gdim = example.gdim
+
     comm = MPI.COMM_SELF
     domain, ct, ft = gmshio.read_from_msh(fine_grid, comm, gdim=gdim)
     omega = RectangularDomain(domain, cell_tags=ct, facet_tags=ft)
@@ -269,7 +273,7 @@ def discretize_auxiliary_problem(fine_grid: str, degree: int, facet_tags: Union[
     # linear elasticity problem
     emod = df.fem.Constant(omega.grid, df.default_scalar_type(1.0))
     nu = df.fem.Constant(omega.grid, df.default_scalar_type(0.25))
-    mat = LinearElasticMaterial(gdim, E=emod, NU=nu, plane_stress=True)
+    mat = LinearElasticMaterial(gdim, E=emod, NU=nu, plane_stress=example.plane_stress)
     ve = element("P", domain.basix_cell(), degree, shape=(gdim,))
     V = df.fem.functionspace(domain, ve)
     problem = LinearElasticityProblem(omega, V, phases=mat)
