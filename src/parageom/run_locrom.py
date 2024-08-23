@@ -38,8 +38,8 @@ def main(args):
     # do not change interface tags; see src/parageom/preprocessing.py::create_parent_domain
     interface_tags = [i for i in range(15, 25)]
     global_auxp = discretize_auxiliary_problem(
+        example,
         global_parent_domain_path.as_posix(),
-        example.geom_deg,
         interface_tags,
         example.parameters["global"],
         coarse_grid=coarse_grid_path.as_posix(),
@@ -49,6 +49,10 @@ def main(args):
     h1_product = fom.products["h1_0_semi"]
 
     # ### Discretize subdomain operators
+    # NOTE
+    # rhs_local is non-zero although this should only be the case for cell 0
+    # this is handled during assembly
+    # see `assemble_gfem_system` and `assemble_gfem_system_with_ei`
     operator_local, rhs_local = discretize_subdomain_operators(example)
 
     # ### EI of subdomain operator
@@ -185,7 +189,7 @@ def main(args):
         err_norms = l_char * err.norm(h1_product)
         fom_norms = l_char * fom_solutions.norm(h1_product)
         rel_errn = err_norms / fom_norms
-        logger.info(f"{rel_errn=}")
+        logger.debug(f"{rel_errn=}")
 
         # Max norm (nodal absolute values)
         u_fom_vec = l_char * fom_solutions.amax()[1]
@@ -220,10 +224,6 @@ def main(args):
         max_relerr["max"].append(np.max(relerr_vec))
     t_loop.stop()
     logger.info(f"Error analysis took {t_loop.elapsed()[0]}.")
-
-    # fom.visualize(fom_solutions, filename="ufom.xdmf")
-    # fom.visualize(rom_solutions, filename="urom.xdmf")
-    # fom.visualize(err, filename="uerr.xdmf")
 
     if args.output is not None:
         np.savez(
