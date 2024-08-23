@@ -138,33 +138,33 @@ def task_hapod():
             }
 
 
-def task_heuristic():
-    """ParaGeom: Construct basis via Heuristic range finder"""
-    module = "src.parageom.heuristic"
-    distr = example.distributions[0]
-    for nreal in range(example.num_real):
-        for config in CONFIGS:
-            deps = [SRC / "heuristic.py"]
-            deps.append(example.coarse_grid("global"))
-            deps.append(example.parent_domain("global"))
-            deps.append(example.coarse_grid("target"))
-            deps.append(example.parent_domain("target"))
-            deps.append(example.coarse_grid(config))
-            deps.append(example.parent_domain(config))
-            targets = []
-            targets.append(
-                example.log_basis_construction(nreal, "heuristic", distr, config)
-            )
-            targets.append(example.heuristic_modes_npy(nreal, distr, config))
-            yield {
-                "name": config + ":" + str(nreal),
-                "file_dep": deps,
-                "actions": [
-                    "python3 -m {} {} {} {}".format(module, distr, config, nreal)
-                ],
-                "targets": targets,
-                "clean": True,
-            }
+# def task_heuristic():
+#     """ParaGeom: Construct basis via Heuristic range finder"""
+#     module = "src.parageom.heuristic"
+#     distr = example.distributions[0]
+#     for nreal in range(example.num_real):
+#         for config in CONFIGS:
+#             deps = [SRC / "heuristic.py"]
+#             deps.append(example.coarse_grid("global"))
+#             deps.append(example.parent_domain("global"))
+#             deps.append(example.coarse_grid("target"))
+#             deps.append(example.parent_domain("target"))
+#             deps.append(example.coarse_grid(config))
+#             deps.append(example.parent_domain(config))
+#             targets = []
+#             targets.append(
+#                 example.log_basis_construction(nreal, "heuristic", distr, config)
+#             )
+#             targets.append(example.heuristic_modes_npy(nreal, distr, config))
+#             yield {
+#                 "name": config + ":" + str(nreal),
+#                 "file_dep": deps,
+#                 "actions": [
+#                     "python3 -m {} {} {} {}".format(module, distr, config, nreal)
+#                 ],
+#                 "targets": targets,
+#                 "clean": True,
+#             }
 
 
 def task_projerr():
@@ -201,8 +201,8 @@ def task_fig_projerr():
     for nreal in range(example.num_real):
         for config in CONFIGS:
             deps = [SRC / "plot_projerr.py"]
-            deps.append(example.projerr(nreal, "hapod", distr, config))
-            deps.append(example.projerr(nreal, "heuristic", distr, config))
+            for method in example.methods:
+                deps.append(example.projerr(nreal, method, distr, config))
             targets = []
             targets.append(example.fig_projerr(config))
             yield {
