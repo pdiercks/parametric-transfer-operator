@@ -186,8 +186,8 @@ First, the global domain $\varOmega_{\mathrm{gl}}^{\bm\mu}$ and a non-overlappin
 \end{equation}
 is introduced.
 In the context of lattice structures, each subdomain $\varOmega_i^{\bm\mu}$ corresponds to a unit cell.
-Next, a coarse grid partition of the global domain and a fine grid partition of the unit cell is introduced as shown in~\added[id=pd]{TODO: add figure showing coarse grid and fine grid for a single unit cell.}
-\added[id=pd]{Fig. XX} also shows one exemplary oversampling domain $\varOmega^{\bm\mu}$.
+Next, a coarse grid partition of the global domain and a fine grid partition of the unit cell is introduced as shown in~\cref{fig:oversampling_domain}.
+\Cref{fig:oversampling_domain} also shows one exemplary oversampling domain $\varOmega^{\bm\mu}$.
 The oversampling problem (given for linear elastostatics) then comprises the solution of the following boundary value problem.
 \begin{align}
 	\begin{split}
@@ -200,7 +200,7 @@ The oversampling problem (given for linear elastostatics) then comprises the sol
 \end{align}
 Here, $\bm\sigma$ is the \textsc{Cauchy} stress, $\bm{n}$ the normal vector and $\bm{g}$ \textsc{Dirichlet} boundary data to be prescribed on the boundary $\varGamma^{\m}_{\out}$.
 The boundaries $\varGamma^{\m}_{\mathrm{N}}$ and $\varGamma^{\m}_{\mathrm{D}}$ denote the part of the boundary of the oversampling domain that coincides with the global \textsc{Neumann} boundary $\varSigma^{\m}_{\mathrm{N}}$ or \textsc{Dirichlet} boundary $\varSigma^{\m}_{\mathrm{D}}$, respectively.
-Note that the topology is dependent on the target subdomain $\varOmega^{\m}_{\inrm}$ and the size of the oversampled region (\added[id=pd]{TODO: refer to figure as above}).
+Note that the topology is dependent on the target subdomain $\varOmega^{\m}_{\inrm}$ and the size of the oversampled region.
 Considering linear elastic isotropic materials
 \begin{equation}
     \bm\sigma(\bm{u}(\m)) = \mathbb{C}\vdot\!\vdot\bm\varepsilon(\bm{u}(\m))\,,
@@ -240,11 +240,25 @@ the integration can be carried out over the fixed parent domain
     \label{eq:weak_osp_parent}
 \end{equation}
 The resolution of~\cref{eq:weak_osp_parent} and subsequent restriction of the solution to the target subdomain, denoted as $\bm{u}(\m)\big\vert_{\varOmega^{\p}_{\inrm}}$, comprises the solution of the oversampling problem.
-The transfer operator $\bm{T}_{\m}: \mathcal{S}\to\mathcal{R}$, maps the boundary data $\bm{g}$ to the solution on the target subdomain $\bm{u}(\m)\big\vert_{\varOmega^{\p}_{\inrm}} = \bm{T}_{\m}(\bm{g}).$
+The transfer operator $\bm{T}_{\m}: \mathcal{S}\to\mathcal{R}$, maps for a given parameter value $\m$ the boundary data $\bm{g}$ to the solution on the target subdomain $\bm{u}(\m)\big\vert_{\varOmega^{\p}_{\inrm}} = \bm{T}_{\m}(\bm{g}).$
 Here, $\mathcal{S}$ and $\mathcal{R}$ are appropriate source and range spaces, respectively.
 Throughout the paper, we assume a suitable discretization and numerical solution of~\cref{eq:weak_osp_parent} using the FE method.
 For details concerning the discretization of the transfer operator (for a fixed parameter value) it is referred to~\cite{Buhr2018Randomized}.
-\added[id=pd]{Mention additional Neumann problem, data to be added to the final basis. Introduce terminology of spectral basis as part without Neumann}
+
+Finally, we note that the images of $\bm{T}_{\m}$ are computed, such that they do not contain any translations or rotations (rigid body modes are removed via orthogonal projection), \ie{} they comprise purely \textit{deformational modes}.
+Moreover, (global) \textsc{Neumann} or \textsc{Dirichlet} boundary conditions prescribed on $\varSigma^{\m}_{\mathrm{N}}$ or $\varSigma^{\m}_{\mathrm{D}}$, respectively, have not been considered yet.
+Therefore, for example, an additional \textsc{Neumann} problem\footnote{The case of inhomogeneous \textsc{Dirichlet} boundary conditions is analogous.} has to be solved to enrich the local spaces.
+\begin{align}
+	\begin{split}
+	\label{eq:neumann_problem}
+    - \div{\bm{\sigma}} (\bm{u}(\bm\mu)) &= \bm{0} \quad  \mathrm{in}\;{\varOmega^{\bm\mu}}\subset\varOmega^{\bm\mu}_{\mathrm{gl}}\,,\\
+    \bm{\sigma}(\bm{u}(\bm\mu)) \vdot \bm{n} &= \hat{\bm{t}} \quad \mathrm{on}\; \varGamma^{\m}_{\mathrm{N}}:= \partial\varOmega^{\m}\cap\varSigma^{\m}_{\mathrm{N}}\,,\\
+    \bm{u}(\bm\mu) &= \bm{0} \quad  \mathrm{on}\;\varGamma^{\m}_{\mathrm{D}}:=\partial\varOmega^{\m}\cap\varSigma^{\m}_{\mathrm{D}}\,,\\
+    \bm{u}(\bm\mu) &= \bm{0}\quad\mathrm{on}\;\varGamma^{\m}_{\mathrm{out}}:= \partial\varOmega^{\m} \setminus\partial\varOmega^{\m}_{\mathrm{gl}}\,.
+	\end{split}
+\end{align}
+\Cref{eq:neumann_problem} is solved on the parent domain employing a pull back as above.
+Also, for construction of a sufficiently rich local basis it has to be solved for many parameter values $\m$, but a sampling of the boundary values on $\varGamma^{\m}_{\out}$ is not required.
 % - setting, global domain = union of non overlapping subdomains = unit cells
 % - introduction of coarse grid where each cell corresponds to unit cell subdomain
 % - goal of constructing local spaces for only parts of the domain
@@ -257,7 +271,7 @@ For details concerning the discretization of the transfer operator (for a fixed 
 \begin{figure}
     \centering
     \include{./img/oversampling_domain.tex}
-    \caption{Exemplary coarse grid discretization of the global domain $\varOmega^{\m}_{\gl}$, with oversampling domain $\varOmega^{\m}$ in grey (a) and fine grid discretization of the unit cell (b).}\label{fig:oversampling_domain}
+    \caption{Exemplary coarse grid discretization of the global domain $\varOmega^{\m}_{\gl}$, with target subdomain $\varOmega^{\m}_i$ within oversampling domain $\varOmega^{\m}$ in grey (a) and fine grid discretization of the unit cell (b).}\label{fig:oversampling_domain}
 \end{figure}
 
 % TODO adjust abovecaptionskip if necessary
@@ -287,9 +301,9 @@ For details concerning the discretization of the transfer operator (for a fixed 
     \State{$\bm{S}_{\mathrm{train}}\gets\;\{\bm\mu_1,\ldots,\bm\mu_{N_\mathrm{train}}\}$}\Comment{initialize training set}
     \For{$\bm\mu_j$ in $\bm{S}_{\mathrm{train}}$}
     \State{$\bm{R}\gets$ \textsc{AdaptiveRandomizedRangeApproximation}($\bm{T}_{\bm\mu_j}$, $\texttt{tol}$, $n_t$, $\varepsilon_{\mathrm{algofail}}$)}
-    \State{$\bm{u}_{\mathrm{Neumann}}(\bm\mu_j)\gets \bm{T}_{\bm\mu_j}(\bm{0})$}\Comment{solve additional Neumann problem if $\varGamma_{\mathrm{N}}\ne\emptyset$}
-    \State{$\bm{R}\gets \bm{R}\cup\left(\bm{u}_{\mathrm{Neumann}}(\bm\mu_j)\right)$}
-    \State{$\bm{S}\gets \bm{S}\cup\left(\mathrm{orthonormalize}\left(\bm{R}\right)\right)$}
+    % \State{$\bm{u}_{\mathrm{Neumann}}(\bm\mu_j)\gets \bm{T}_{\bm\mu_j}(\bm{0})$}\Comment{solve additional Neumann problem if $\varGamma_{\mathrm{N}}\ne\emptyset$}
+    % \State{$\bm{R}\gets \bm{R}\cup\left(\bm{u}_{\mathrm{Neumann}}(\bm\mu_j)\right)$}
+    \State{$\bm{S}\gets \mathrm{orthonormalize}\left(\bm{S}\cup\bm{R}\right)$}
     \EndFor%
     \State{$\bm{B}\gets\textsc{POD}(\bm{S})$}
     \State{\textbf{return} {$X^n=\mathrm{span}\left(\bm{B}\right)$}}
