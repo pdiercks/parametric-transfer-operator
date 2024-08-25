@@ -298,3 +298,62 @@ def task_fig_locrom_error():
             "targets": [example.fig_locrom_error],
             "clean": True,
             }
+
+
+
+def task_optimization():
+    """ParaGeom: Determine optimal design"""
+    module = "src.parageom.optimization"
+    distr = example.distributions[0]
+
+    num_modes = 30 # TODO: rather use max value?
+    minimizer = "SLSQP"
+    omega = example.omega
+
+    nreal = 0 # do optimization only for single realization
+    for method in example.methods:
+        deps = [SRC / "optimization.py"]
+        deps.append(example.coarse_grid("global"))
+        deps.append(example.parent_domain("global"))
+        deps.append(example.parent_unit_cell)
+        for cell in range(5):
+            deps.append(example.local_basis_npy(nreal, method, distr, cell))
+        deps.append(example.local_basis_dofs_per_vert(nreal, method, distr))
+        targets = [example.fom_minimization_data,
+                   example.rom_minimization_data(distr, method)]
+        yield {
+                "name": method,
+                "file_dep": deps,
+                "actions": ["python3 -m {} {} {} {} --method {} --omega {}".format(module, distr, method, num_modes, minimizer, omega)],
+                "targets": targets,
+                "clean": True,
+                }
+
+
+def task_pp_stress():
+    """ParaGeom: Post-process stress"""
+    module = "src.parageom.pp_stress"
+    distr = "normal"
+    num_modes = 60 # local basis size
+    omega = example.omega # weighting factor for output functional
+    nreal = 0
+    for method in example.methods:
+        deps = [SRC / "pp_stress.py"]
+        # mesh and basis deps to construct rom
+        deps.append(example.coarse_grid("global"))
+        deps.append(example.parent_domain("global"))
+        deps.append(example.parent_unit_cell)
+        for cell in range(5):
+            deps.append(example.local_basis_npy(nreal, method, distr, cell))
+        deps.append(example.local_basis_dofs_per_vert(nreal, method, distr))
+        # optimization result
+        deps.append(example.fom_minimization_data)
+        # xdmf files as targets
+        targets = list(example.pp_stress(method).values())
+        yield {
+                "name": method,
+                "file_dep": deps,
+                "actions": ["python3 -m {} {} {} {} --omega {}".format(module, distr, method, num_modes, omega)],
+                "targets": targets,
+                "clean": True,
+                }

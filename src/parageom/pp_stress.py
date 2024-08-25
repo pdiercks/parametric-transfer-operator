@@ -4,6 +4,7 @@ import dolfinx as df
 import basix
 
 import numpy as np
+from pymor.core.pickle import load
 from pymor.vectorarrays.numpy import NumpyVectorSpace
 from pymor.operators.constructions import VectorOperator, LincombOperator, VectorFunctional, ConstantOperator
 from pymor.parameters.functionals import GenericParameterFunctional
@@ -50,14 +51,19 @@ def main(args):
     # ### Global function for displacment
     displacement = df.fem.Function(V)
 
-    # ps = fom.parameters.space(example.mu_range)
-    # mu = ps.sample_randomly(1)[0]
-    mu = fom.parameters.parse([0.1 for _ in range(10)])
+    # ### Get optimal solution μ*
+    fom_data = example.fom_minimization_data
+    with fom_data.open("rb") as fh:
+        data = load(fh)
+    mu = fom.parameters.parse(data["mu_min"])
 
-    s1_fom, s2_fom, s_fom = compute_principal_stress(fom, mu, displacement, stress, parageom)
+    # targets
+    xdmf_files = example.pp_stress(args.name)
+
+    s1_fom, s2_fom, s_fom = compute_principal_stress(fom, mu, displacement, stress, parageom, rec_data=None, xdmf_filename=xdmf_files["fom"].as_posix())
     displacement.x.array[:] = 0. # type: ignore
     stress.x.array[:] = 0. # type: ignore
-    s1_rom, s2_rom, s_rom = compute_principal_stress(rom, mu, displacement, stress, parageom, rec_data=rec_data)
+    s1_rom, s2_rom, s_rom = compute_principal_stress(rom, mu, displacement, stress, parageom, rec_data=rec_data, xdmf_filename=xdmf_files["rom"].as_posix())
 
     # stress error in euclidean norm
     def compute_norms(fom, rom):
@@ -81,12 +87,12 @@ def main(args):
     error.x.array[::2] /= sx_max # type: ignore
     error.x.array[1::2] /= sy_max # type: ignore
 
-    with df.io.XDMFFile(Q.mesh.comm, "output/stress_error.xdmf", "w") as xdmf: # type: ignore
+    with df.io.XDMFFile(Q.mesh.comm, xdmf_files["err"].as_posix(), "w") as xdmf: # type: ignore
         xdmf.write_mesh(Q.mesh)
         xdmf.write_function(error) # type: ignore
 
 
-def compute_principal_stress(model, mu, u, stress, parageom, rec_data=None):
+def compute_principal_stress(model, mu, u, stress, parageom, rec_data=None, xdmf_filename=None):
     from .stress_analysis import principal_stress_2d, project
 
     V = u.function_space
@@ -128,9 +134,10 @@ def compute_principal_stress(model, mu, u, stress, parageom, rec_data=None):
     sigma_q.x.array[1::2] = s2.flatten()
     project(sigma_q, sigma_p)
 
-    with df.io.XDMFFile(W.mesh.comm, f"output/stress_{model.name}.xdmf", "w") as xdmf:
-        xdmf.write_mesh(W.mesh)
-        xdmf.write_function(sigma_p)
+    if xdmf_filename is not None:
+        with df.io.XDMFFile(W.mesh.comm, xdmf_filename, "w") as xdmf:
+            xdmf.write_mesh(W.mesh)
+            xdmf.write_function(sigma_p)
 
     return s1, s2, sigma_p
 
