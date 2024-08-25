@@ -82,7 +82,7 @@ class BeamData:
                 "hapod": 0.01,
                 })
     epsilon_star_projerr: float = 0.001
-    omega: float = 0.5
+    omega: float = 0.5 # ω related to HAPOD (not output functional)
     rrf_ttol: float = 10e-2
     rrf_ftol: float = 1e-10
     rrf_num_testvecs: int = 20
@@ -258,10 +258,10 @@ class BeamData:
         """FOM minimization data"""
         return self.rf / "fom_minimization_data.out"
 
-    # def rom_minimization_data(self, distr: str, name: str) -> Path:
-    #     """ROM minimization data"""
-    #     return self.rf / f"rom_minimization_data_{distr}_{name}.out"
-    #
+    def rom_minimization_data(self, distr: str, name: str) -> Path:
+        """ROM minimization data"""
+        return self.rf / f"rom_minimization_data_{distr}_{name}.out"
+
     # @property
     # def minimization_data_table(self) -> Path:
     #     return self.rf / "minimization_data.csv"
