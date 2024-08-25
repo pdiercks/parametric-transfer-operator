@@ -250,7 +250,7 @@ def reconstruct(
         dofs = dofmap.cell_dofs(cell)
 
         # fill global field via dof mapping
-        V_to_Vsub = make_mapping(Vsub, V)
+        V_to_Vsub = make_mapping(Vsub, V, padding=1e-8, check=True)
         u_global_view[V_to_Vsub] = U_rb[0, dofs] @ basis
         u_global.x.scatter_forward()
 

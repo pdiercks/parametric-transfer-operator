@@ -68,12 +68,12 @@ def main(args):
         wrapped_op = EISubdomainOperatorWrapper(restricted_op, mops, interpolation_matrix, magic_dofs, m_inv)
 
         # convert `rhs_local` to NumPy
-        vector = rhs_local.as_range_array().to_numpy()
+        vector = rhs_local.as_range_array().to_numpy() # type: ignore
         rhs_va = mops[0].range.from_numpy(vector)
         rhs_local = VectorOperator(rhs_va)
 
     # ### Coarse grid of the global domain
-    coarse_grid = global_auxp.coarse_grid
+    coarse_grid = global_auxp.coarse_grid # type: ignore
 
     # ### DofMap
     dofmap = GFEMDofMap(coarse_grid)
@@ -109,7 +109,7 @@ def main(args):
 
     # Functions to store FOM & ROM solution
     u_rb = df.fem.Function(fom.solution_space.V)
-    u_loc = df.fem.Function(operator_local.source.V)
+    u_loc = df.fem.Function(operator_local.source.V) # type: ignore
 
     Nmax = max_dofs_per_vert.max()
     ΔN = 10
@@ -174,7 +174,7 @@ def main(args):
                     logger.info(f"{nmodes=}, \tSolve took {t.elapsed()[0]}.")
 
             with Timer("reconstruction") as t:
-                reconstruct(U_rb_.to_numpy(), dofmap, current_local_bases, u_loc, u_rb)
+                reconstruct(U_rb_.to_numpy(), dofmap, current_local_bases, u_loc, u_rb) # type: ignore
                 logger.info(f"{nmodes=},\treconstruction took {t.elapsed()[0]}.")
             U_rom = fom.solution_space.make_array([u_rb.x.petsc_vec.copy()])  # type: ignore
             rom_solutions.append(U_rom)

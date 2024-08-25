@@ -299,7 +299,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
 
     # ### Output definition
     # solve FOM for initial mu
-    initial_mu = params.parse([0.1 for _ in range(10)])
+    initial_mu = params.parse([0.1 for _ in range(example.nx)])
     vol_ref = compute_volume(initial_mu)
     U_ref = operator.apply_inverse(rhs.as_range_array(), mu=initial_mu)
 
