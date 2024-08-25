@@ -86,7 +86,7 @@ class BeamData:
     rrf_ttol: float = 10e-2
     rrf_ftol: float = 1e-10
     rrf_num_testvecs: int = 20
-    neumann_rtol: float = 1e-5
+    neumann_rtol: float = 1e-8
     run_mode: str = "DEBUG"
 
     def __post_init__(self):
@@ -221,9 +221,11 @@ class BeamData:
     def ntrain(self, config: str) -> int:
         """Define size of training set"""
         if self.run_mode == "DEBUG":
+            # 20 samples per unit cell
             map = {"left": 60, "inner": 80, "right": 60}
             return map[config]
         elif self.run_mode == "PRODUCTION":
+            # 50 samples per unit cell
             map = {"left": 150, "inner": 200, "right": 150}
             return map[config]
         else:
@@ -261,6 +263,15 @@ class BeamData:
     def rom_minimization_data(self, distr: str, name: str) -> Path:
         """ROM minimization data"""
         return self.rf / f"rom_minimization_data_{distr}_{name}.out"
+
+    def pp_stress(self, method: str) -> dict[str, Path]:
+        """Postprocessing of stress at optimal design"""
+        folder = self.method_folder(0, method)
+        return {
+                "fom": folder / "stress_fom.xdmf",
+                "rom": folder / "stress_rom.xdmf",
+                "err": folder / "stress_err.xdmf"
+                }
 
     # @property
     # def minimization_data_table(self) -> Path:
