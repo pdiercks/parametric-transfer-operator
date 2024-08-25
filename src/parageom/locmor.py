@@ -5,7 +5,7 @@ from collections import defaultdict, namedtuple
 import numpy as np
 import numpy.typing as npt
 from scipy.sparse import coo_array, csr_array
-from scipy.linalg import solve
+import scipy.linalg
 
 from mpi4py import MPI
 from petsc4py import PETSc
@@ -171,13 +171,13 @@ class GlobalParaGeomOperator(Operator):
         M = len(self.ei_sub_op.cb)
 
         data = self.data
-        new = np.zeros((data.shape[1],), dtype=np.float32)
+        new = np.zeros((data.shape[1],), dtype=np.float64)
 
         for i, mu_i in enumerate(mu.to_numpy()):
             # restricted evaluation of the subdomain operator
             loc_mu = op.parameters.parse([mu_i])
             A = csr_array(op.assemble(loc_mu).matrix.getValuesCSR()[::-1])
-            _coeffs = solve(interpolation_matrix, A[rdofs[:, 0], rdofs[:, 1]])
+            _coeffs = scipy.linalg.solve(interpolation_matrix, A[rdofs[:, 0], rdofs[:, 1]])
             λ = _coeffs.reshape(1, M)
 
             subdomain_range = None
@@ -352,10 +352,10 @@ def assemble_gfem_system(
         rhs["indexptr"].append(len(rhs["rows"]))
 
     Ndofs = dofmap.num_dofs
-    data = np.array(lhs["data"])
-    rows = np.array(lhs["rows"])
-    cols = np.array(lhs["cols"])
-    indexptr = np.array(lhs["indexptr"])
+    data = np.array(lhs["data"], dtype=np.float64)
+    rows = np.array(lhs["rows"], dtype=np.int32)
+    cols = np.array(lhs["cols"], dtype=np.int32)
+    indexptr = np.array(lhs["indexptr"], dtype=np.int32)
     shape = (Ndofs, Ndofs)
     options = None
     op = COOMatrixOperator(
@@ -368,10 +368,10 @@ def assemble_gfem_system(
         name="K",
     )
 
-    data = np.array(rhs["data"])
-    rows = np.array(rhs["rows"])
-    cols = np.array(rhs["cols"])
-    indexptr = np.array(rhs["indexptr"])
+    data = np.array(rhs["data"], dtype=np.float64)
+    rows = np.array(rhs["rows"], dtype=np.int32)
+    cols = np.array(rhs["cols"], dtype=np.int32)
+    indexptr = np.array(rhs["indexptr"], dtype=np.int32)
     shape = (Ndofs, 1)
     rhs_op = COOMatrixOperator(
         (data, rows, cols),
@@ -481,7 +481,7 @@ def assemble_gfem_system_with_ei(
     _data = []
     for m in range(cb_size):
         _data.append(lhs[f"data_{m}"])
-    data = np.vstack(_data)
+    data = np.vstack(_data, dtype=np.float64)
     # stack matrix data as row vectors
     # need to form linear combination with interpolation coeff per row
     # need to account for different geometry (μ) per column using indexptr
@@ -500,11 +500,11 @@ def assemble_gfem_system_with_ei(
     # coeff (M, 10)
     # indexptr --> defining 10 ranges within [0, nnz-1] that corresponds to values for each subdomain
 
-    rows = np.array(lhs["rows"])
-    cols = np.array(lhs["cols"])
-    indexptr = np.array(lhs["indexptr"])
+    rows = np.array(lhs["rows"], dtype=np.int32)
+    cols = np.array(lhs["cols"], dtype=np.int32)
+    indexptr = np.array(lhs["indexptr"], dtype=np.int32)
     shape = (Ndofs, Ndofs)
-    options = {"inverse": "scipy_lgmres"}
+    options = None
     op = GlobalParaGeomOperator(
         ei_sub_op,
         data,
@@ -518,10 +518,10 @@ def assemble_gfem_system_with_ei(
         name="K",
     )
 
-    data = np.array(rhs["data"])
-    rows = np.array(rhs["rows"])
-    cols = np.array(rhs["cols"])
-    indexptr = np.array(rhs["indexptr"])
+    data = np.array(rhs["data"], dtype=np.float64)
+    rows = np.array(rhs["rows"], dtype=np.int32)
+    cols = np.array(rhs["cols"], dtype=np.int32)
+    indexptr = np.array(rhs["indexptr"], dtype=np.int32)
     shape = (Ndofs, 1)
     rhs_op = COOMatrixOperator(
         (data, rows, cols),

@@ -14,7 +14,6 @@ from pymor.operators.constructions import VectorOperator
 from pymor.models.basic import StationaryModel
 from pymor.tools.random import new_rng
 
-
 def main(args):
     from .tasks import example
     from .auxiliary_problem import discretize_auxiliary_problem
@@ -169,6 +168,7 @@ def main(args):
                     )
                     logger.info(f"{nmodes=}, \tAssembly took {t.elapsed()[0]}.")
                 rom = StationaryModel(operator, rhs, name="locROM")
+
                 with Timer("Solve") as t:
                     U_rb_ = rom.solve(mu)
                     logger.info(f"{nmodes=}, \tSolve took {t.elapsed()[0]}.")
@@ -179,8 +179,14 @@ def main(args):
             U_rom = fom.solution_space.make_array([u_rb.x.petsc_vec.copy()])  # type: ignore
             rom_solutions.append(U_rom)
 
+
         # absolute error
         err = fom_solutions - rom_solutions
+
+        if args.debug:
+            fom.visualize(fom_solutions[0], filename="output/run_locrom_fom.xdmf")
+            fom.visualize(rom_solutions[0], filename="output/run_locrom_rom.xdmf")
+            fom.visualize(err[0], filename="output/run_locrom_err.xdmf")
 
         # l2-mean error
         l2_mean = np.sum(l_char**2.0 * err.norm2(h1_product)) / len(err)
