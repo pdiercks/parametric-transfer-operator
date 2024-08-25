@@ -306,7 +306,7 @@ def task_optimization():
     module = "src.parageom.optimization"
     distr = example.distributions[0]
 
-    num_modes = 30 # TODO: rather use max value?
+    num_modes = 100 # TODO: rather use max value?
     minimizer = "SLSQP"
     omega = example.omega
 
@@ -334,7 +334,7 @@ def task_pp_stress():
     """ParaGeom: Post-process stress"""
     module = "src.parageom.pp_stress"
     distr = "normal"
-    num_modes = 60 # local basis size
+    num_modes = 100 # local basis size
     omega = example.omega # weighting factor for output functional
     nreal = 0
     for method in example.methods:

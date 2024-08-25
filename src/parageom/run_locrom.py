@@ -60,7 +60,7 @@ def main(args):
         # FIXME
         # store data of deim somewhere
         with Timer("EI of subdomain operator") as t:
-            mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local, design="uniform", ntrain=501, modes=None, atol=0., rtol=1e-12, method="method_of_snapshots")
+            mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local, design="uniform", ntrain=501, modes=None, atol=0., rtol=1e-8, method="method_of_snapshots")
             logger.info(f"EI of subdomain operator took {t.elapsed()[0]}.")
         m_dofs, m_inv = np.unique(magic_dofs, return_inverse=True)
         logger.debug(f"{magic_dofs=}")
