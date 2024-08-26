@@ -113,7 +113,7 @@ def main(args):
 
     Nmax = max_dofs_per_vert.max()
     ΔN = 10
-    num_modes_per_vertex = list(range(Nmax // ΔN, Nmax + 1, Nmax // ΔN))
+    num_modes_per_vertex = list(range(Nmax // ΔN, Nmax + 1, 3 * (Nmax // ΔN) ))
     logger.debug(f"{Nmax=}")
     logger.debug(f"{num_modes_per_vertex=}")
 
