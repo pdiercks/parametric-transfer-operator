@@ -10,3 +10,4 @@ with rom_data_path.open('rb') as fh:
 
 print(f"FOM optimum: {fomdata['mu_min']}")
 print(f"ROM optimum: {romdata['mu_N_min']}")
+breakpoint()

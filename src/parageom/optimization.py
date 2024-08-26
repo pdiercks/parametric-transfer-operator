@@ -151,7 +151,7 @@ def main(args):
     # ### Write outputs
     fom_minimization_data["method"] = args.method
     rom_minimization_data["method"] = args.method
-    rom_minimization_data["num_modes"] = args.num_modes
+    rom_minimization_data["num_modes"] = np.average(rec_data[0].dofs_per_vert)
 
     with example.fom_minimization_data.open("wb") as fh:
         dump(fom_minimization_data, fh)
@@ -337,7 +337,7 @@ def build_localized_rom(cli, example, global_auxp, trafo_disp, parameters, ω=0.
     operator_local, rhs_local = discretize_subdomain_operators(example)
     u_local = df.fem.Function(operator_local.source.V)
 
-    mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local, design="uniform", ntrain=501, modes=None, atol=0., rtol=1e-12, method="method_of_snapshots")
+    mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local, design="uniform", ntrain=501, modes=None, atol=0., rtol=example.mdeim_rtol, method="method_of_snapshots")
     m_dofs, m_inv = np.unique(magic_dofs, return_inverse=True)
     restricted_op, _ = operator_local.restricted(m_dofs, padding=1e-8)
     wrapped_op = EISubdomainOperatorWrapper(restricted_op, mops, interpolation_matrix, magic_dofs, m_inv)
@@ -377,7 +377,11 @@ def build_localized_rom(cli, example, global_auxp, trafo_disp, parameters, ω=0.
     assert max_dofs_per_vert.shape == (coarse_grid.num_cells, 4)
     assert np.allclose(np.array(bases_length), np.sum(max_dofs_per_vert, axis=1))
 
-    nmodes = cli.num_modes
+    Nmax = max_dofs_per_vert.max()
+    ΔN = 10
+    num_modes_per_vertex = list(range(Nmax // ΔN, Nmax + 1, 3 * (Nmax // ΔN) ))
+    nmodes = cli.num_modes or num_modes_per_vertex[-2] # second to last point in the validation
+
     dofs_per_vert = max_dofs_per_vert.copy()
     dofs_per_vert[max_dofs_per_vert > nmodes] = nmodes
     dofmap.distribute_dofs(dofs_per_vert)
@@ -385,7 +389,6 @@ def build_localized_rom(cli, example, global_auxp, trafo_disp, parameters, ω=0.
     operator, rhs, local_bases = assemble_gfem_system_with_ei(
         dofmap, wrapped_op, rhs_local, local_bases, dofs_per_vert, max_dofs_per_vert, parameters)
 
-    # TODO: add output functional
     # definition of ParaGeom Problem for volume computation
     omega = global_auxp.problem.domain
     matparam = {"gdim": omega.gdim, "E": 1.0, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
@@ -446,7 +449,7 @@ if __name__ == "__main__":
         choices=("hapod", "heuristic"),
     )
     parser.add_argument(
-        "num_modes",
+        "--num_modes",
         type=int,
         help="Local basis size to be used with local ROM.",
     )

@@ -71,7 +71,7 @@ class BeamData:
     )
     training_set_seed: int = 767667058
     testing_set_seed: int = 545445836
-    validation_set_seed: int = 9818890
+    validation_set_seed: int = 241690
     projerr_seed: int = 923719053
     configurations: tuple[str, str, str] = ("left", "inner", "right")
     distributions: tuple[str, ...] = ("normal",)
@@ -87,6 +87,7 @@ class BeamData:
     rrf_ftol: float = 1e-10
     rrf_num_testvecs: int = 20
     neumann_rtol: float = 1e-8
+    mdeim_rtol: float = 1e-5
     run_mode: str = "DEBUG"
 
     def __post_init__(self):
@@ -220,16 +221,14 @@ class BeamData:
 
     def ntrain(self, config: str) -> int:
         """Define size of training set"""
-        if self.run_mode == "DEBUG":
-            # 20 samples per unit cell
-            map = {"left": 60, "inner": 80, "right": 60}
-            return map[config]
-        elif self.run_mode == "PRODUCTION":
-            # 50 samples per unit cell
-            map = {"left": 150, "inner": 200, "right": 150}
-            return map[config]
-        else:
-            raise NotImplementedError
+        # num_samples = 51 # per unit cell; step size 0.004
+        num_samples = 300
+        if self.run_mode == "PRODUCTION":
+            num_samples = 101 # per unit cell; step size 0.002
+        # map = {"left": 3 * num_samples, "inner": 4 * num_samples, "right": 3 * num_samples}
+        map = {"left": 1000, "inner": 2000, "right": 1000}
+        # 2000 is too much though ...
+        return map[config]
 
     def cell_to_config(self, cell: int) -> str:
         """Maps global cell index to config."""
@@ -329,6 +328,10 @@ class BeamData:
     def hapod_singular_values(self, nr: int, distr: str, conf: str) -> Path:
         """singular values of final POD"""
         return self.method_folder(nr, "hapod") / f"singular_values_{distr}_{conf}.npy"
+
+    def hapod_neumann_svals(self, nr: int, distr: str, conf: str) -> Path:
+        """singular values of POD of neumann data"""
+        return self.method_folder(nr, "hapod") / f"neumann_singular_values_{distr}_{conf}.npy"
 
     def hapod_modes_xdmf(self, nr: int, distr: str, config: str) -> Path:
         """modes of the final POD"""

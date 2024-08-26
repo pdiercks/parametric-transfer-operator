@@ -14,6 +14,7 @@ from pymor.operators.constructions import VectorOperator
 from pymor.models.basic import StationaryModel
 from pymor.tools.random import new_rng
 
+
 def main(args):
     from .tasks import example
     from .auxiliary_problem import discretize_auxiliary_problem
@@ -24,7 +25,13 @@ def main(args):
     from .dofmap_gfem import GFEMDofMap
 
     # ### logger
-    set_defaults({"pymor.core.logger.getLogger.filename": example.log_run_locrom(args.nreal, args.method, args.distr, ei=args.ei)})
+    set_defaults(
+        {
+            "pymor.core.logger.getLogger.filename": example.log_run_locrom(
+                args.nreal, args.method, args.distr, ei=args.ei
+            )
+        }
+    )
     if args.debug:
         loglevel = "DEBUG"
     else:
@@ -60,7 +67,16 @@ def main(args):
         # FIXME
         # store data of deim somewhere
         with Timer("EI of subdomain operator") as t:
-            mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator_local, design="uniform", ntrain=501, modes=None, atol=0., rtol=1e-8, method="method_of_snapshots")
+            mops, interpolation_matrix, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(
+                example,
+                operator_local,
+                design="uniform",
+                ntrain=501,
+                modes=None,
+                atol=0.0,
+                rtol=example.mdeim_rtol,
+                method="method_of_snapshots",
+            )
             logger.info(f"EI of subdomain operator took {t.elapsed()[0]}.")
         m_dofs, m_inv = np.unique(magic_dofs, return_inverse=True)
         logger.debug(f"{magic_dofs=}")
@@ -68,12 +84,12 @@ def main(args):
         wrapped_op = EISubdomainOperatorWrapper(restricted_op, mops, interpolation_matrix, magic_dofs, m_inv)
 
         # convert `rhs_local` to NumPy
-        vector = rhs_local.as_range_array().to_numpy() # type: ignore
+        vector = rhs_local.as_range_array().to_numpy()  # type: ignore
         rhs_va = mops[0].range.from_numpy(vector)
         rhs_local = VectorOperator(rhs_va)
 
     # ### Coarse grid of the global domain
-    coarse_grid = global_auxp.coarse_grid # type: ignore
+    coarse_grid = global_auxp.coarse_grid  # type: ignore
 
     # ### DofMap
     dofmap = GFEMDofMap(coarse_grid)
@@ -109,11 +125,13 @@ def main(args):
 
     # Functions to store FOM & ROM solution
     u_rb = df.fem.Function(fom.solution_space.V)
-    u_loc = df.fem.Function(operator_local.source.V) # type: ignore
+    u_loc = df.fem.Function(operator_local.source.V)  # type: ignore
 
     Nmax = max_dofs_per_vert.max()
     ΔN = 10
-    num_modes_per_vertex = list(range(Nmax // ΔN, Nmax + 1, 3 * (Nmax // ΔN) ))
+    num_modes_per_vertex = list(range(Nmax // ΔN, Nmax + 1, 3 * (Nmax // ΔN)))
+    num_modes_per_vertex = [20, 60, 100, 120]
+    # breakpoint()
     logger.debug(f"{Nmax=}")
     logger.debug(f"{num_modes_per_vertex=}")
 
@@ -123,10 +141,15 @@ def main(args):
     l2_err = []
     ndofs = []
 
+    def compute_kappa(rom, mu):
+        mat = rom.operator.assemble(mu=mu)
+        kappa = np.linalg.cond(mat.matrix.todense())
+        return kappa
+
     t_loop = Timer("Loop")
     t_loop.start()
-    for nmodes in num_modes_per_vertex:
 
+    for nmodes in num_modes_per_vertex:
         # construct `dofs_per_vert` for current number of modes
         dofs_per_vert = max_dofs_per_vert.copy()
         dofs_per_vert[max_dofs_per_vert > nmodes] = nmodes
@@ -138,12 +161,21 @@ def main(args):
             assert wrapped_op is not None
             with Timer("AssemblyEI") as t:
                 operator, rhs, current_local_bases = assemble_gfem_system_with_ei(
-                        dofmap, wrapped_op, rhs_local, local_bases, dofs_per_vert, max_dofs_per_vert, fom.parameters)
+                    dofmap, wrapped_op, rhs_local, local_bases, dofs_per_vert, max_dofs_per_vert, fom.parameters
+                )
                 logger.info(f"AssemblyEI took {t.elapsed()[0]}.")
             rom = StationaryModel(operator, rhs, name="locROM_with_ei")
 
+            cond_A = []
+            for mu in validation_set:
+                cond_A.append(compute_kappa(rom, mu))
+            breakpoint()
+            print("check condition number")
+
         fom_solutions = fom.solution_space.empty()
         rom_solutions = fom.solution_space.empty()
+
+        cond_A_without_ei = []
 
         for mu in validation_set:
             U_fom = fom.solve(mu)
@@ -168,18 +200,21 @@ def main(args):
                     )
                     logger.info(f"{nmodes=}, \tAssembly took {t.elapsed()[0]}.")
                 rom = StationaryModel(operator, rhs, name="locROM")
+                kappa = compute_kappa(rom, mu)
+                cond_A_without_ei.append(kappa)
 
                 with Timer("Solve") as t:
                     U_rb_ = rom.solve(mu)
                     logger.info(f"{nmodes=}, \tSolve took {t.elapsed()[0]}.")
 
             with Timer("reconstruction") as t:
-                reconstruct(U_rb_.to_numpy(), dofmap, current_local_bases, u_loc, u_rb) # type: ignore
+                reconstruct(U_rb_.to_numpy(), dofmap, current_local_bases, u_loc, u_rb)  # type: ignore
                 logger.info(f"{nmodes=},\treconstruction took {t.elapsed()[0]}.")
             U_rom = fom.solution_space.make_array([u_rb.x.petsc_vec.copy()])  # type: ignore
             rom_solutions.append(U_rom)
 
-
+        breakpoint()
+        print(np.array(cond_A_without_ei))
         # absolute error
         err = fom_solutions - rom_solutions
 

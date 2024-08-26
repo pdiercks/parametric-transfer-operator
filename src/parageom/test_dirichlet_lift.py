@@ -36,7 +36,7 @@ def test():
             print("pass")
 
     num_vals = n + 1
-    g = np.arange(num_vals, dtype=np.float32)
+    g = np.arange(num_vals, dtype=np.float64)
     compare(mat, lift, g)
     compare(mat, lift, np.random.rand(num_vals))
     compare(mat, lift, np.random.rand(num_vals))

@@ -16,14 +16,14 @@ import ufl
 from pymor.algorithms.gram_schmidt import gram_schmidt
 from pymor.algorithms.projection import project
 from pymor.bindings.fenicsx import FenicsxMatrixOperator, FenicsxVectorSpace
-from pymor.operators.constructions import VectorOperator
+from pymor.operators.constructions import VectorOperator, LincombOperator
 from pymor.operators.interface import Operator
 from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.vectorarrays.interface import VectorArray
 from pymor.vectorarrays.numpy import NumpyVectorSpace
 from pymor.parameters.base import Parameters
 
-from multi.boundary import plane_at
+from multi.boundary import plane_at, point_at
 from multi.domain import RectangularDomain, StructuredQuadGrid
 from multi.dofmap import DofMap
 from multi.materials import LinearElasticMaterial
@@ -409,9 +409,17 @@ def assemble_gfem_system_with_ei(
 
     from .dofmap_gfem import select_modes
 
+    # TODO: try to set BCs to better condition system matrix
+
     # no need to apply bcs as basis functions should
     # satisfy these automatically
-    bc_dofs = np.array([], dtype=np.int32)
+    raise NotImplementedError("FIXME, condition number")
+    breakpoint()
+    left = dofmap.grid.locate_entities_boundary(0, plane_at(0.0, "x"))
+    bc_dofs = []
+    for vertex in left:
+        bc_dofs += dofmap.entity_dofs(vertex)
+    bc_dofs = np.array(bc_dofs, dtype=np.int32)
 
     lhs = defaultdict(list)
     rhs = defaultdict(list)
@@ -500,6 +508,8 @@ def assemble_gfem_system_with_ei(
     # coeff (M, 10)
     # indexptr --> defining 10 ranges within [0, nnz-1] that corresponds to values for each subdomain
 
+    # ### LHS
+    # Matrix operator
     rows = np.array(lhs["rows"], dtype=np.int32)
     cols = np.array(lhs["cols"], dtype=np.int32)
     indexptr = np.array(lhs["indexptr"], dtype=np.int32)
@@ -517,7 +527,17 @@ def assemble_gfem_system_with_ei(
         solver_options=options,
         name="K",
     )
+    # BC operator
+    bc_array = coo_array(
+        (bc_mat["data"], (bc_mat["rows"], bc_mat["cols"])), shape=shape
+    )
+    bc_array.eliminate_zeros()
+    bc_op = NumpyMatrixOperator(
+        bc_array.tocsr(), op.source.id, op.range.id, op.solver_options, "bc_mat"
+    )
+    lhs_op = LincombOperator([op, bc_op], [1.0, 1.0])
 
+    # ### RHS
     data = np.array(rhs["data"], dtype=np.float64)
     rows = np.array(rhs["rows"], dtype=np.int32)
     cols = np.array(rhs["cols"], dtype=np.int32)
@@ -532,7 +552,7 @@ def assemble_gfem_system_with_ei(
         solver_options=options,
         name="F",
     )
-    return op, rhs_op, local_bases
+    return lhs_op, rhs_op, local_bases
 
 
 class DirichletLift(object):

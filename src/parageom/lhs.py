@@ -25,7 +25,7 @@ def sample_lhs(parameter_space: ParameterSpace, name: str, **kwargs) -> list[Mu]
 
     """
     ndim = parameter_space.parameters[name]
-    ranges = np.array([parameter_space.ranges[name]], dtype=np.float32)
+    ranges = np.array([parameter_space.ranges[name]], dtype=np.float64)
     xrange = np.repeat(ranges, ndim, axis=0)
     samples = lhs(ndim, **kwargs)
     scale_range(samples, xrange)
@@ -39,7 +39,7 @@ def sample_lhs(parameter_space: ParameterSpace, name: str, **kwargs) -> list[Mu]
 
 if __name__ == "__main__":
     E_range = [1.0, 2.0]
-    xr = np.array([E_range], dtype=np.float32)
+    xr = np.array([E_range], dtype=np.float64)
     ndim = 2
     x = np.repeat(xr, ndim, axis=0)
     num_samples = 50

@@ -125,6 +125,8 @@ def task_hapod():
             )
             targets.append(example.hapod_modes_npy(nreal, distr, config))
             targets.append(example.hapod_singular_values(nreal, distr, config))
+            if config == "left":
+                targets.append(example.hapod_neumann_svals(nreal, distr, config))
             yield {
                 "name": config + ":" + str(nreal),
                 "file_dep": deps,
@@ -286,7 +288,7 @@ def task_fig_locrom_error():
     module = "src.parageom.plot_romerr"
     nreal = 0
     distr = "normal"
-    norm = "h1_semi"
+    norm = "max_relerr_h1_semi"
 
     deps = []
     for method in example.methods:
@@ -306,7 +308,6 @@ def task_optimization():
     module = "src.parageom.optimization"
     distr = example.distributions[0]
 
-    num_modes = 100 # TODO: rather use max value?
     minimizer = "SLSQP"
     omega = example.omega
 
@@ -324,7 +325,7 @@ def task_optimization():
         yield {
                 "name": method,
                 "file_dep": deps,
-                "actions": ["python3 -m {} {} {} {} --method {} --omega {}".format(module, distr, method, num_modes, minimizer, omega)],
+                "actions": ["python3 -m {} {} {} --method {} --omega {}".format(module, distr, method, minimizer, omega)],
                 "targets": targets,
                 "clean": True,
                 }
@@ -334,7 +335,6 @@ def task_pp_stress():
     """ParaGeom: Post-process stress"""
     module = "src.parageom.pp_stress"
     distr = "normal"
-    num_modes = 100 # local basis size
     omega = example.omega # weighting factor for output functional
     nreal = 0
     for method in example.methods:
@@ -353,7 +353,7 @@ def task_pp_stress():
         yield {
                 "name": method,
                 "file_dep": deps,
-                "actions": ["python3 -m {} {} {} {} --omega {}".format(module, distr, method, num_modes, omega)],
+                "actions": ["python3 -m {} {} {} --omega {}".format(module, distr, method, omega)],
                 "targets": targets,
                 "clean": True,
                 }

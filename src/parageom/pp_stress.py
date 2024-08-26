@@ -193,7 +193,11 @@ def build_localized_rom(cli, example, global_auxp, trafo_disp, parameters, ω=0.
     assert max_dofs_per_vert.shape == (coarse_grid.num_cells, 4)
     assert np.allclose(np.array(bases_length), np.sum(max_dofs_per_vert, axis=1))
 
-    nmodes = cli.num_modes
+    Nmax = max_dofs_per_vert.max()
+    ΔN = 10
+    num_modes_per_vertex = list(range(Nmax // ΔN, Nmax + 1, 3 * (Nmax // ΔN) ))
+    nmodes = num_modes_per_vertex[-2] # second to last point in the validation
+
     dofs_per_vert = max_dofs_per_vert.copy()
     dofs_per_vert[max_dofs_per_vert > nmodes] = nmodes
     dofmap.distribute_dofs(dofs_per_vert)
@@ -201,7 +205,6 @@ def build_localized_rom(cli, example, global_auxp, trafo_disp, parameters, ω=0.
     operator, rhs, local_bases = assemble_gfem_system_with_ei(
         dofmap, wrapped_op, rhs_local, local_bases, dofs_per_vert, max_dofs_per_vert, parameters)
 
-    # TODO: add output functional
     # definition of ParaGeom Problem for volume computation
     omega = global_auxp.problem.domain
     matparam = {"gdim": omega.gdim, "E": 1.0, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
@@ -260,11 +263,6 @@ if __name__ == "__main__":
         type=str,
         help="The name of the training strategy.",
         choices=("hapod", "heuristic"),
-    )
-    parser.add_argument(
-        "num_modes",
-        type=int,
-        help="Local basis size to be used with local ROM.",
     )
     parser.add_argument(
             "--omega",

@@ -144,9 +144,9 @@ def main(args):
 
     def enrich_with_constant(rb, x=False, y=False):
         dim = rb.shape[1]
-        xmode = np.ones((1, dim), dtype=np.float32)
+        xmode = np.ones((1, dim), dtype=np.float64)
         xmode[:, 1::2 ] *= 0.
-        ymode = np.ones((1, dim), dtype=np.float32)
+        ymode = np.ones((1, dim), dtype=np.float64)
         ymode[:, ::2] *= 0.
         basis = rb.copy()
         if y:
@@ -203,9 +203,9 @@ def main(args):
             dx_omega[:, 1:] = np.zeros_like(dx_omega[:, 1:])
             logger.debug(f"{dx_omega=}")
             if vertex in left_boundary:
-                dx_omega = np.array([[a, 0, 0]], dtype=np.float32)
+                dx_omega = np.array([[a, 0, 0]], dtype=np.float64)
             if vertex in right_boundary:
-                dx_omega = np.array([[4 * a, 0, 0]], dtype=np.float32)
+                dx_omega = np.array([[4 * a, 0, 0]], dtype=np.float64)
             omega[config].translate(dx_omega)
             logger.debug(f"{config=}, \tomega.xmin={omega[config].xmin}")
 

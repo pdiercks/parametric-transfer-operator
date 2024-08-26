@@ -25,11 +25,16 @@ def main(cli):
     red = bamcd["red"][0]
 
     marker = {
-        "h1_semi": "x",
-        "max": "o",
+        "l2_err": "o",
+        "max_relerr_h1_semi": "s",
+        "max_relerr_max": "+",
     }
-    norm_label = {"h1_semi": "H1-semi", "max": "max"}
-    err_ = "max_relerr"
+    # marker_ei = {
+    #     "l2_err": "o",
+    #     "max_relerr_h1_semi": "o",
+    #     "max_relerr_max": "o",
+    # }
+    norm_label = {"max_relerr_h1_semi": "H1-semi", "max_relerr_max": "max"}
 
     args = [__file__, cli.outfile]
     styles = [example.plotting_style.as_posix()]
@@ -40,7 +45,7 @@ def main(cli):
             data = np.load(infile)
             num_dofs = data["ndofs"]
             for norm in cli.norm:
-                err = data["_".join([err_, norm])]
+                err = data[norm]
                 mark = marker[norm]
                 if method == "heuristic":
                     label = f"HRRF, {norm_label[norm]}"
@@ -55,7 +60,7 @@ def main(cli):
                 data = np.load(infile)
                 num_dofs = data["ndofs"]
                 for norm in cli.norm:
-                    err = data["_".join([err_, norm])]
+                    err = data[norm]
                     mark = marker[norm]
                     if method == "heuristic":
                         label = f"HRRF+EI, {norm_label[norm]}"
