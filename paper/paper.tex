@@ -115,7 +115,7 @@ First, as references~\cite{Smetana2016Optimal,Taddei2018Localization} do not mak
 Herein, the approach given in~\cite{Taddei2018Localization}, identified as a \textit{distributed approximate POD} (see also~\cite{Himpe2018Hierarchical}), is adopted to range approximation via random sampling.
 Second, a framework for the shape optimization of lattice structures is proposed.
 It combines the aforementioned algorithm to construct local approximation spaces with an auxiliary problem, as in~\cite{Guo2022Learning}, to facilitate geometrical parametrizations of the unit cell and the matrix version~\cite{Negri2015Efficient} of the empirical interpolation method (EIM)~\cite{Barrault2004‘empirical,Chaturantabut2010Nonlinear} to ensure online efficiency of the final reduced order model (ROM).
-Furthermore, the global approximation space is constructed from the local spaces using the generalized finite element method (GFEM)~\cite{Babuska2004Generalized}.
+Furthermore, the global approximation space is constructed from the local spaces using the partition of unity method or generalized finite element method (GFEM)~\cite{BABUSKA1997,Babuska2004Generalized}.
 
 The rest of the article is organized as follows.
 In~\cref{sec:method}, the building blocks of the shape optimization framework are described.
@@ -216,7 +216,7 @@ and the stiffness tetrad given in component form as
     C_{ijkl} = \lambda \delta_{ij}\delta_{kl} + \mu \left(\delta_{ik}\delta_{jl}+\delta_{il}\delta_{jk}\right)\,,
     \label{eq:stiffness_tetrad}
 \end{equation}
-the weak form reads \added[id=pd]{TODO: is it necessary to write Dirichlet lift explicitly?}
+the weak form reads
 \begin{equation}
     \int_{\varOmega^{\m}} \pdv{\updelta\bm{u}}{\bm{x}^{\m}} \vdot\!\vdot \mathbb{C} \vdot\!\vdot
     \pdv{\bm{u}(\m)}{\bm{x}^{\m}} \dd{\bm{x}^{\m}} = \bm{0}\,.
@@ -257,7 +257,7 @@ Therefore, for example, an additional \textsc{Neumann} problem\footnote{The case
     \bm{u}(\bm\mu) &= \bm{0}\quad\mathrm{on}\;\varGamma^{\m}_{\mathrm{out}}:= \partial\varOmega^{\m} \setminus\partial\varOmega^{\m}_{\mathrm{gl}}\,.
 	\end{split}
 \end{align}
-\Cref{eq:neumann_problem} is solved on the parent domain employing a pull back as above.
+\Cref{eq:neumann_problem} is solved on the parent domain employing the pull back as above.
 Also, for construction of a sufficiently rich local basis it has to be solved for many parameter values $\m$, but a sampling of the boundary values on $\varGamma^{\m}_{\out}$ is not required.
 % - setting, global domain = union of non overlapping subdomains = unit cells
 % - introduction of coarse grid where each cell corresponds to unit cell subdomain
@@ -283,11 +283,23 @@ Also, for construction of a sufficiently rich local basis it has to be solved fo
 \subsubsection{Randomized range finder and proper orthogonal decomposition} % (fold)
 \label{sec:Randomized range finder and POD}
 
-\begin{itemize}
-    \item assume discretization of T
-    \item explain challenge of finding appropriate space
-    \item go with idea from Taddei \& Patera, but range approx. instead of TE
-\end{itemize}
+Assuming a proper FE discretization of $\bm{T}_{\m}$, next the algorithm to approximate the range of $\bm{T}_{\m}$ for any $\m$ is discussed.
+Herein, a strategy for the exploration of the parameter space and sampling of the random boundary conditions in the oversampling are the key challenges.
+In the present work, the strategy by Taddei \& Patera~\cite{Taddei2018Localization} is adopted in which based on the connection between the POD of images of the transfer operator (for certain boundary conditions) and the singular values of the transfer operator they devise a training strategy which is recognized as a distributed approximate POD (see \cite{Himpe2018Hierarchical}).
+For each $\m_j$ in a predefined training set, they compute the singular values of $\bm{T}_{\m_j}$ by resolution of an eigenvalue problem and subsequently compute the POD over the set of all eigenvectors.
+As the authors state, the resolution of the eigenvalue problems may be prohibitive in some cases, and therefore we employ range approximation by random sampling instead.
+
+The procedure for the computation of parameter-independent deformational modes is summarized in~\cref{algo:rrfpod}.
+First, an empty snapshot set $\bm{S}$ and a training set $\bm{S}_{\mathrm{train}}$ are initialized.
+The training set $\bm{S}_{\mathrm{train}}$ has to be sufficiently rich, such that it is a good representation of the parameter space.
+\comment[id=pd]{TODO: add reference to Haasdonk (standard sampling)?}
+Next, for each parameter value $\m_j\in\bm{S}_{\mathrm{train}}$ the range of $\bm{T}_{\m_j}$ which is now fixed with respect to the parameter value is approximated using Algorithm 1 \textsc{AdaptiveRandomizedRangeApproximation} from~\cite{Buhr2018Randomized} and the set of snapshots is extended by Gram Schmidt orthogonalization (line 5 \& 6).
+Note that the parameter value $\m$ and boundary conditions $\bm{g}$ are not varied at the same time.
+Finally, the POD is computed over the snapshot set $\bm{S}$ which yields the parameter-independent space $X^n$.
+The dimension of the local space $X^n$, \ie{} the number of local basis functions is denoted by $n$.
+
+In case of inhomogeneous \textsc{Neumann} boundary conditions, after termination of~\cref{algo:rrfpod}, the \textsc{Neumann} problem~\cref{eq:neumann_problem} is solved for each $\m_j\in\bm{S}_{\mathrm{train}}$ as well.
+Following compression via POD the space $X^n$ is enriched by the additional \textsc{Neumann} modes.
 
 \begin{algorithm}
     \caption{RRFPOD caption.}%
@@ -311,27 +323,30 @@ Also, for construction of a sufficiently rich local basis it has to be solved fo
     \end{algorithmic} 
 \end{algorithm}
 
-\added[id=pd]{TODO: Given a discretization of T, we can now discuss how the range can be approximated.}
-
-\added[id=pd]{TODO: check how/when Neumann data is added in case of RRFPOD. This can also be done outside the loop and even after POD of spectral basis.}
-\added[id=pd]{TODO: FIX neumann data in the algorithm.}
+\comment[id=pd]{TODO: explain tolerances to control approximation quality. Refer to HAPOD paper and mention that $\varepsilon^{\ast}$ can be used to compute tolerances at each node of the tree.}
+\comment[id=pd]{TODO: define notation for POD.}
 
 % subsubsection Randomized range finder and POD (end)
 
 \subsection{Construction of a global approximation} % (fold)
 \label{sub:Construction of a global approximation}
-
-\begin{itemize}
-    \item challenge that local spaces are not conforming on the interface
-    \item use GFEM as suitable method to construct conforming global approximation
-    \item how much detail should be necessary to explain GFEM?
-\end{itemize}
+Given local approximation spaces $X^n_i$ for each target subdomain $\varOmega_i^{\p}$, the construction of a global approximation via the GFEM is discussed.
+The difficulty is that the basis functions of the local spaces $X^n_i$ and $X^n_j$ of two neighboring subdomains $\varOmega_i^{\p}$ and $\varOmega_j^{\p}$ are not conforming on the shared interface $\varGamma^{\p}_{ij}=\partial\varOmega_i^{\p}\cap\partial\varOmega_j^{\p}$.
+However, given a suitably\footnote{According to Definition 1 of~\cite{BABUSKA1997}.} defined partition of unity $\{{\varphi}_i\}$ the local basis functions can be included in the global FE space by multiplication with the standard FE shape functions ${\varphi}_i$, such that a conforming approximation is obtained.
+The global GFEM space is defined as
+\begin{equation}
+	\label{eq:Xgfem}
+	X_{\mathrm{GFEM}}:= \sum_{i} \varphi_iX^n_i = \left\lbrace\sum_i\varphi_i\bm\xi_i \;\big|\; \bm\xi_i\in X^n_i	\right\rbrace\,.
+\end{equation}
+\comment[id=pd]{TODO: add figure. This explains best what is going on.}
+\comment[id=pd]{TODO: equation for partition of unity and final gfem space. Not sure if I can write this like Babuska.}
 
 % subsection Construction of a global approximation (end)
 
 \subsection{Online efficiency} % (fold)
 \label{sub:Online efficiency}
-
+With the global GFEM space, each coarse grid cell (\ie{} unit cell of the lattice) can be viewed as a high order FE.
+For example, it is just a quadrilateral cell with special ansatz functions 
 \begin{itemize}
     \item explain approach based on \textit{super elements}: each unit cell is just a quadrilateral cell with special ansatz functions
     \item challenge: would still need to assemble $K$ of unit cell for each new parameter
