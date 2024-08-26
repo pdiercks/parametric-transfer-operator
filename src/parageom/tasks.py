@@ -236,6 +236,7 @@ def task_gfem():
             for cell in range(5):
                 targets.append(example.local_basis_npy(nreal, method, distr, cell))
             targets.append(example.local_basis_dofs_per_vert(nreal, method, distr))
+            targets.append(example.log_gfem(nreal, method, distr))
             yield {
                     "name": method + ":" + str(nreal),
                     "file_dep": deps,
@@ -349,7 +350,9 @@ def task_pp_stress():
         # optimization result
         deps.append(example.fom_minimization_data)
         # xdmf files as targets
-        targets = list(example.pp_stress(method).values())
+        targets = []
+        for x in example.pp_stress(method).values():
+            targets.extend(with_h5(x))
         yield {
                 "name": method,
                 "file_dep": deps,
