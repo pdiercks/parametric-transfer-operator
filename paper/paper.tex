@@ -1,6 +1,7 @@
 \documentclass[a4paper]{eccomas_paper-2024}
 
 \usepackage{graphicx}
+\usepackage{subfig}
 \usepackage{url}
 \usepackage{amsmath}
 \usepackage{amsfonts}
@@ -60,6 +61,9 @@ sorting=none,%remove this to have things sorted, e.g. use style=alphabetic
 \newcommand{\p}{\mathrm{p}}
 \newcommand{\out}{\mathrm{out}}
 \newcommand{\inrm}{\mathrm{in}}
+% operators
+\newcommand{\vecm}{\mathrm{vec}}
+\renewcommand{\top}{\mathrm{T}}
 
 \graphicspath{{./img/}}
 
@@ -247,7 +251,7 @@ For details concerning the discretization of the transfer operator (for a fixed 
 
 Finally, we note that the images of $\bm{T}_{\m}$ are computed, such that they do not contain any translations or rotations (rigid body modes are removed via orthogonal projection), \ie{} they comprise purely \textit{deformational modes}.
 Moreover, (global) \textsc{Neumann} or \textsc{Dirichlet} boundary conditions prescribed on $\varSigma^{\m}_{\mathrm{N}}$ or $\varSigma^{\m}_{\mathrm{D}}$, respectively, have not been considered yet.
-Therefore, for example, an additional \textsc{Neumann} problem\footnote{The case of inhomogeneous \textsc{Dirichlet} boundary conditions is analogous.} has to be solved to enrich the local spaces.
+Therefore, for example, an additional \textsc{Neumann} problem\footnote{The case of inhomogeneous \textsc{Dirichlet} boundary conditions can be treated in the same way.} has to be solved to enrich the local spaces.
 \begin{align}
 	\begin{split}
 	\label{eq:neumann_problem}
@@ -290,9 +294,9 @@ For each $\m_j$ in a predefined training set, they compute the singular values o
 As the authors state, the resolution of the eigenvalue problems may be prohibitive in some cases, and therefore we employ range approximation by random sampling instead.
 
 The procedure for the computation of parameter-independent deformational modes is summarized in~\cref{algo:rrfpod}.
+The target tolerance $\varepsilon^{\ast}$ is used to control the quality of the approximation space (by bounding the mean $\ell^2$-error), and to compute the local tolerances $\varepsilon_{\alpha}$ that steer the range approximation of each transfer operator and the tolerance $\varepsilon_{\rho}$ for the final POD.
 First, an empty snapshot set $\bm{S}$ and a training set $\bm{S}_{\mathrm{train}}$ are initialized.
-The training set $\bm{S}_{\mathrm{train}}$ has to be sufficiently rich, such that it is a good representation of the parameter space.
-\comment[id=pd]{TODO: add reference to Haasdonk (standard sampling)?}
+The training set $\bm{S}_{\mathrm{train}}$ has to be sufficiently rich, such that it is a good representation of the parameter space, and the reader is referred to~\cite{Haasdonk2017Chapter}.
 Next, for each parameter value $\m_j\in\bm{S}_{\mathrm{train}}$ the range of $\bm{T}_{\m_j}$ which is now fixed with respect to the parameter value is approximated using Algorithm 1 \textsc{AdaptiveRandomizedRangeApproximation} from~\cite{Buhr2018Randomized} and the set of snapshots is extended by Gram Schmidt orthogonalization (line 5 \& 6).
 Note that the parameter value $\m$ and boundary conditions $\bm{g}$ are not varied at the same time.
 Finally, the POD is computed over the snapshot set $\bm{S}$ which yields the parameter-independent space $X^n$.
@@ -302,29 +306,30 @@ In case of inhomogeneous \textsc{Neumann} boundary conditions, after termination
 Following compression via POD the space $X^n$ is enriched by the additional \textsc{Neumann} modes.
 
 \begin{algorithm}
-    \caption{RRFPOD caption.}%
+    \caption{Randomized range finder (RRF) combined with POD.}%
     \label{algo:rrfpod}
     \begin{algorithmic}[1]
-        \Function{HapodRangeApproximation}{$\bm{T}$, $\texttt{tol}$, $n_t$, $\varepsilon_{\mathrm{algofail}}$, $N_{\mathrm{train}}$}
-    \Statex{\textbf{Input:} Operator $\bm{T}_{\bm\mu}$, target tolerance $\texttt{tol}$, number of testvectors $n_t$, maximum failure probability $\varepsilon_{\mathrm{algofail}}$, number of parameter samples $N_{\mathrm{train}}$}
+        \Function{HapodRangeApproximation}{$\bm{T}$, $\varepsilon^{\ast}$, $n_t$, $\varepsilon_{\mathrm{algofail}}$, $N_{\mathrm{train}}$}
+        \Statex{\textbf{Input:} Operator $\bm{T}_{\bm\mu}$, target tolerance $\varepsilon^{\ast}$, number of testvectors $n_t$, maximum failure probability $\varepsilon_{\mathrm{algofail}}$, number of parameter samples $N_{\mathrm{train}}$}
     \Statex{\textbf{Output:} space $X^n$}
 
+    \State{Compute $\varepsilon_{\rho}$ and $\varepsilon_{\alpha}$ from $\varepsilon^{\ast}$ according to Theorem 10 of~\cite{Himpe2018Hierarchical}}
     \State{$\bm{S}$ $\gets\;\emptyset$}\Comment{initialize snapshot set}
     \State{$\bm{S}_{\mathrm{train}}\gets\;\{\bm\mu_1,\ldots,\bm\mu_{N_\mathrm{train}}\}$}\Comment{initialize training set}
     \For{$\bm\mu_j$ in $\bm{S}_{\mathrm{train}}$}
-    \State{$\bm{R}\gets$ \textsc{AdaptiveRandomizedRangeApproximation}($\bm{T}_{\bm\mu_j}$, $\texttt{tol}$, $n_t$, $\varepsilon_{\mathrm{algofail}}$)}
+    \State{$\bm{R}\gets$ \textsc{AdaptiveRandomizedRangeApproximation}($\bm{T}_{\bm\mu_j}$, $\varepsilon_{\alpha}$, $n_t$, $\varepsilon_{\mathrm{algofail}}$)}
     % \State{$\bm{u}_{\mathrm{Neumann}}(\bm\mu_j)\gets \bm{T}_{\bm\mu_j}(\bm{0})$}\Comment{solve additional Neumann problem if $\varGamma_{\mathrm{N}}\ne\emptyset$}
     % \State{$\bm{R}\gets \bm{R}\cup\left(\bm{u}_{\mathrm{Neumann}}(\bm\mu_j)\right)$}
     \State{$\bm{S}\gets \mathrm{orthonormalize}\left(\bm{S}\cup\bm{R}\right)$}
     \EndFor%
-    \State{$\bm{B}\gets\textsc{POD}(\bm{S})$}
+    \State{$\bm{B}\gets\textsc{POD}(\bm{S}, \varepsilon_{\rho})$}
     \State{\textbf{return} {$X^n=\mathrm{span}\left(\bm{B}\right)$}}
     \EndFunction%
     \end{algorithmic} 
 \end{algorithm}
 
-\comment[id=pd]{TODO: explain tolerances to control approximation quality. Refer to HAPOD paper and mention that $\varepsilon^{\ast}$ can be used to compute tolerances at each node of the tree.}
-\comment[id=pd]{TODO: define notation for POD.}
+% \comment[id=pd]{TODO: explain tolerances to control approximation quality. Refer to HAPOD paper and mention that $\varepsilon^{\ast}$ can be used to compute tolerances at each node of the tree (epsilon star drives the RRF and the final POD. However, this means that we have to use l2-mean error as termination criterion. Too detailed?}
+% \comment[id=pd]{TODO: define notation for POD.}
 
 % subsubsection Randomized range finder and POD (end)
 
@@ -336,22 +341,64 @@ However, given a suitably\footnote{According to Definition 1 of~\cite{BABUSKA199
 The global GFEM space is defined as
 \begin{equation}
 	\label{eq:Xgfem}
-	X_{\mathrm{GFEM}}:= \sum_{i} \varphi_iX^n_i = \left\lbrace\sum_i\varphi_i\bm\xi_i \;\big|\; \bm\xi_i\in X^n_i	\right\rbrace\,.
+    X_{\mathrm{GFEM}}:= \sum_{i} \varphi_iX^n_i = \left\lbrace\sum_i\varphi_i\bm\xi_i \;\big|\; \bm\xi_i\in X^n_i	\right\rbrace\,.
 \end{equation}
-\comment[id=pd]{TODO: add figure. This explains best what is going on.}
-\comment[id=pd]{TODO: equation for partition of unity and final gfem space. Not sure if I can write this like Babuska.}
+Furthermore, the GFEM function denoted as $\bm{\psi}(\bm{x}) = \varphi(\bm{x})\bm{\xi}(\bm{x}), \bm{x}\in\omega_{\alpha}$ for a patch $\omega_{\alpha}$ is shown in~\cref{fig:gfem} to illustrate the procedure of constructing the GFEM functions.
+\begin{figure}[h]
+    \centering
+    \subfloat[Linear hat function $\varphi(\bm{x})$]{%
+          \includegraphics[height=5cm]{phi.pdf}%
+          \label{fig:gfem_left}%
+       } 
+       \subfloat[Enrichment function $\bm{\xi}(\bm{x})$]{%
+          \includegraphics[height=5cm]{enrichment.pdf}%
+          \label{fig:gfem_middle}%
+       }
+       \subfloat[GFEM function $\bm\psi(\bm{x})$]{%
+          \includegraphics[height=5cm]{gfem_function.pdf}%
+          \label{fig:gfem_right}%
+       }
+       \caption{Construction of GFEM functions.}
+       \label{fig:gfem}
+\end{figure} 
 
 % subsection Construction of a global approximation (end)
 
 \subsection{Online efficiency} % (fold)
 \label{sub:Online efficiency}
 With the global GFEM space, each coarse grid cell (\ie{} unit cell of the lattice) can be viewed as a high order FE.
-For example, it is just a quadrilateral cell with special ansatz functions 
-\begin{itemize}
-    \item explain approach based on \textit{super elements}: each unit cell is just a quadrilateral cell with special ansatz functions
-    \item challenge: would still need to assemble $K$ of unit cell for each new parameter
-    \item therefore, employ EIM to speed up assembly of $K$ (reduced integration)
-\end{itemize}
+For instance, assuming a coarse grid partition as shown in~\cref{fig:oversampling_domain}, the coarse grid cell is a quadrilateral cell with special ansatz functions $\bm{\psi}_i$.
+The components of the FE matrix of the $i-$th coarse grid cell are given by
+\begin{align}
+    \begin{split}
+        a^i_{kl} &= \int_{\varOmega^{\p}_i} \left(\pdv{\bm{\psi}_k}{\bm{x}^{\p}}\vdot\bm{F}^{-1}_{\m}\right)\vdot\!\vdot \mathbb{C} \vdot\!\vdot
+    \left(\pdv{\bm{\psi}_l}{\bm{x}^{\p}}\vdot\bm{F}^{-1}_{\m}\right)\det(\bm{F}_{\m})\dd{\bm{x}^{\p}}\,,\\
+                 &= ({V}^\top)_{km} {K}_{mn}(\mu){V}_{nl}\,.
+    \end{split}
+    \label{eq:element_matrix}
+\end{align}
+Here, $\bm{V}$ is the matrix that holds the FE vectors of the GFEM functions $\bm\psi_i$ as column vectors and $\bm{K}(\mu)$ is the stiffness matrix of the subdomain $\varOmega^{\p}_i$ (\ie{} unit cell).
+Since $\bm{K}$ is dependent on the parameter $\m$, integration over the full fine scale mesh of the unit cell is required whenever the model is evaluated for a new parameter value which will drastically reduce the computational efficiency of our method.
+
+To overcome this problem, the stiffness matrix $\bm{K}(\m)$ is approximated by Empirical Interpolation~(see \cite{Barrault2004‘empirical,Chaturantabut2010Nonlinear} and in particular \cite{Negri2015Efficient} for the matrix version termed MDEIM employed here), such that
+\begin{equation}
+    \bm{K}(\m) \approx \bm{K}_Q(\m) =\sum_{q=1}^{Q} \theta_q(\m) \bm{K}_q\,.
+    \label{eq:K_ei}
+\end{equation}
+Herein, $\bm{K}_q$ are parameter-independent matrices that can be precomputed\footnote{Due to the Galerkin projection onto $\bm{V}$ (\cref{eq:element_matrix}) the matrices to be precomputed and stored are also sufficiently small.}.
+The $\bm\theta(\m)\in\mathbb{R}^Q$ are called interpolation coefficients and can be determined via the interpolation equation
+\begin{equation}
+    \bm{\Phi}_{\mathcal{I}}\bm\theta(\m) = \bm{k}_{\mathcal{I}}(\m)\,.
+    \label{eq:interp}
+\end{equation}
+Considering the matrix version of DEIM, the interpolation is constructed for matrices that are vectorized by stacking their columns on top of each other which is denoted by $\bm{k}=\vecm(\bm{K})$.
+The suffix $(\cdot)_{\mathcal{I}}$ indicates the restricted evaluation, reduced integration respectively.
+The basis $\bm{\Phi}=[\vecm(\bm{K}_1), \ldots, \vecm(\bm{K}_Q)]$ and the interpolation indices $\mathcal{I}$ are determined by applying the DEIM algorithm as proposed in~\cite{Chaturantabut2010Nonlinear} to a set of snapshots $\{\vecm(\bm{K}(\m_1)), \ldots, \vecm(\bm{K}(\m_m))\}$, $m>0$.
+By reversing the $\vecm(\cdot)$ operation, the approximation $\bm{K}_Q(\m)$ can be formed using~\cref{eq:K_ei} once the interpolation coefficients are determined by solution of \cref{eq:interp}.
+For more details on the overall procedure it is referred to~\cite{Negri2015Efficient}.
+
+Finally, with a fast method to compute $\bm{K}_Q(\m)$, the calculation of the FE matrices $a^i_{kl}$ of each coarse grid cell are independent of the underlying fine grid discretization of the unit cell.
+The assembly of the global system matrix follows the usual assembly routine for FE methods.
 
 % subsection Online efficiency (end)
 
