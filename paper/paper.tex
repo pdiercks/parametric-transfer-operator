@@ -65,6 +65,7 @@ sorting=none,%remove this to have things sorted, e.g. use style=alphabetic
 \newcommand{\vecm}{\mathrm{vec}}
 \renewcommand{\top}{\mathrm{T}}
 
+\urldef{\gradientenbetonurl}\url{https://gradientenbeton.eu/}
 \graphicspath{{./img/}}
 
 \title{AN EFFICIENT LOCALIZED MODEL ORDER REDUCTION FRAMEWORK FOR THE SHAPE OPTIMIZATION OF ADDITIVELY MANUFACTURED LATTICE STRUCTURES\break ECCOMAS CONGRESS 2024}
@@ -404,17 +405,31 @@ The assembly of the global system matrix follows the usual assembly routine for 
 
 \section{NUMERICAL EXPERIMENTS} % (fold)
 \label{sec:numerical experiments}
-
-\begin{itemize}
-    \item general stuff like FE cell type and degree
-    \item software: dolfinx version 0.8.0
-    \item PC hardware?
-\end{itemize}
+The proposed methodology to construct the ROM is evaluated based on the example of a graded concrete slab. In~\cref{sub:Projection error study}, the approximation quality of the local spaces is accessed by studying the projection error. The ROM is validated against the FOM (\cref{sub:Reduced order model validation}) and the solution of a shape optimization problem is presented in~\cref{sub:Shape optimization}.
+\comment[id=pd]{TODO: remove these sentences in case the article is too long.}
 
 % section numerical experiments (end)
 
 \subsection{Graded concrete slab} % (fold)
 \label{sub:Graded concrete slab}
+The numerical example investigated here is motivated by \textit{graded concrete} in which voids are created by inserting hollow bodies into the concrete formwork with the goal of mass reduction, see~\cref{fig:gradientenbeton}.
+The problem is simplified and we consider a two dimensional beam under plane stress conditions as shown in~\cref{fig:beam_sketch}.
+
+\begin{figure}
+    \begin{center}
+        \includegraphics[keepaspectratio,height=4cm]{gradientenbeton_formwork.jpg}
+    \end{center}
+    \caption{Formwork for a graded concrete slab. Weight savings are achieved by placing hollow spheres along a structured grid inside the formwork. Source:\gradientenbetonurl.}\label{fig:gradientenbeton}
+\end{figure}
+
+\begin{figure}
+    \begin{center}
+        \includegraphics[width=0.95\textwidth]{example-image}
+    \end{center}
+    \caption{}\label{fig:beam_sketch}
+\end{figure}
+
+
 
 \begin{itemize}
     \item introduce graded concrete / problem (gradientenbeton eu); why this is interesting
