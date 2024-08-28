@@ -129,14 +129,11 @@ def adaptive_rrf_normal(
     maxnorm = np.inf
     l2 = np.sum(M.norm2(range_product)) / len(M)
 
-    l2_errors = [
-        l2,
-    ]
-    max_norms = [
-        maxnorm,
-    ]
+    l2_errors = [l2,]
+    max_norms = [maxnorm,]
 
-    while (maxnorm > testlimit) and (l2 > l2_err**2.0):
+    while (l2 > l2_err**2.0):
+    # while (maxnorm > testlimit) and (l2 > l2_err**2.0):
         basis_length = len(B)
         v = tp.generate_random_boundary_data(1, distribution, options=sampling_options)
 
@@ -151,6 +148,8 @@ def adaptive_rrf_normal(
         max_norms.append(maxnorm)
 
     reason = "maxnorm" if maxnorm < testlimit else "l2err"
+    logger.info(f"{maxnorm < testlimit =}\t{maxnorm=}")
+    logger.info(f"{l2 < l2_err ** 2 =}\t{l2=}")
     logger.info(f"Finished RRF in {len(B)} iterations ({reason=}).")
 
     return B

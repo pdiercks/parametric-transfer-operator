@@ -4,11 +4,11 @@ import dolfinx as df
 import basix
 
 import numpy as np
-from pymor.core.pickle import load
 from pymor.vectorarrays.numpy import NumpyVectorSpace
 from pymor.operators.constructions import VectorOperator, LincombOperator, VectorFunctional, ConstantOperator
 from pymor.parameters.functionals import GenericParameterFunctional
 from pymor.models.basic import StationaryModel
+from pymor.tools.random import new_rng
 
 
 def main(args):
@@ -18,6 +18,8 @@ def main(args):
     from .fom import discretize_fom, ParaGeomLinEla
 
     # ### Build FOM
+    print("Discretizing FOM ...")
+
     coarse_grid_path = example.coarse_grid("global").as_posix()
     parent_domain_path = example.parent_domain("global").as_posix()
     interface_tags = [
@@ -39,6 +41,7 @@ def main(args):
     parageom = ParaGeomLinEla(auxiliary_problem.problem.domain, V, d_trafo, matparam) # type: ignore
 
     # ### Build localized ROM
+    print("Building ROM ...")
     rom, rec_data = build_localized_rom(args, example, auxiliary_problem, d_trafo, fom.parameters, ω=args.omega)
 
     # ### Global function for stress
@@ -52,18 +55,10 @@ def main(args):
     displacement = df.fem.Function(V)
 
     # ### Get optimal solution μ*
-    fom_data = example.fom_minimization_data
-    with fom_data.open("rb") as fh:
-        data = load(fh)
-    mu = fom.parameters.parse(data["mu_min"])
-
-    # targets
-    xdmf_files = example.pp_stress(args.name)
-
-    s1_fom, s2_fom, s_fom = compute_principal_stress(fom, mu, displacement, stress, parageom, rec_data=None, xdmf_filename=xdmf_files["fom"].as_posix())
-    displacement.x.array[:] = 0. # type: ignore
-    stress.x.array[:] = 0. # type: ignore
-    s1_rom, s2_rom, s_rom = compute_principal_stress(rom, mu, displacement, stress, parageom, rec_data=rec_data, xdmf_filename=xdmf_files["rom"].as_posix())
+    # ### ROM Assembly and Error Analysis
+    P = fom.parameters.space(example.mu_range)
+    with new_rng(example.validation_set_seed):
+        validation_set = P.sample_randomly(args.num_test)
 
     # stress error in euclidean norm
     def compute_norms(fom, rom):
@@ -72,24 +67,38 @@ def main(args):
         fom_norm = np.linalg.norm(fom.flatten())
         return en, fom_norm
 
-    en_1, fn_1 = compute_norms(s1_fom, s1_rom)
-    en_2, fn_2 = compute_norms(s2_fom, s2_rom)
-    print(f"""Relative error in Euclidean norm:
-          s1: {en_1 / fn_1}
-          s2: {en_2 / fn_2}
-          """)
+    errors_s1 = []
+    errors_s2 = []
 
-    Q = s_fom.function_space # type: ignore
-    error = df.fem.Function(Q, name="e")
-    sx_max = np.abs(np.amin(s_fom.x.array[::2])) # type: ignore ; compression
-    sy_max = np.abs(np.amax(s_fom.x.array[1::2])) # type: ignore ; tension
-    error.x.array[:] = np.abs(s_fom.x.array[:] - s_rom.x.array[:]) # type: ignore
-    error.x.array[::2] /= sx_max # type: ignore
-    error.x.array[1::2] /= sy_max # type: ignore
+    print("Starting validation loop ...")
+    for mu in validation_set:
+        s1_fom, s2_fom, _ = compute_principal_stress(fom, mu, displacement, stress, parageom, rec_data=None, xdmf_filename=None)
+        displacement.x.array[:] = 0. # type: ignore
+        stress.x.array[:] = 0. # type: ignore
+        s1_rom, s2_rom, _ = compute_principal_stress(rom, mu, displacement, stress, parageom, rec_data=rec_data, xdmf_filename=None)
 
-    with df.io.XDMFFile(Q.mesh.comm, xdmf_files["err"].as_posix(), "w") as xdmf: # type: ignore
-        xdmf.write_mesh(Q.mesh)
-        xdmf.write_function(error) # type: ignore
+        en_1, fn_1 = compute_norms(s1_fom, s1_rom)
+        en_2, fn_2 = compute_norms(s2_fom, s2_rom)
+        print(f"""Relative error in Euclidean norm:
+              s1: {en_1 / fn_1}
+              s2: {en_2 / fn_2}
+              """)
+        errors_s1.append(en_1 / fn_1)
+        errors_s2.append(en_2 / fn_2)
+
+
+    breakpoint()
+    # Q = s_fom.function_space # type: ignore
+    # error = df.fem.Function(Q, name="e")
+    # sx_max = np.abs(np.amin(s_fom.x.array[::2])) # type: ignore ; compression
+    # sy_max = np.abs(np.amax(s_fom.x.array[1::2])) # type: ignore ; tension
+    # error.x.array[:] = np.abs(s_fom.x.array[:] - s_rom.x.array[:]) # type: ignore
+    # error.x.array[::2] /= sx_max # type: ignore
+    # error.x.array[1::2] /= sy_max # type: ignore
+    #
+    # with df.io.XDMFFile(Q.mesh.comm, xdmf_files["err"].as_posix(), "w") as xdmf: # type: ignore
+    #     xdmf.write_mesh(Q.mesh)
+    #     xdmf.write_function(error) # type: ignore
 
 
 def compute_principal_stress(model, mu, u, stress, parageom, rec_data=None, xdmf_filename=None):
@@ -196,7 +205,7 @@ def build_localized_rom(cli, example, global_auxp, trafo_disp, parameters, ω=0.
     Nmax = max_dofs_per_vert.max()
     ΔN = 10
     num_modes_per_vertex = list(range(Nmax // ΔN, Nmax + 1, 3 * (Nmax // ΔN) ))
-    nmodes = num_modes_per_vertex[-2] # second to last point in the validation
+    nmodes = num_modes_per_vertex[-1] # second to last point in the validation
 
     dofs_per_vert = max_dofs_per_vert.copy()
     dofs_per_vert[max_dofs_per_vert > nmodes] = nmodes
@@ -264,6 +273,7 @@ if __name__ == "__main__":
         help="The name of the training strategy.",
         choices=("hapod", "heuristic"),
     )
+    parser.add_argument("num_test", type=int)
     parser.add_argument(
             "--omega",
             type=float,

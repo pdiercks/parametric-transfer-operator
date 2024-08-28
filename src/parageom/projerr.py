@@ -78,7 +78,15 @@ def main(args):
 
         Nin = transfer.rhs.dofs.size
         epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2.0) * epsilon_star
-        epsilon_pod = epsilon_star * np.sqrt(Nin * ntrain)
+        # total number of input vectors is at most Nin * ntrain
+        epsilon_pod = np.sqrt(Nin * ntrain) * example.omega * epsilon_star
+        # but as usually much less vectors than Nin are computed per transfer operator
+        # however epsilon_pod can simply be computed after number of snapshots is known
+
+        # ε_α = np.sqrt(Nin) ... <-- cardinality of snapshot set
+        # l2-mean should be computed over set of size Nin then ...
+
+        # but since Nin is 
 
         # scaling
         epsilon_alpha /= example.l_char
@@ -92,13 +100,14 @@ def main(args):
                     transfer,
                     error_tol=example.rrf_ttol / example.l_char,
                     failure_tolerance=example.rrf_ftol,
-                    num_testvecs=example.rrf_num_testvecs,
+                    num_testvecs=Nin,
+                    # num_testvecs=20,
                     l2_err=epsilon_alpha,
-                    sampling_options={"scale": 0.1},
+                    # sampling_options={"scale": 0.1},
                 )
                 logger.info(f"\nSpectral Basis length: {len(rb)}.")
                 spectral_basis_sizes.append(len(rb))
-                snapshots.append(rb)
+                snapshots.append(rb) # type: ignore
         logger.info(
             f"Average length of spectral basis: {np.average(spectral_basis_sizes)}."
         )
@@ -132,14 +141,17 @@ def main(args):
         raise ValueError("Basis is not orthonormal wrt range product.")
 
     # Definition of test set (μ) and test data (g)
-    test_set = parameter_space.sample_randomly(50)
+    test_set = parameter_space.sample_randomly(ntrain)
     test_data = transfer.range.empty(reserve=len(test_set))
+
+    # use ntrain and Nin to define test data, but with different seed?
 
     logger.info(f"Computing test set of size {len(test_set)}...")
     with new_rng(example.projerr_seed):
         for mu in test_set:
             transfer.assemble_operator(mu)
-            g = transfer.generate_random_boundary_data(1, args.distr, {"scale": 0.1})
+            # g = transfer.generate_random_boundary_data(1, args.distr, {"scale": 0.1})
+            g = transfer.generate_random_boundary_data(Nin, args.distr)
             test_data.append(transfer.solve(g))
 
     aerrs = defaultdict(list)
@@ -152,10 +164,10 @@ def main(args):
         if key == "max":
             return lc * U.amax()[1]
         else:
-            assert key in ("h1-semi", "euclidean")
+            assert key in (transfer.range_product.name, "euclidean")
             return lc * U.norm(value)
 
-    products = {"h1-semi": transfer.range_product, "euclidean": None, "max": False}
+    products = {transfer.range_product.name: transfer.range_product, "euclidean": None, "max": False}
     test_norms = {}
     for k, v in products.items():
         test_norms[k] = compute_norm(test_data, k, v)
@@ -182,16 +194,21 @@ def main(args):
             rerrs[k].append(np.max(rel_err))
             l2errs[k].append(l2_err)
 
+    breakpoint()
+    print(np.min(l2errs["energy"]))
+    # FIXME? when using the energy product min l2err is not below epsilon_star ** 2
+    # during the training (rrf) I compute l2-mean over set of size Nin (=84 for inner)
+    # but the projection error is computed over set of size 500
     if args.output is not None:
         np.savez(
             args.output,
-            rerr_h1_semi=rerrs["h1-semi"],
+            rerr_h1_semi=rerrs[transfer.range_product.name],
             rerr_euclidean=rerrs["euclidean"],
             rerr_max=rerrs["max"],
-            aerr_h1_semi=aerrs["h1-semi"],
+            aerr_h1_semi=aerrs[transfer.range_product.name],
             aerr_euclidean=aerrs["euclidean"],
             aerr_max=aerrs["max"],
-            l2err_h1_semi=l2errs["h1-semi"],
+            l2err_h1_semi=l2errs[transfer.range_product.name],
             l2err_euclidean=l2errs["euclidean"],
             l2err_max=l2errs["max"],
         )

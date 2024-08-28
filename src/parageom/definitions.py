@@ -50,7 +50,7 @@ class BeamData:
 
     name: str = "parageom"
     gdim: int = 2
-    l_char: float = 100.0  # [mm], characteristic length = unit length
+    l_char: float = 1.0  # [mm], characteristic length = unit length
     unit_length: float = 1.0  # dimensionless unit length
     nx: int = 10
     ny: int = 1
@@ -78,8 +78,8 @@ class BeamData:
     methods: tuple[str, ...] = ("hapod", ) # "heuristic")
     epsilon_star: dict = field(
             default_factory=lambda: {
-                "heuristic": 0.01,
-                "hapod": 0.01,
+                "heuristic": 0.001,
+                "hapod": 0.001,
                 })
     epsilon_star_projerr: float = 0.001
     omega: float = 0.5 # ω related to HAPOD (not output functional)
@@ -221,13 +221,10 @@ class BeamData:
 
     def ntrain(self, config: str) -> int:
         """Define size of training set"""
-        # num_samples = 51 # per unit cell; step size 0.004
-        num_samples = 300
+        num_samples = 50 # per unit cell; step size 0.004
         if self.run_mode == "PRODUCTION":
             num_samples = 101 # per unit cell; step size 0.002
-        # map = {"left": 3 * num_samples, "inner": 4 * num_samples, "right": 3 * num_samples}
-        map = {"left": 1000, "inner": 2000, "right": 1000}
-        # 2000 is too much though ...
+        map = {"left": 3 * num_samples, "inner": 5 * num_samples, "right": 3 * num_samples}
         return map[config]
 
     def cell_to_config(self, cell: int) -> str:

@@ -300,13 +300,13 @@ def main():
     # phyiscal domains/meshes
     # need to use same degree as degree that should be
     # used for the geometry interpolation afterwards
-    degree = example.geom_deg
+    assert example.fe_deg == example.geom_deg
 
     # discretize auxiliary problem for parent unit cell
     mshfile = example.parent_unit_cell.as_posix()
     ftags = {"bottom": 11, "left": 12, "right": 13, "top": 14, "interface": 15}
     param = {"R": 1}
-    auxp = discretize_auxiliary_problem(mshfile, degree, ftags, param)
+    auxp = discretize_auxiliary_problem(example, mshfile, ftags, param)
 
     # output function
     d = df.fem.Function(auxp.problem.V)
@@ -327,7 +327,7 @@ def main():
     global_coarse_domain = example.coarse_grid("global").as_posix()
     param = {"R": 10}
     int_tags = [i for i in range(15, 25)]
-    auxp = discretize_auxiliary_problem(global_domain_msh, degree, int_tags, param, coarse_grid=global_coarse_domain)
+    auxp = discretize_auxiliary_problem(example, global_domain_msh, int_tags, param, coarse_grid=global_coarse_domain)
 
     d = df.fem.Function(auxp.problem.V)
     xdmf = XDMFFile(d.function_space.mesh.comm, "./transformation_global_domain.xdmf", "w")

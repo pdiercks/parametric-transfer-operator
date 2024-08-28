@@ -146,7 +146,7 @@ def discretize_subdomain_operators(example):
     d = df.fem.Function(aux.problem.V, name="d_trafo")
 
     omega = aux.problem.domain
-    matparam = {"gdim": omega.gdim, "E": 1.0, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
+    matparam = {"gdim": omega.gdim, "E": example.youngs_modulus, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
     problem = ParaGeomLinEla(omega, aux.problem.V, d, matparam)
 
     # ### wrap stiffness matrix as pymor operator
@@ -161,8 +161,9 @@ def discretize_subdomain_operators(example):
     )
 
     # ### wrap external force as pymor operator
-    EMOD = example.youngs_modulus
-    TY = -example.traction_y / EMOD
+    # EMOD = example.youngs_modulus
+    # TY = -example.traction_y / EMOD
+    TY = -example.traction_y
     traction = df.fem.Constant(
         omega.grid, (df.default_scalar_type(0.0), df.default_scalar_type(TY))
     )
@@ -202,7 +203,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
     assert neumann is not None
     facet_tags, _ = create_meshtags(domain, fdim, {"top": neumann})
     omega = RectangularDomain(domain, facet_tags=facet_tags)
-    matparam = {"gdim": omega.gdim, "E": 1.0, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
+    matparam = {"gdim": omega.gdim, "E": example.youngs_modulus, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
     problem = ParaGeomLinEla(omega, auxiliary_problem.problem.V, trafo_disp, matparam)
 
     # Dirichlet BCs
@@ -243,8 +244,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
     bcs = _create_dirichlet_bcs(tuple(dirichlet_bcs))
 
     # Neumann BCs
-    EMOD = example.youngs_modulus
-    TY = -example.traction_y / EMOD
+    TY = -example.traction_y
     traction = df.fem.Constant(
         domain, (df.default_scalar_type(0.0), df.default_scalar_type(TY))
     )
@@ -277,15 +277,19 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
     rhs = VectorOperator(F_ext)  # type: ignore
 
     # ### Inner products
-    inner_product = InnerProduct(V, product="h1-semi", bcs=bcs)
-    product_mat = inner_product.assemble_matrix()
-    product_name = "h1_0_semi"
-    h1_product = FenicsxMatrixOperator(product_mat, V, V, name=product_name)
+    mu_bar = params.parse([example.mu_bar for _ in range(example.nx)])
+    energy_product_name = "energy"
+    energy_product = operator.assemble(mu=mu_bar).with_(name=energy_product_name)
+
+    h1_semi_inner = InnerProduct(V, product="h1-semi", bcs=bcs)
+    product_mat = h1_semi_inner.assemble_matrix()
+    h1_semi_product_name = "h1_0_semi"
+    h1_product = FenicsxMatrixOperator(product_mat, V, V, name=h1_semi_product_name)
 
     l2_inner = InnerProduct(V, product="l2", bcs=bcs)
     product_mat = l2_inner.assemble_matrix()
-    product_l2 = "l2"
-    l2_product = FenicsxMatrixOperator(product_mat, V, V, name=product_l2)
+    l2_product_name = "l2"
+    l2_product = FenicsxMatrixOperator(product_mat, V, V, name=l2_product_name)
 
     # ### Visualizer
     viz = FenicsxVisualizer(FenicsxVectorSpace(V))
@@ -298,7 +302,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
         return vol
 
     # ### Output definition
-    # solve FOM for initial mu
+    # solve FOM for initial mu --> max Volume
     initial_mu = params.parse([0.1 for _ in range(example.nx)])
     vol_ref = compute_volume(initial_mu)
     U_ref = operator.apply_inverse(rhs.as_range_array(), mu=initial_mu)
@@ -322,7 +326,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
         operator,
         rhs,
         output_functional=output,
-        products={product_name: h1_product, product_l2: l2_product},
+        products={h1_semi_product_name: h1_product, l2_product_name: l2_product, energy_product_name: energy_product},
         visualizer=viz,
         name="FOM",
     )
@@ -341,8 +345,8 @@ if __name__ == "__main__":
         i for i in range(15, 25)
     ]  # FIXME better define in Example data class
     auxp = discretize_auxiliary_problem(
+        example,
         parent_domain_path,
-        degree,
         interface_tags,
         example.parameters["global"],
         coarse_grid=coarse_grid_path,
@@ -357,17 +361,17 @@ if __name__ == "__main__":
     U = fom.solve(mu) # dimensionless solution U, real displacement D=l_char * U
     # with characteristic length l_char = 100. mm (unit length)
 
-    D = U.copy()
-    l_char = 100.
-    D.scal(l_char)
+    # D = U.copy()
+    # l_char = 100.
+    # D.scal(l_char)
 
     # check norm of displacement field
-    assert np.isclose(D.norm(), U.norm() * l_char)
-    assert np.isclose(D.norm(fom.h1_0_semi_product), U.norm(fom.h1_0_semi_product) * l_char)
+    # assert np.isclose(D.norm(), U.norm() * l_char)
+    # assert np.isclose(D.norm(fom.h1_0_semi_product), U.norm(fom.h1_0_semi_product) * l_char)
 
     # check load
     total_load = np.sum(fom.rhs.as_range_array().to_numpy())  # type: ignore
-    assert np.isclose(total_load, -example.traction_y / example.youngs_modulus)
+    assert np.isclose(total_load, -example.traction_y)
 
     u = df.fem.Function(auxp.problem.V)
     mesh = u.function_space.mesh
@@ -425,6 +429,6 @@ if __name__ == "__main__":
         sigma_q.x.array[1::2] = s2.flatten()
         project(sigma_q, sigma_p)
 
-        # with df.io.XDMFFile(W.mesh.comm, f"output/{name}_s.xdmf", "w") as xdmf:
-        #     xdmf.write_mesh(W.mesh)
-        #     xdmf.write_function(sigma_p)
+        with df.io.XDMFFile(W.mesh.comm, f"output/{name}_s.xdmf", "w") as xdmf:
+            xdmf.write_mesh(W.mesh)
+            xdmf.write_function(sigma_p)

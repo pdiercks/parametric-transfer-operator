@@ -220,6 +220,13 @@ def task_gfem():
     """ParaGeom: Build GFEM approximation"""
     module = "src.parageom.gfem"
     distr = example.distributions[0]
+
+    def create_action(module, nreal, method, distr, debug=False):
+        action = "python3 -m {} {} {} {}".format(module, nreal, method, distr)
+        if debug:
+            action += " --debug"
+        return action
+
     for nreal in range(example.num_real):
         for method in example.methods:
             deps = [SRC / "gfem.py"]
@@ -240,7 +247,7 @@ def task_gfem():
             yield {
                     "name": method + ":" + str(nreal),
                     "file_dep": deps,
-                    "actions": ["python3 -m {} {} {} {}".format(module, nreal, method, distr)],
+                    "actions": [create_action(module, nreal, method, distr, debug=True)],
                     "targets": targets,
                     "clean": True,
                     }
@@ -309,6 +316,7 @@ def task_optimization():
     module = "src.parageom.optimization"
     distr = example.distributions[0]
 
+    num_modes = 120
     minimizer = "SLSQP"
     omega = example.omega
 
@@ -326,7 +334,7 @@ def task_optimization():
         yield {
                 "name": method,
                 "file_dep": deps,
-                "actions": ["python3 -m {} {} {} --method {} --omega {}".format(module, distr, method, minimizer, omega)],
+                "actions": ["python3 -m {} {} {} --num_modes {} --method {} --omega {}".format(module, distr, method, num_modes, minimizer, omega)],
                 "targets": targets,
                 "clean": True,
                 }

@@ -380,7 +380,7 @@ def build_localized_rom(cli, example, global_auxp, trafo_disp, parameters, ω=0.
     Nmax = max_dofs_per_vert.max()
     ΔN = 10
     num_modes_per_vertex = list(range(Nmax // ΔN, Nmax + 1, 3 * (Nmax // ΔN) ))
-    nmodes = cli.num_modes or num_modes_per_vertex[-2] # second to last point in the validation
+    nmodes = cli.num_modes or num_modes_per_vertex[-2]
 
     dofs_per_vert = max_dofs_per_vert.copy()
     dofs_per_vert[max_dofs_per_vert > nmodes] = nmodes
@@ -391,7 +391,7 @@ def build_localized_rom(cli, example, global_auxp, trafo_disp, parameters, ω=0.
 
     # definition of ParaGeom Problem for volume computation
     omega = global_auxp.problem.domain
-    matparam = {"gdim": omega.gdim, "E": 1.0, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
+    matparam = {"gdim": omega.gdim, "E": example.youngs_modulus, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
     parageom = ParaGeomLinEla(omega, global_auxp.problem.V, trafo_disp, matparam)
 
     def param_setter(mu):

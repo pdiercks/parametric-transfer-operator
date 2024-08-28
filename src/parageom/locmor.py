@@ -413,13 +413,21 @@ def assemble_gfem_system_with_ei(
 
     # no need to apply bcs as basis functions should
     # satisfy these automatically
-    raise NotImplementedError("FIXME, condition number")
-    breakpoint()
-    left = dofmap.grid.locate_entities_boundary(0, plane_at(0.0, "x"))
-    bc_dofs = []
-    for vertex in left:
-        bc_dofs += dofmap.entity_dofs(vertex)
-    bc_dofs = np.array(bc_dofs, dtype=np.int32)
+    # raise NotImplementedError("FIXME, condition number")
+    # left = dofmap.grid.locate_entities_boundary(0, plane_at(0.0, "x"))
+    # right = dofmap.grid.locate_entities_boundary(0, point_at([10., 0., 0.]))
+
+    # assert left.size == 2
+    # assert right.size == 1
+
+    # bc_dofs = []
+    # for vertex in left:
+    #     bc_dofs.append(dofmap.entity_dofs(vertex)[0])
+    # for vertex in right:
+    #     bc_dofs.append(dofmap.entity_dofs(vertex)[0])
+    #     bc_dofs.append(dofmap.entity_dofs(vertex)[1])
+    # bc_dofs = np.array(bc_dofs, dtype=np.int32)
+    bc_dofs = np.array([], dtype=np.int32)
 
     lhs = defaultdict(list)
     rhs = defaultdict(list)
@@ -528,14 +536,17 @@ def assemble_gfem_system_with_ei(
         name="K",
     )
     # BC operator
-    bc_array = coo_array(
-        (bc_mat["data"], (bc_mat["rows"], bc_mat["cols"])), shape=shape
-    )
-    bc_array.eliminate_zeros()
-    bc_op = NumpyMatrixOperator(
-        bc_array.tocsr(), op.source.id, op.range.id, op.solver_options, "bc_mat"
-    )
-    lhs_op = LincombOperator([op, bc_op], [1.0, 1.0])
+    if np.any(bc_dofs):
+        bc_array = coo_array(
+            (bc_mat["data"], (bc_mat["rows"], bc_mat["cols"])), shape=shape
+        )
+        bc_array.eliminate_zeros()
+        bc_op = NumpyMatrixOperator(
+            bc_array.tocsr(), op.source.id, op.range.id, op.solver_options, "bc_mat"
+        )
+        lhs_op = LincombOperator([op, bc_op], [1.0, 1.0])
+    else:
+        lhs_op = op
 
     # ### RHS
     data = np.array(rhs["data"], dtype=np.float64)
@@ -832,11 +843,12 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
     d_trafo = df.fem.Function(V, name="d_trafo")
 
     # ### Discretize left hand side - FenicsxMatrixBasedOperator
+    matparam = {"gdim": example.gdim, "E": example.youngs_modulus, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
     parageom = ParaGeomLinEla(
         omega,
         V,
         d=d_trafo,  # type: ignore
-        matparam={"gdim": example.gdim, "E": 1.0, "NU": example.poisson_ratio, "plane_stress": example.plane_stress},
+        matparam=matparam,
     )
     params = example.parameters[configuration]
 
@@ -845,6 +857,7 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
         auxiliary_problem.solve(d_trafo, mu)  # type: ignore
         d_trafo.x.scatter_forward()  # type: ignore
 
+    # operator for left hand side on full oversampling domain
     operator = FenicsxMatrixBasedOperator(
         parageom.form_lhs, params, param_setter=param_setter, bcs=bcs_op
     )
@@ -867,12 +880,25 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
         return ufl.inner(u, v) * ufl.dx # type: ignore
 
     # ### Range product operator
-    h1_cpp = df.fem.form(h1_0_semi(V_in))
-    pmat_range = dolfinx.fem.petsc.create_matrix(h1_cpp)
-    pmat_range.zeroEntries()
-    dolfinx.fem.petsc.assemble_matrix(pmat_range, h1_cpp, bcs=bcs_range_product)
-    pmat_range.assemble()
-    range_product = FenicsxMatrixOperator(pmat_range, V_in, V_in, name="h1_0_semi")
+    # h1_cpp = df.fem.form(h1_0_semi(V_in))
+    # pmat_range = dolfinx.fem.petsc.create_matrix(h1_cpp)
+    # pmat_range.zeroEntries()
+    # dolfinx.fem.petsc.assemble_matrix(pmat_range, h1_cpp, bcs=bcs_range_product)
+    # pmat_range.assemble()
+    # range_product = FenicsxMatrixOperator(pmat_range, V_in, V_in, name="h1_0_semi")
+
+    # num_components = params["R"]
+    # mu_bar = params.parse([example.mu_bar for _ in range(num_components)])
+
+    # assemble energy product for mu_bar by simply using parent domain
+    range_mat = LinearElasticMaterial(**matparam)
+    linela_target = LinearElasticityProblem(omega_in, V_in, phases=range_mat)
+    a_cpp = df.fem.form(linela_target.form_lhs)
+    range_mat = dolfinx.fem.petsc.create_matrix(a_cpp)
+    range_mat.zeroEntries()
+    dolfinx.fem.petsc.assemble_matrix(range_mat, a_cpp, bcs=bcs_range_product)
+    range_mat.assemble()
+    range_product = FenicsxMatrixOperator(range_mat, V_in, V_in, name="energy")
 
     # ### Source product operator
     l2_cpp = df.fem.form(l2(V))
@@ -909,7 +935,7 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
     # ### Discretize Neumann Data
     if configuration == "left":
         dA = ufl.Measure("ds", domain=omega.grid, subdomain_data=omega.facet_tags)
-        t_y = -example.traction_y / example.youngs_modulus
+        t_y = -example.traction_y
         traction = df.fem.Constant(
             omega.grid,
             (df.default_scalar_type(0.0), df.default_scalar_type(t_y)),
@@ -929,7 +955,7 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
         f_ext.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
         dolfinx.fem.petsc.set_bc(f_ext, bcs_neumann)
 
-        assert np.isclose(np.sum(f_ext.array), -example.traction_y / example.youngs_modulus)
+        assert np.isclose(np.sum(f_ext.array), -example.traction_y)
         F_ext = operator.range.make_array([f_ext])  # type: ignore
     else:
         F_ext = operator.range.zeros(1)

@@ -52,7 +52,8 @@ def main(args):
     )
     trafo_d_gl = df.fem.Function(global_auxp.problem.V, name="d_trafo")
     fom = discretize_fom(example, global_auxp, trafo_d_gl)
-    h1_product = fom.products["h1_0_semi"]
+    # h1_product = fom.products["h1_0_semi"]
+    energy_product = fom.products["energy"]
 
     # ### Discretize subdomain operators
     # NOTE
@@ -130,8 +131,8 @@ def main(args):
     Nmax = max_dofs_per_vert.max()
     ΔN = 10
     num_modes_per_vertex = list(range(Nmax // ΔN, Nmax + 1, 3 * (Nmax // ΔN)))
-    num_modes_per_vertex = [20, 60, 100, 120]
-    # breakpoint()
+    # num_modes_per_vertex = [20, 40, 60, 80, 100, 120] #, 100, 120]
+    num_modes_per_vertex = num_modes_per_vertex[-1:]
     logger.debug(f"{Nmax=}")
     logger.debug(f"{num_modes_per_vertex=}")
 
@@ -166,16 +167,16 @@ def main(args):
                 logger.info(f"AssemblyEI took {t.elapsed()[0]}.")
             rom = StationaryModel(operator, rhs, name="locROM_with_ei")
 
-            cond_A = []
-            for mu in validation_set:
-                cond_A.append(compute_kappa(rom, mu))
-            breakpoint()
-            print("check condition number")
+            # cond_A = []
+            # for mu in validation_set:
+            #     cond_A.append(compute_kappa(rom, mu))
+            # κ = np.array(cond_A)
+            # logger.debug(f"{κ=}")
 
         fom_solutions = fom.solution_space.empty()
         rom_solutions = fom.solution_space.empty()
 
-        cond_A_without_ei = []
+        # cond_A_without_ei = []
 
         for mu in validation_set:
             U_fom = fom.solve(mu)
@@ -200,8 +201,8 @@ def main(args):
                     )
                     logger.info(f"{nmodes=}, \tAssembly took {t.elapsed()[0]}.")
                 rom = StationaryModel(operator, rhs, name="locROM")
-                kappa = compute_kappa(rom, mu)
-                cond_A_without_ei.append(kappa)
+                # kappa = compute_kappa(rom, mu)
+                # cond_A_without_ei.append(kappa)
 
                 with Timer("Solve") as t:
                     U_rb_ = rom.solve(mu)
@@ -213,8 +214,7 @@ def main(args):
             U_rom = fom.solution_space.make_array([u_rb.x.petsc_vec.copy()])  # type: ignore
             rom_solutions.append(U_rom)
 
-        breakpoint()
-        print(np.array(cond_A_without_ei))
+        # print(np.array(cond_A_without_ei))
         # absolute error
         err = fom_solutions - rom_solutions
 
@@ -224,11 +224,11 @@ def main(args):
             fom.visualize(err[0], filename="output/run_locrom_err.xdmf")
 
         # l2-mean error
-        l2_mean = np.sum(l_char**2.0 * err.norm2(h1_product)) / len(err)
+        l2_mean = np.sum(l_char**2.0 * err.norm2(energy_product)) / len(err)
 
         # H1 norm
-        err_norms = l_char * err.norm(h1_product)
-        fom_norms = l_char * fom_solutions.norm(h1_product)
+        err_norms = l_char * err.norm(energy_product)
+        fom_norms = l_char * fom_solutions.norm(energy_product)
         rel_errn = err_norms / fom_norms
         logger.debug(f"{rel_errn=}")
 
@@ -246,6 +246,7 @@ def main(args):
         l2-mean error:\t{l2_mean}
         """
         logger.info(summary)
+        breakpoint()
 
         # ### Gather data
         if len(ndofs) < 1:
@@ -255,7 +256,7 @@ def main(args):
             max_err["max"].append(np.max(u_fom_vec))
             max_relerr["h1_semi"].append(1.0)
             max_relerr["max"].append(1.0)
-            l2_err.append(np.sum(l_char**2.0 * fom_solutions.norm2(h1_product)) / len(fom_solutions))
+            l2_err.append(np.sum(l_char**2.0 * fom_solutions.norm2(energy_product)) / len(fom_solutions))
 
         ndofs.append(dofmap.num_dofs)
         l2_err.append(l2_mean)
