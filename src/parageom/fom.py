@@ -177,7 +177,6 @@ def discretize_subdomain_operators(example):
 
 def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
     """Discretize FOM with Pull Back"""
-    from .fom import ParaGeomLinEla
     from .matrix_based_operator import (
         FenicsxMatrixBasedOperator,
         BCTopo,
@@ -330,7 +329,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
         visualizer=viz,
         name="FOM",
     )
-    return fom
+    return fom, problem
 
 
 if __name__ == "__main__":

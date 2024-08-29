@@ -132,8 +132,7 @@ def adaptive_rrf_normal(
     l2_errors = [l2,]
     max_norms = [maxnorm,]
 
-    while (l2 > l2_err**2.0):
-    # while (maxnorm > testlimit) and (l2 > l2_err**2.0):
+    while (maxnorm > testlimit) and (l2 > l2_err**2.0):
         basis_length = len(B)
         v = tp.generate_random_boundary_data(1, distribution, options=sampling_options)
 
@@ -148,7 +147,7 @@ def adaptive_rrf_normal(
         max_norms.append(maxnorm)
 
     reason = "maxnorm" if maxnorm < testlimit else "l2err"
-    logger.info(f"{maxnorm < testlimit =}\t{maxnorm=}")
+    logger.info(f"{maxnorm < testlimit =}\t{maxnorm=}\t{testlimit=}")
     logger.info(f"{l2 < l2_err ** 2 =}\t{l2=}")
     logger.info(f"Finished RRF in {len(B)} iterations ({reason=}).")
 
@@ -209,12 +208,20 @@ def main(args):
 
     epsilon_star = example.epsilon_star["hapod"]
     Nin = transfer.rhs.dofs.size
-    epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2.0) * epsilon_star
-    epsilon_pod = epsilon_star * np.sqrt(Nin * ntrain)
+    # epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2.0) * epsilon_star
+    # epsilon_pod = epsilon_star * np.sqrt(Nin * ntrain)
+    epsilon_alpha = np.sqrt(1 - example.omega**2.0) * epsilon_star
+    epsilon_pod = np.sqrt(ntrain) * example.omega * epsilon_star
 
-    # scaling
-    epsilon_alpha /= example.l_char
-    epsilon_pod /= example.l_char
+    # breakpoint()
+    # mu = training_set.pop()
+    # transfer.assemble_operator(mu)
+    # g = transfer.generate_random_boundary_data(1, "normal")
+    # U = transfer.solve(g)
+    #
+    # from pymor.bindings.fenicsx import FenicsxVisualizer
+    # viz = FenicsxVisualizer(U.space)
+    # viz.visualize(U, filename="U_left_kernel_12.xdmf")
 
     for mu, seed_seq in zip(training_set, seed_seqs_rrf):
         with new_rng(seed_seq):
@@ -224,9 +231,8 @@ def main(args):
                 transfer,
                 error_tol=example.rrf_ttol / example.l_char,
                 failure_tolerance=example.rrf_ftol,
-                num_testvecs=example.rrf_num_testvecs,
+                num_testvecs=Nin,
                 l2_err=epsilon_alpha,
-                sampling_options={"scale": 0.1},
             )
             logger.info(f"\nSpectral Basis length: {len(basis)}.")
             spectral_basis_sizes.append(len(basis))
@@ -238,12 +244,15 @@ def main(args):
                 U_in_neumann = transfer.range.from_numpy(U_neumann.dofs(transfer._restriction))
 
                 # ### Remove kernel after restriction to target subdomain
-                U_orth = orthogonal_part(
-                    U_in_neumann,
-                    transfer.kernel,
-                    product=None,
-                    orthonormal=True,
-                )
+                if transfer.kernel is not None:
+                    U_orth = orthogonal_part(
+                        U_in_neumann,
+                        transfer.kernel,
+                        product=None,
+                        orthonormal=True,
+                    )
+                else:
+                    U_orth = U_in_neumann
                 neumann_snapshots.append(U_orth)  # type: ignore
 
     logger.info(f"Average length of spectral basis: {np.average(spectral_basis_sizes)}.")
@@ -256,7 +265,6 @@ def main(args):
             neumann_modes, neumann_svals = pod(
                 neumann_snapshots, product=transfer.range_product, rtol=example.neumann_rtol
             )
-
         with logger.block("Extending spectral basis by Neumann modes via GS ..."):
             spectral_modes.append(neumann_modes)
             gram_schmidt(spectral_modes, product=transfer.range_product, offset=basis_length, check=False, copy=False)
@@ -274,6 +282,9 @@ def main(args):
 
         viz = FenicsxVisualizer(transfer.range)
         viz.visualize(spectral_modes, filename=f"hapod_{args.configuration}.xdmf")
+
+        if require_neumann_data:
+            viz.visualize(neumann_modes, filename=f"hapod_neumann_{args.configuration}.xdmf")
 
     np.save(
         example.hapod_modes_npy(args.nreal, args.distribution, args.configuration),

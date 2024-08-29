@@ -9,7 +9,116 @@ from pymor.operators.constructions import VectorOperator, LincombOperator, Vecto
 from pymor.parameters.functionals import GenericParameterFunctional
 from pymor.models.basic import StationaryModel
 from pymor.tools.random import new_rng
+from .stress_analysis import principal_stress_2d, project
+from multi.interpolation import make_mapping
+from multi.dofmap import DofMap
 
+
+def reconstruct(
+    U_rb: np.ndarray,
+    dofmap: DofMap,
+    bases: list[np.ndarray],
+    u_local: df.fem.Function,
+    u_global: df.fem.Function,
+) -> None:
+    """Reconstructs rom solution on the global domain.
+
+    Args:
+        Urb: ROM solution in the reduced space.
+        dofmap: The dofmap of the reduced space.
+        bases: Local basis for each subdomain.
+        u_local: The local solution field.
+        u_global: The global solution field to be filled with values.
+
+    """
+    coarse_grid = dofmap.grid
+    V = u_global.function_space
+    Vsub = u_local.function_space
+    submesh = Vsub.mesh
+    x_submesh = submesh.geometry.x
+    u_global_view = u_global.x.array
+    u_global_view[:] = 0.0
+
+    for cell in range(dofmap.num_cells):
+        # translate subdomain mesh
+        vertices = coarse_grid.get_entities(0, cell)
+        dx_cell = coarse_grid.get_entity_coordinates(0, vertices)[0]
+        x_submesh += dx_cell
+
+        # fill u_local with rom solution
+        basis = bases[cell]
+        dofs = dofmap.cell_dofs(cell)
+
+        # fill global field via dof mapping
+        V_to_Vsub = make_mapping(Vsub, V, padding=1e-8, check=True)
+        u_global_view[V_to_Vsub] = U_rb[0, dofs] @ basis
+
+        # move subdomain mesh to origin
+        x_submesh -= dx_cell
+    u_global.x.scatter_forward()
+
+
+
+# def build_subdomain_mappings(u_local, u_global, dofmap):
+#     coarse_grid = dofmap.grid
+#     V = u_global.function_space
+#     Vsub = u_local.function_space
+#     submesh = Vsub.mesh
+#     x_submesh = submesh.geometry.x
+#
+#     mappings = []
+#
+#     for cell in range(dofmap.num_cells):
+#         # translate subdomain mesh
+#         vertices = coarse_grid.get_entities(0, cell)
+#         dx_cell = coarse_grid.get_entity_coordinates(0, vertices)[0]
+#         x_submesh += dx_cell
+#
+#         # fill global field via dof mapping
+#         V_to_Vsub = make_mapping(Vsub, V, padding=1e-8, check=True)
+#         mappings.append(V_to_Vsub)
+#
+#         # move subdomain mesh to origin
+#         x_submesh -= dx_cell
+#
+#     # TODO: add checks on mappings
+#     return np.array(mappings)
+#
+
+# def reconstruct(
+#     U_rb: np.ndarray,
+#     dofmap: DofMap,
+#     bases: list[np.ndarray],
+#     u_global: df.fem.Function,
+#     mappings
+# ) -> None:
+#     """Reconstructs rom solution on the global domain.
+#
+#     Args:
+#         Urb: ROM solution in the reduced space.
+#         dofmap: The dofmap of the reduced space.
+#         bases: Local basis for each subdomain.
+#         u_local: The local solution field.
+#         u_global: The global solution field to be filled with values.
+#
+#     """
+#     u_global_view = u_global.x.array
+#     u_global_view[:] = 0.0
+#
+#     for cell in range(dofmap.num_cells):
+#         # translate subdomain mesh
+#         # vertices = coarse_grid.get_entities(0, cell)
+#         # dx_cell = coarse_grid.get_entity_coordinates(0, vertices)[0]
+#         # x_submesh += dx_cell
+#
+#         # fill u_local with rom solution
+#         basis = bases[cell]
+#         dofs = dofmap.cell_dofs(cell)
+#
+#         V_to_Vsub = mappings[cell]
+#         u_global_view[V_to_Vsub] = U_rb[0, dofs] @ basis
+#     u_global.x.scatter_forward()
+#
 
 def main(args):
     """compute principal stress using FOM and ROM"""
@@ -36,6 +145,10 @@ def main(args):
     d_trafo = df.fem.Function(V, name="d_trafo")
     fom = discretize_fom(example, auxiliary_problem, d_trafo, ω=args.omega)
 
+    # ### Global functions for displacment
+    d_fom = df.fem.Function(V, name="ufom")
+    d_rom = df.fem.Function(V, name="urom")
+
     gdim = fom.solution_space.V.mesh.geometry.dim
     matparam = {"gdim": gdim, "E": example.youngs_modulus, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
     parageom = ParaGeomLinEla(auxiliary_problem.problem.domain, V, d_trafo, matparam) # type: ignore
@@ -43,16 +156,28 @@ def main(args):
     # ### Build localized ROM
     print("Building ROM ...")
     rom, rec_data = build_localized_rom(args, example, auxiliary_problem, d_trafo, fom.parameters, ω=args.omega)
+    dofmap, local_bases, u_local = rec_data
+    rec_bases = local_bases.copy()
 
-    # ### Global function for stress
+    # ### Global functions for stress
     basix_celltype = getattr(basix.CellType, V.mesh.topology.cell_type.name)
     q_degree = 2
     QVe = basix.ufl.quadrature_element(basix_celltype, value_shape=(4,), scheme="default", degree=q_degree) # type: ignore
     QV = df.fem.functionspace(V.mesh, QVe)
-    stress = df.fem.Function(QV, name="Cauchy")
 
-    # ### Global function for displacment
-    displacement = df.fem.Function(V)
+    stress_fom = df.fem.Function(QV, name="s_fom")
+    stress_rom = df.fem.Function(QV, name="s_rom")
+
+    # ### Prinicipal stress functions
+    qs = basix.ufl.quadrature_element(basix_celltype, value_shape=(2,), scheme="default", degree=q_degree)
+    Q = df.fem.functionspace(V.mesh, qs)
+    sp_fom = df.fem.Function(Q, name="sp_fom")
+    sp_rom = df.fem.Function(Q, name="sp_rom")
+
+    # space for projection, plotting
+    W = df.fem.functionspace(V.mesh, ("P", 2, (2,))) # output space: linear Lagrange elements
+    proj_sp_fom = df.fem.Function(W, name="sp_fom")
+    proj_sp_rom = df.fem.Function(W, name="sp_rom")
 
     # ### Get optimal solution μ*
     # ### ROM Assembly and Error Analysis
@@ -67,27 +192,80 @@ def main(args):
         fom_norm = np.linalg.norm(fom.flatten())
         return en, fom_norm
 
+    def update_u_fom(mu):
+        U = fom.solve(mu)
+        d_fom.x.array[:] = U.to_numpy().flatten()
+        return U
+
+    def update_u_rom(mu):
+        Urb = rom.solve(mu)
+        print(Urb.to_numpy())
+        # breakpoint()
+        # reconstruct(Urb.to_numpy(), dofmap, local_bases, d_rom, dof_mappings)
+        reconstruct(Urb.to_numpy(), dofmap, rec_bases, u_local, d_rom)
+        # return fom.solution_space.make_array([d_rom.x.petsc_vec])
+
     errors_s1 = []
     errors_s2 = []
+    abs_errors_u = []
+    rel_errors_u = []
 
     print("Starting validation loop ...")
-    for mu in validation_set:
-        s1_fom, s2_fom, _ = compute_principal_stress(fom, mu, displacement, stress, parageom, rec_data=None, xdmf_filename=None)
-        displacement.x.array[:] = 0. # type: ignore
-        stress.x.array[:] = 0. # type: ignore
-        s1_rom, s2_rom, _ = compute_principal_stress(rom, mu, displacement, stress, parageom, rec_data=rec_data, xdmf_filename=None)
+    # validation_set = 2 * [validation_set[85],]
+    # mu = validation_set[85]
 
-        en_1, fn_1 = compute_norms(s1_fom, s1_rom)
-        en_2, fn_2 = compute_norms(s2_fom, s2_rom)
-        print(f"""Relative error in Euclidean norm:
-              s1: {en_1 / fn_1}
-              s2: {en_2 / fn_2}
-              """)
-        errors_s1.append(en_1 / fn_1)
-        errors_s2.append(en_2 / fn_2)
+    mu = validation_set[79]
 
+    # u = rom.solve(mu)
+    # print(u)
+    # r = rom.solve(mu)
+    # print(r)
+    update_u_rom(mu)
+    update_u_rom(mu)
 
+    # ### Workaround: it works!!
+
+    # solutions = []
+    # for _ in range(2):
+    #     solutions.append(rom.solve(mu))
+    #
+    # print(solutions)
+    #
+    # reconstructions = []
+    # for i in range(2):
+    #     u = solutions[i]
+    #     reconstruct(u.to_numpy(), dofmap, rec_bases, u_local, d_rom)
+    #     reconstructions.append(d_rom.x.petsc_vec.copy())
+    #
+    # U_rom = fom.solution_space.make_array(reconstructions)
+    # U_fom = fom.solve(mu)
+    # U_fom.append(fom.solve(mu))
+
+    # Expectation: the same solution for U_rb should be printed 4 times.
+    # The first 3 times the same solution is printed, but the 4th time it's different / wrong.
+    # The only call in between is `reconstruct`.
+    # Now I need to figure out why this call should influence the rom solution.
     breakpoint()
+
+    # for mu in validation_set:
+        # Ufom = update_u_fom(mu)
+        # Urom = update_u_rom(mu)
+        # u_err = (Ufom - Urom).norm(fom.products["energy"])
+        # abs_errors_u.append(u_err)
+        # rel_errors_u.append(u_err / Ufom.norm(fom.products["energy"]))
+        # s1_fom, s2_fom = compute_principal_stress(d_fom, stress_fom, parageom, sp_fom, proj_sp_fom)
+        # s1_rom, s2_rom = compute_principal_stress(d_rom, stress_rom, parageom, sp_rom, proj_sp_rom)
+        #
+        # en_1, fn_1 = compute_norms(s1_fom, s1_rom)
+        # en_2, fn_2 = compute_norms(s2_fom, s2_rom)
+        # print(f"""Relative error in Euclidean norm:
+        #       s1: {en_1 / fn_1}
+        #       s2: {en_2 / fn_2}
+        #       """)
+        # errors_s1.append(en_1 / fn_1)
+        # errors_s2.append(en_2 / fn_2)
+
+
     # Q = s_fom.function_space # type: ignore
     # error = df.fem.Function(Q, name="e")
     # sx_max = np.abs(np.amin(s_fom.x.array[::2])) # type: ignore ; compression
@@ -101,54 +279,23 @@ def main(args):
     #     xdmf.write_function(error) # type: ignore
 
 
-def compute_principal_stress(model, mu, u, stress, parageom, rec_data=None, xdmf_filename=None):
-    from .stress_analysis import principal_stress_2d, project
+def compute_principal_stress(disp, stress, parageom, p_stress, projected_stress):
 
-    V = u.function_space
+    V = disp.function_space
     domain = V.mesh
     tdim = domain.topology.dim
     map_c = domain.topology.index_map(tdim)
     num_cells = map_c.size_local + map_c.num_ghosts
     cells = np.arange(0, num_cells, dtype=np.int32)
 
-    if model.name.startswith("locROM"):
-        assert rec_data is not None
-        dofmap, local_bases, u_local = rec_data
-        from .locmor import reconstruct
-
-        def update_displacement_solution(mu):
-            U = model.solve(mu)
-            reconstruct(U.to_numpy(), dofmap, local_bases, u_local, u)
-    else:
-        assert rec_data is None
-
-        def update_displacement_solution(mu):
-            U = model.solve(mu)
-            u.x.array[:] = U.to_numpy().flatten()
-
-    update_displacement_solution(mu)
     q_degree = 2
-    s1, s2 = principal_stress_2d(u, parageom, q_degree=q_degree, cells=cells, values=stress.x.array.reshape(cells.size, -1))
+    s1, s2 = principal_stress_2d(disp, parageom, q_degree=q_degree, cells=cells, values=stress.x.array.reshape(cells.size, -1))
 
-    # quadrature space and function space for stress output
-    basix_celltype = getattr(basix.CellType, V.mesh.topology.cell_type.name)
-    qs = basix.ufl.quadrature_element(basix_celltype, value_shape=(2,), scheme="default", degree=q_degree)
-    Q = df.fem.functionspace(V.mesh, qs)
-    sigma_q = df.fem.Function(Q, name="sp")
+    p_stress.x.array[::2] = s1.flatten()
+    p_stress.x.array[1::2] = s2.flatten()
+    project(p_stress, projected_stress)
 
-    W = df.fem.functionspace(V.mesh, ("P", 2, (2,))) # output space: linear Lagrange elements
-    sigma_p = df.fem.Function(W, name="sp")
-
-    sigma_q.x.array[::2] = s1.flatten()
-    sigma_q.x.array[1::2] = s2.flatten()
-    project(sigma_q, sigma_p)
-
-    if xdmf_filename is not None:
-        with df.io.XDMFFile(W.mesh.comm, xdmf_filename, "w") as xdmf:
-            xdmf.write_mesh(W.mesh)
-            xdmf.write_function(sigma_p)
-
-    return s1, s2, sigma_p
+    return s1, s2
 
 
 def build_localized_rom(cli, example, global_auxp, trafo_disp, parameters, ω=0.5):
@@ -205,13 +352,14 @@ def build_localized_rom(cli, example, global_auxp, trafo_disp, parameters, ω=0.
     Nmax = max_dofs_per_vert.max()
     ΔN = 10
     num_modes_per_vertex = list(range(Nmax // ΔN, Nmax + 1, 3 * (Nmax // ΔN) ))
-    nmodes = num_modes_per_vertex[-1] # second to last point in the validation
+    # nmodes = num_modes_per_vertex[-1] # second to last point in the validation
+    nmodes = 50
 
     dofs_per_vert = max_dofs_per_vert.copy()
     dofs_per_vert[max_dofs_per_vert > nmodes] = nmodes
     dofmap.distribute_dofs(dofs_per_vert)
 
-    operator, rhs, local_bases = assemble_gfem_system_with_ei(
+    operator, rhs, fixed_local_bases = assemble_gfem_system_with_ei(
         dofmap, wrapped_op, rhs_local, local_bases, dofs_per_vert, max_dofs_per_vert, parameters)
 
     # definition of ParaGeom Problem for volume computation
@@ -250,7 +398,7 @@ def build_localized_rom(cli, example, global_auxp, trafo_disp, parameters, ω=0.
     output = LincombOperator([one_op, compliance], [volume, ω])
 
     rom = StationaryModel(operator, rhs, output_functional=output, name="locROM_with_ei")
-    return rom, (dofmap, local_bases, u_local)
+    return rom, (dofmap, fixed_local_bases, u_local)
 
 
 if __name__ == "__main__":

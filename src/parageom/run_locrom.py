@@ -51,7 +51,7 @@ def main(args):
         coarse_grid=coarse_grid_path.as_posix(),
     )
     trafo_d_gl = df.fem.Function(global_auxp.problem.V, name="d_trafo")
-    fom = discretize_fom(example, global_auxp, trafo_d_gl)
+    fom, _ = discretize_fom(example, global_auxp, trafo_d_gl)
     # h1_product = fom.products["h1_0_semi"]
     energy_product = fom.products["energy"]
 
@@ -132,9 +132,11 @@ def main(args):
     ΔN = 10
     num_modes_per_vertex = list(range(Nmax // ΔN, Nmax + 1, 3 * (Nmax // ΔN)))
     # num_modes_per_vertex = [20, 40, 60, 80, 100, 120] #, 100, 120]
-    num_modes_per_vertex = num_modes_per_vertex[-1:]
+    num_modes_per_vertex = num_modes_per_vertex[-2:]
     logger.debug(f"{Nmax=}")
     logger.debug(f"{num_modes_per_vertex=}")
+
+    num_modes_per_vertex = [5,]
 
     l_char = example.l_char
     max_err = defaultdict(list)
@@ -201,6 +203,7 @@ def main(args):
                     )
                     logger.info(f"{nmodes=}, \tAssembly took {t.elapsed()[0]}.")
                 rom = StationaryModel(operator, rhs, name="locROM")
+                breakpoint()
                 # kappa = compute_kappa(rom, mu)
                 # cond_A_without_ei.append(kappa)
 

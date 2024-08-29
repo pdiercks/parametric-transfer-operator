@@ -78,15 +78,15 @@ class BeamData:
     methods: tuple[str, ...] = ("hapod", ) # "heuristic")
     epsilon_star: dict = field(
             default_factory=lambda: {
-                "heuristic": 0.001,
-                "hapod": 0.001,
+                "heuristic": 0.01,
+                "hapod": 0.01,
                 })
     epsilon_star_projerr: float = 0.001
     omega: float = 0.5 # ω related to HAPOD (not output functional)
     rrf_ttol: float = 10e-2
     rrf_ftol: float = 1e-10
     rrf_num_testvecs: int = 20
-    neumann_rtol: float = 1e-8
+    neumann_rtol: float = 1e-5
     mdeim_rtol: float = 1e-5
     run_mode: str = "DEBUG"
 
@@ -219,13 +219,18 @@ class BeamData:
         map = {"inner": 1, "left": 0, "right": 1}
         return map[config]
 
-    def ntrain(self, config: str) -> int:
-        """Define size of training set"""
-        num_samples = 50 # per unit cell; step size 0.004
-        if self.run_mode == "PRODUCTION":
-            num_samples = 101 # per unit cell; step size 0.002
-        map = {"left": 3 * num_samples, "inner": 5 * num_samples, "right": 3 * num_samples}
-        return map[config]
+    def ntrain(self, k: int) -> int:
+        """Define size of training set for k-th transfer problem"""
+
+        # FIXME
+        # put meaningful numbers
+        # this is just to test if the conditioning improves with new oversampling
+        if k in (0, 10):
+            return 30
+        elif k in (1, 9):
+            return 50
+        else:
+            return 100
 
     def cell_to_config(self, cell: int) -> str:
         """Maps global cell index to config."""
@@ -305,15 +310,15 @@ class BeamData:
         np.save(outpath, realizations)
 
     def log_basis_construction(
-        self, nr: int, method: str, distr: str, config: str
+            self, nr: int, method: str, k: int
     ) -> Path:
-        return self.logs_path(nr, method) / f"basis_construction_{distr}_{config}.log"
+        return self.logs_path(nr, method) / f"basis_construction_{k:02}.log"
 
     def log_projerr(self, nr: int, method: str, distr: str, config: str) -> Path:
         return self.logs_path(nr, method) / f"projerr_{distr}_{config}.log"
 
-    def log_gfem(self, nr: int, method: str, distr: str) -> Path:
-        return self.logs_path(nr, method) / f"gfem_{distr}.log"
+    def log_gfem(self, nr: int, cell: int, method="hapod") -> Path:
+        return self.logs_path(nr, method) / f"gfem_{cell:02}.log"
 
     def log_run_locrom(self, nr: int, method: str, distr: str, ei: bool=False) -> Path:
         dir = self.logs_path(nr, method)
@@ -322,28 +327,28 @@ class BeamData:
         else:
             return dir / f"run_locrom_{distr}.log"
 
-    def hapod_singular_values(self, nr: int, distr: str, conf: str) -> Path:
-        """singular values of final POD"""
-        return self.method_folder(nr, "hapod") / f"singular_values_{distr}_{conf}.npy"
+    def hapod_singular_values(self, nr: int, k: int) -> Path:
+        """singular values of final POD for k-th transfer problem"""
+        return self.method_folder(nr, "hapod") / f"singular_values_{k:02}.npy"
 
-    def hapod_neumann_svals(self, nr: int, distr: str, conf: str) -> Path:
-        """singular values of POD of neumann data"""
-        return self.method_folder(nr, "hapod") / f"neumann_singular_values_{distr}_{conf}.npy"
+    def hapod_neumann_svals(self, nr: int, k: int) -> Path:
+        """singular values of POD of neumann data for k-th transfer problem"""
+        return self.method_folder(nr, "hapod") / f"neumann_singular_values_{k:02}.npy"
 
-    def hapod_modes_xdmf(self, nr: int, distr: str, config: str) -> Path:
-        """modes of the final POD"""
+    def hapod_modes_xdmf(self, nr: int, k: int) -> Path:
+        """modes of the final POD for k-th transfer problem"""
         dir = self.method_folder(nr, "hapod") / "pod_modes"
-        return dir / f"modes_{distr}_{config}.xdmf"
+        return dir / f"modes_{k:02}.xdmf"
 
     def heuristic_modes_xdmf(self, nr: int, distr: str, config: str) -> Path:
         """modes computed by heuristic range finder"""
         dir = self.method_folder(nr, "heuristic") / "modes"
         return dir / f"modes_{distr}_{config}.xdmf"
 
-    def hapod_modes_npy(self, nr: int, distr: str, config: str) -> Path:
-        """modes of the final POD"""
+    def hapod_modes_npy(self, nr: int, k: int) -> Path:
+        """modes of the final POD for k-th transfer problem"""
         dir = self.method_folder(nr, "hapod") / "pod_modes"
-        return dir / f"modes_{distr}_{config}.npy"
+        return dir / f"modes_{k:02}.npy"
 
     def heuristic_modes_npy(self, nr: int, distr: str, config: str) -> Path:
         """modes computed by heuristic range finder"""
@@ -354,9 +359,18 @@ class BeamData:
         dir = self.method_folder(nr, method)
         return dir / f"projerr_{distr}_{config}.npz"
 
-    @property
-    def target_subdomain(self) -> Path:
-        return self.parent_domain("target")
+    # @property
+    # def target_subdomain(self) -> Path:
+    #     return self.parent_domain("target")
+
+    def path_omega(self, k: int) -> Path:
+        return self.grids_path / f"omega_{k:02}.msh"
+
+    def path_omega_coarse(self, k: int) -> Path:
+        return self.grids_path / f"omega_coarse_{k:02}.msh"
+
+    def path_omega_in(self, k: int) -> Path:
+        return self.grids_path / f"omega_in_{k:02}.msh"
 
     def config_to_omega_in(self, config: str, local=True) -> list[int]:
         """Maps config to cell local index/indices of oversampling domain that correspond to omega in."""
@@ -473,47 +487,52 @@ class BeamData:
         else:
             raise NotImplementedError
 
-    def get_kernel_set(self, cell_index: int) -> tuple[int, ...]:
-        """return indices of rigid body modes to be used"""
-        assert cell_index in (0, 1, 4, 5, 8, 9)
+    # def get_kernel_set(self, cell_index: int) -> tuple[int, ...]:
+    #     """return indices of rigid body modes to be used"""
+    #     assert cell_index in (0, 1, 4, 5, 8, 9)
+    #
+    #     # never remove kernel if Dirichlet (even if only component-wise)
+    #     # is present. This can destroy the condition, because
+    #     # kernel.inner(U) cannot be trusted to compute zero coefficient
+    #     # for the constrained component ...
+    #
+    #     kernel = set([0, 1, 2])
+    #     if cell_index in (0, 1):
+    #         # left: u_x is fixed for left boundary
+    #         kernel.remove(0)
+    #     # elif cell_index in (4, 5):
+    #     #     # inner, use all rigid body modes
+    #     elif cell_index in (8, 9):
+    #         # right, only trans y is constrained
+    #         # right: u_y is fixed for a single point
+    #         kernel.remove(1)
+    #     return tuple(kernel)
 
-        kernel = set([0, 1, 2])
-        if cell_index in (0, 1):
-            # left: u_x is fixed for left boundary
-            kernel.remove(0)
-        # elif cell_index in (4, 5):
-        #     # inner, use all rigid body modes
-        elif cell_index in (8, 9):
-            # right, only trans y is constrained
-            # right: u_y is fixed for a single point
-            kernel.remove(1)
-        return tuple(kernel)
-
-    def get_gamma_out(self, cell_index: Optional[int] = None) -> Callable:
-        unit_length = self.unit_length
-        y = self.height
-        tol = 1e-4
-
-        # NOTE
-        # this only defines the marker
-        # code needs to use df.mesh.locate_entities_boundary
-
-        if cell_index in (0, 1):
-            x = 3 * unit_length
-            start = [x, 0.0 + tol, 0.0]
-            end = [x, y - tol, 0.0]
-            gamma_out = within_range(start, end)
-        elif cell_index in (4, 5):
-            x_left = 3 * unit_length
-            x_right = 7 * unit_length
-            left = within_range([x_left, 0.0 + tol, 0.0], [x_left, y - tol, 0.0])
-            right = within_range([x_right, 0.0 + tol, 0.0], [x_right, y - tol, 0.0])
-
-            def gamma_out(x):
-                return np.logical_or(left(x), right(x))
-        elif cell_index in (8, 9):
-            x = 7 * unit_length
-            gamma_out = within_range([x, 0.0 + tol, 0.0], [x, y - tol, 0.0])
-        else:
-            raise NotImplementedError
-        return gamma_out
+    # def get_gamma_out(self, cell_index: Optional[int] = None) -> Callable:
+    #     unit_length = self.unit_length
+    #     y = self.height
+    #     tol = 1e-4
+    #
+    #     # NOTE
+    #     # this only defines the marker
+    #     # code needs to use df.mesh.locate_entities_boundary
+    #
+    #     if cell_index in (0, 1):
+    #         x = 3 * unit_length
+    #         start = [x, 0.0 + tol, 0.0]
+    #         end = [x, y - tol, 0.0]
+    #         gamma_out = within_range(start, end)
+    #     elif cell_index in (4, 5):
+    #         x_left = 3 * unit_length
+    #         x_right = 7 * unit_length
+    #         left = within_range([x_left, 0.0 + tol, 0.0], [x_left, y - tol, 0.0])
+    #         right = within_range([x_right, 0.0 + tol, 0.0], [x_right, y - tol, 0.0])
+    #
+    #         def gamma_out(x):
+    #             return np.logical_or(left(x), right(x))
+    #     elif cell_index in (8, 9):
+    #         x = 7 * unit_length
+    #         gamma_out = within_range([x, 0.0 + tol, 0.0], [x, y - tol, 0.0])
+    #     else:
+    #         raise NotImplementedError
+    #     return gamma_out

@@ -23,7 +23,7 @@ from pymor.vectorarrays.interface import VectorArray
 from pymor.vectorarrays.numpy import NumpyVectorSpace
 from pymor.parameters.base import Parameters
 
-from multi.boundary import plane_at, point_at
+from multi.boundary import plane_at
 from multi.domain import RectangularDomain, StructuredQuadGrid
 from multi.dofmap import DofMap
 from multi.materials import LinearElasticMaterial
@@ -238,6 +238,7 @@ def reconstruct(
     submesh = Vsub.mesh
     x_submesh = submesh.geometry.x
     u_global_view = u_global.x.array
+    u_global_view[:] = 0.0
 
     for cell in range(dofmap.num_cells):
         # translate subdomain mesh
@@ -252,10 +253,10 @@ def reconstruct(
         # fill global field via dof mapping
         V_to_Vsub = make_mapping(Vsub, V, padding=1e-8, check=True)
         u_global_view[V_to_Vsub] = U_rb[0, dofs] @ basis
-        u_global.x.scatter_forward()
 
         # move subdomain mesh to origin
         x_submesh -= dx_cell
+    u_global.x.scatter_forward()
 
 
 def assemble_gfem_system(
@@ -897,6 +898,7 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
     range_mat = dolfinx.fem.petsc.create_matrix(a_cpp)
     range_mat.zeroEntries()
     dolfinx.fem.petsc.assemble_matrix(range_mat, a_cpp, bcs=bcs_range_product)
+    # dolfinx.fem.petsc.assemble_matrix(range_mat, a_cpp, bcs=[])
     range_mat.assemble()
     range_product = FenicsxMatrixOperator(range_mat, V_in, V_in, name="energy")
 
@@ -914,12 +916,19 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
     ns_vecs = build_nullspace(V_in, gdim=example.gdim)
     assert len(ns_vecs) == 3
     rigid_body_modes = []
-    for j in kernel_set:
-        dolfinx.fem.petsc.set_bc(ns_vecs[j], bcs_range_product)
-        rigid_body_modes.append(ns_vecs[j])
-    kernel = target_space.make_array(rigid_body_modes)  # type: ignore
-    gram_schmidt(kernel, product=None, copy=False)
-    assert np.allclose(kernel.gramian(), np.eye(len(kernel)))
+
+    kernel = None
+    if len(kernel_set) > 0:
+        for j in kernel_set:
+            dolfinx.fem.petsc.set_bc(ns_vecs[j], bcs_range_product)
+            rigid_body_modes.append(ns_vecs[j])
+        kernel = target_space.make_array(rigid_body_modes)  # type: ignore
+        gram_schmidt(kernel, product=None, copy=False)
+        assert np.allclose(kernel.gramian(), np.eye(len(kernel)))
+    else:
+        kernel = None
+
+    assert kernel is not None
 
     # #### Transfer Problem
     transfer = ParametricTransferProblem(
