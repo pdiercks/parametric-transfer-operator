@@ -128,8 +128,6 @@ def main():
     max_rel_err_stress = []
     energy_product = fom.products['energy']
 
-    validation_set = validation_set[61:71]
-
     for mu in validation_set:
         U_fom = fom.solve(mu)
         fom_sols.append(U_fom)
@@ -155,38 +153,46 @@ def main():
         rom_sols.append(U_rom)
 
         # try different solver for rom
-        print("Trying different solver (dense)")
-        A = rom.operator.assemble(mu).matrix.todense()
-        b = rom.rhs.as_range_array(mu).to_numpy().flatten()
-        x = np.linalg.solve(A, b)
-
-        reconstruct(x.reshape(urb.to_numpy().shape), dofmap, modes, d_local, other_d_rom)
-        other_rom_sols.append(fom.solution_space.make_array([other_d_rom.x.petsc_vec.copy()])) # type: ignore
-        stress_expr_fom.eval(V.mesh, entities=cells, values=stress_fom.x.array.reshape(cells.size, -1))
-        s_fom = compute_principal_components(stress_fom.x.array.reshape(cells.size, -1))
-
+        # print("Trying different solver (dense)")
+        # A = rom.operator.assemble(mu).matrix.todense()
+        # b = rom.rhs.as_range_array(mu).to_numpy().flatten()
+        # x = np.linalg.solve(A, b)
+        #
+        # breakpoint()
+        # reconstruct(x.reshape(urb.to_numpy().shape), dofmap, modes, d_local, other_d_rom)
+        # other_rom_sols.append(fom.solution_space.make_array([other_d_rom.x.petsc_vec.copy()])) # type: ignore
         stress_expr_rom.eval(V.mesh, entities=cells, values=stress_rom.x.array.reshape(cells.size, -1))
         s_rom = compute_principal_components(stress_rom.x.array.reshape(cells.size, -1))
+
+        stress_expr_fom.eval(V.mesh, entities=cells, values=stress_fom.x.array.reshape(cells.size, -1))
+        s_fom = compute_principal_components(stress_fom.x.array.reshape(cells.size, -1))
 
         first_principal = compute_stress_error_norms(s_fom[1], s_rom[1])
         max_rel_err_stress.append(first_principal["max_rel_err"])
         
 
+    # displacement error in energy norm
     u_errors = fom_sols - rom_sols
-    other_u_errors = fom_sols - other_rom_sols
     errn = u_errors.norm(energy_product) / fom_sols.norm(energy_product)
-    other_errn = other_u_errors.norm(energy_product) / fom_sols.norm(energy_product)
-    breakpoint()
-    # compare errn and err_norms
 
-    # np.sqrt(product.pairwise_apply2(U, U))
+    # displacement error per node
+    u_errors.scal(1 / fom_sols.amax()[1])
+    nodal_uerr = u_errors.amax()[1]
 
-    print(f"Num modes = {num_modes}\n")
+    print(f"\nValidation set size = {len(validation_set)}\nNum modes = {num_modes}\n")
 
     print(f"""Displacement
-          min err = {np.min(errn)}
-          max err = {np.max(errn)}
-          avg err = {np.average(errn)}
+          Relative Error in Energy Norm:
+          ---------------------
+          min = {np.min(errn)}
+          max = {np.max(errn)}
+          avg = {np.average(errn)}
+
+          Max Nodal Relative Error:
+          ----------------
+          min = {np.min(nodal_uerr)}
+          max = {np.min(nodal_uerr)}
+          avg = {np.min(nodal_uerr)}
           """)
 
     print(f"""Stress
@@ -234,27 +240,15 @@ def build_rom(example, dofmap, params, num_modes, nreal=0, method="hapod", distr
     operator_local, rhs_local = discretize_subdomain_operators(example)
 
     # ### Reduced bases
-    # 0: left, 1: transition, 2: inner, 3: transition, 4: right
-    archetypes = []
-    for cell in range(5):
-        archetypes.append(np.load(example.local_basis_npy(nreal, method, distribution, cell)))
-
+    num_coarse_grid_cells = dofmap.grid.num_cells
     local_bases = []
-    local_bases.append(archetypes[0].copy())
-    local_bases.append(archetypes[1].copy())
-    for _ in range(6):
-        local_bases.append(archetypes[2].copy())
-    local_bases.append(archetypes[3].copy())
-    local_bases.append(archetypes[4].copy())
-
+    max_dofs_per_vert = []
+    for cell in range(num_coarse_grid_cells):
+        local_bases.append(np.load(example.local_basis_npy(nreal, cell)))
+        max_dofs_per_vert.append(np.load(example.local_basis_dofs_per_vert(nreal, cell)))
 
     # ### Maximum number of modes per vertex
-    num_coarse_grid_cells = dofmap.grid.num_cells
-    max_dofs_per_vert = np.load(example.local_basis_dofs_per_vert(nreal, method, distribution))
-    # raise to number of cells in the coarse grid
-    repetitions = [1, 1, num_coarse_grid_cells - len(archetypes) + 1, 1, 1]
-    assert np.isclose(np.sum(repetitions), num_coarse_grid_cells)
-    max_dofs_per_vert = np.repeat(max_dofs_per_vert, repetitions, axis=0)
+    max_dofs_per_vert = np.array(max_dofs_per_vert)
     assert max_dofs_per_vert.shape == (num_coarse_grid_cells, 4)
     bases_length = [len(rb) for rb in local_bases]
     assert np.allclose(np.array(bases_length), np.sum(max_dofs_per_vert, axis=1))

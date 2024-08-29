@@ -249,41 +249,36 @@ def task_hapod():
 #                     }
 
 
-# def task_gfem():
-#     """ParaGeom: Build GFEM approximation"""
-#     module = "src.parageom.gfem"
-#     distr = example.distributions[0]
-#
-#     def create_action(module, nreal, method, distr, debug=False):
-#         action = "python3 -m {} {} {} {}".format(module, nreal, method, distr)
-#         if debug:
-#             action += " --debug"
-#         return action
-#
-#     for nreal in range(example.num_real):
-#         for method in example.methods:
-#             deps = [SRC / "gfem.py"]
-#             deps.append(example.coarse_grid("global"))
-#             deps.append(example.parent_unit_cell)
-#             for cfg in CONFIGS:
-#                 if method == "hapod":
-#                     deps.append(example.hapod_modes_npy(nreal, distr, cfg))
-#                 elif method == "heuristic":
-#                     deps.append(example.heuristic_modes_npy(nreal, distr, cfg))
-#             targets = []
-#             # see gfem.py, only 5 (=3+2) cells are used
-#             # (+2 to facilitate transition between the 3 archetypes/configurations)
-#             for cell in range(5):
-#                 targets.append(example.local_basis_npy(nreal, method, distr, cell))
-#             targets.append(example.local_basis_dofs_per_vert(nreal, method, distr))
-#             targets.append(example.log_gfem(nreal, method, distr))
-#             yield {
-#                     "name": method + ":" + str(nreal),
-#                     "file_dep": deps,
-#                     "actions": [create_action(module, nreal, method, distr, debug=True)],
-#                     "targets": targets,
-#                     "clean": True,
-#                     }
+def task_gfem():
+    """ParaGeom: Build GFEM approximation"""
+    module = "src.parageom.gfem"
+
+    def create_action(module, nreal, cell, debug=False):
+        action = "python3 -m {} {} {}".format(module, nreal, cell)
+        if debug:
+            action += " --debug"
+        return action
+
+    for nreal in range(example.num_real):
+        for cell in range(10):
+            deps = [SRC / "gfem.py"]
+            # TODO: add meshes as deps
+            deps.append(example.coarse_grid("global"))
+            deps.append(example.parent_unit_cell)
+            for k in range(11):
+                # bases for all transfer problems
+                deps.append(example.hapod_modes_npy(nreal, k))
+            targets = []
+            targets.append(example.local_basis_npy(nreal, cell))
+            targets.append(example.local_basis_dofs_per_vert(nreal, cell))
+            targets.append(example.log_gfem(nreal, cell))
+            yield {
+                    "name": str(nreal) + ":" + str(cell),
+                    "file_dep": deps,
+                    "actions": [create_action(module, nreal, cell, debug=True)],
+                    "targets": targets,
+                    "clean": True,
+                    }
 
 
 # def task_locrom():

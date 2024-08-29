@@ -7,24 +7,22 @@ import numpy as np
 
 from multi.io import read_mesh
 from multi.domain import StructuredQuadGrid, Domain, RectangularDomain
-from multi.solver import build_nullspace
 
-from pymor.algorithms.gram_schmidt import gram_schmidt
 from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxVisualizer
 from pymor.core.logger import getLogger
 from pymor.core.defaults import set_defaults
 
-# GFEM revisited
-# I now have a set of basis functions for each of the 11 target subdomains
-# for each of those I have also a mesh
-
-# - Get coarse grid.
-# - Load all target subdomains and all bases (or one at a time and destroy?)
-# - Loop over cells, for vertex in cell ...
-# - NO TRANSLATION SHIT hopefully
-
 # map from vertex to target subdomain
 VERT_TO_OMEGA_IN = np.array([0, 1, 0, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10], dtype=np.int32)
+
+
+def enrichment_from_kernel(kernel):
+    r = {}
+    if 0 in kernel:
+        r["x"] = True
+    if 1 in kernel:
+        r["y"] = True
+    return r
 
 
 def main(args):
@@ -60,7 +58,6 @@ def main(args):
     unit_cell_domain = Domain(unit_cell_mesh)
     unit_cell_domain.translate(dx_unit_cell)
 
-    breakpoint()
     # ### Function spaces
     value_shape = (example.gdim,)
     X = df.fem.functionspace(struct_grid_gl.grid, ("P", 1, value_shape))  # global coarse space
@@ -71,31 +68,40 @@ def main(args):
         V.mesh, V.element, X.mesh, padding=1e-10
     )
 
-    # ### Data Structures target subdomain Ω_in
-    omega_in = {}
-    V_in = {}
-    omega_in_to_unit_cell = {} # interpolation data
-    bases = {}
-    osp_configs = {}
-    for k in transfer_problems:
-        path_omega_in = example.path_omega_in(k)
-        omega_in[k] = RectangularDomain(read_mesh(path_omega_in, MPI.COMM_WORLD, kwargs={"gdim": example.gdim})[0])
-        V_in[k] = df.fem.functionspace(omega_in[k].grid, V.ufl_element())
-        # Interpolation data from target subdomain to unit cell
-        omega_in_to_unit_cell[k] = df.fem.create_nonmatching_meshes_interpolation_data(
-            V.mesh, V.element, V_in[k].mesh, padding=1e-10
-        )
+    # ### Discussion Enrichment
 
-        # TODO: read local bases
-        bases[k] = np.load(example.hapod_modes_npy(args.nreal, k))
-        osp_configs[k] = oversampling_config_factory(k)
+    # The only question that remains:
+    # If boundary of Ω_in coincides with boundary Sigma_D,
+    # do we enrich only by not constrained component (i) or not at all (ii)?
+
+    # I will first go with enriching based on kernel (i)
+    # If this still is shit might try (ii) again
+
+    # (iii) enrich vertices on left or right boundary only by RBM missing from kernel
+    # and enrich with x and y everywhere else
+
+    # (i) Gives stiff ROM response.
+    # (iii) Gives response that "looks" okay. I need to run again with better training data and more modes to be sure. The condition number now is of order 1e+10.
+
+    # Given the observations from (i) & (iii),
+    # I think that (ii) should give also way too stiff response.
+    # (i) should have been the most consistent theory-wise!!
 
     # map from vertex to "enrichment"
     # should be determined from kernel
-    # Example: cell 0, vertices 0, 1, 2, 3
-    # 0, 2 --> k = 0
-    # 1, 3 --> k = 1
-    enrichments = 0
+    # Example: cell 1, vertices 1, 4, 3, 5
+    # 1, 3 --> k = 1, kernel = (1, 2)    --> enrich x
+    # 4, 5 --> k = 2, kernel = (0, 1, 2) --> enrich x and y
+
+    def enrichment_from_option_three(v):
+        assert v in list(range(22))
+
+        if v in (0, 2):
+            return {"y": True}
+        elif v in (20, ):
+            return {"x": True}
+        else:
+            return {"x": True, "y": True}
 
     def enrich_with_constant(rb, x=False, y=False):
         dim = rb.shape[1]
@@ -111,61 +117,65 @@ def main(args):
 
         return basis
 
-    bases["left_enriched_y"] = enrich_with_constant(bases["left"], y=True)
-    # bases["left_enriched_xy"] = enrich_with_constant(bases["left"], x=True, y=True)
-    bases["inner_enriched_xy"] = enrich_with_constant(bases["inner"], x=True, y=True)
-    # bases["right_enriched_xy"] = enrich_with_constant(bases["right"], x=True, y=True)
-    bases["right_enriched_x"] = enrich_with_constant(bases["right"], x=True)
+    # ### Data Structures target subdomain Ω_in
+    omega_in = {}
+    V_in = {}
+    xi_in = {} # basis function on target subdomain
+    omega_in_to_unit_cell = {} # interpolation data
+    bases = {}
+    osp_configs = {}
+    for k in transfer_problems:
+        path_omega_in = example.path_omega_in(k)
+        omega_in[k] = RectangularDomain(read_mesh(path_omega_in, MPI.COMM_WORLD, kwargs={"gdim": example.gdim})[0])
+        V_in[k] = df.fem.functionspace(omega_in[k].grid, V.ufl_element())
+        # Interpolation data from target subdomain to unit cell
+        omega_in_to_unit_cell[k] = df.fem.create_nonmatching_meshes_interpolation_data(
+            V.mesh, V.element, V_in[k].mesh, padding=1e-10
+        )
+        xi_in[k] = df.fem.Function(V_in[k], name=f"xi_in_{k:02}")  # basis functions on target subdomain
 
-    for k, v in bases.items():
-        bases_length[k] = len(v)
+        osp_configs[k] = oversampling_config_factory(k)
+        # enrich = enrichment_from_kernel(osp_configs[k].kernel)
+        # bases[k] = enrich_with_constant(np.load(example.hapod_modes_npy(args.nreal, k)), **enrich)
+
+        # first load bases without enrichment
+        bases[k] = np.load(example.hapod_modes_npy(args.nreal, k))
+
+        # FIXME
+        # in the above version there is only one enrichment possible per k
+        # however, always two vertices belong to k and we might want to enrich
+        # differently (right boundary)
+
 
     Phi = df.fem.Function(X, name="Phi")  # coarse scale hat functions
     phi = df.fem.Function(V, name="phi")  # hat functions on the fine grid
-    xi_in = df.fem.Function(V_in, name="xi_in")  # basis functions on target subdomain
     xi = df.fem.Function(V, name="xi")  # basis function on unit cell grid
-    psi = df.fem.Function(V, name="psi")  # GFEM function, psi=phi*xi
-
-    source = FenicsxVectorSpace(V)
-
-    # source_in = FenicsxVectorSpace(V_in)
-    # record maximum number of modes per vertex for each cell
-    max_modes_per_vertex = []
+    psi = df.fem.Function(V, name="psi")  # GFEM function, psi=phi*xi on unit cell
 
     modes_per_vertex = []
+    gfem = []
+
     for vertex in vertices:
+
         count_modes_per_vertex = 0
-        config = vertex_to_config[vertex]
-        basis = bases[vertex_to_basis[vertex]]
+        k = VERT_TO_OMEGA_IN[vertex]
+        enrich = enrichment_from_option_three(vertex)
+        blength = len(bases[k])
+        # this makes unnecessary copies, but for testing okay
+        # FIXME avoid unnecessary copies
+        basis = enrich_with_constant(bases[k], **enrich)
+        assert np.isclose(len(bases[k]), blength)
+        assert len(basis) > blength
 
-        # Translate oversampling domain Ω
-        dx_omega = global_quad_grid.get_entity_coordinates(
-            0, np.array([vertex], dtype=np.int32)
-        )
-        # Only translate in x-direction for this particular problem
-        dx_omega[:, 1:] = np.zeros_like(dx_omega[:, 1:])
-        logger.debug(f"{dx_omega=}")
-        if vertex in left_boundary:
-            dx_omega = np.array([[a, 0, 0]], dtype=np.float64)
-        if vertex in right_boundary:
-            dx_omega = np.array([[4 * a, 0, 0]], dtype=np.float64)
-        omega[config].translate(dx_omega)
-        logger.debug(f"{config=}, \tomega.xmin={omega[config].xmin}")
-
-        # Translate target subdomain Ω_in
-        dx_omega_in = dx_omega
-        omega_in.translate(dx_omega_in)
-
-
-        for kk, mode in enumerate(basis):
+        for mode in basis:
             # Fill in values for basis
-            xi_in.x.petsc_vec.zeroEntries()  # type: ignore
-            xi_in.x.petsc_vec.array[:] = mode  # type: ignore
-            xi_in.x.scatter_forward()  # type: ignore
+            xi_in[k].x.petsc_vec.zeroEntries()  # type: ignore
+            xi_in[k].x.petsc_vec.array[:] = mode  # type: ignore
+            xi_in[k].x.scatter_forward()  # type: ignore
 
             # Interpolate basis function to unit cell grid
             xi.x.petsc_vec.zeroEntries()  # type: ignore
-            xi.interpolate(xi_in, nmm_interpolation_data=target_to_unit_cell)  # type: ignore
+            xi.interpolate(xi_in[k], nmm_interpolation_data=omega_in_to_unit_cell[k])  # type: ignore
             xi.x.scatter_forward()  # type: ignore
 
             # Fill values for hat function on coarse grid
@@ -189,39 +199,26 @@ def main(args):
 
         modes_per_vertex.append(count_modes_per_vertex)
         logger.info(
-            f"Computed {count_modes_per_vertex} GFEM functions for vertex {vertex} (cell {cell})."
+            f"Computed {count_modes_per_vertex} GFEM functions for vertex {vertex} (cell {args.cell})."
         )
-        # reverse translation
-        omega[config].translate(-dx_omega)
-        omega_in.translate(-dx_omega_in)
 
-        assert len(modes_per_vertex) == 4
-        max_modes_per_vertex.append(modes_per_vertex)
+    assert len(modes_per_vertex) == 4
 
-        logger.info(f"Computed {len(gfem)} GFEM functions for cell {cell}.")
+    logger.info(f"Total of {len(gfem)} GFEM functions for cell {args.cell}.")
 
-        # ### Write local gfem basis for cell
-        G = source.make_array(gfem)  # type: ignore
-        outstream = example.local_basis_npy(
-            args.nreal, args.method, args.distribution, cell
-        )
-        np.save(outstream, G.to_numpy())
+    # ### Write local gfem basis for cell
+    source = FenicsxVectorSpace(V)
+    G = source.make_array(gfem)  # type: ignore
+    outstream = example.local_basis_npy(args.nreal, args.cell)
+    np.save(outstream, G.to_numpy())
 
-        if args.debug:
-            outstream_xdmf = outstream.with_suffix(".xdmf")
-            viz = FenicsxVisualizer(G.space)
-            viz.visualize(G, filename=outstream_xdmf.as_posix())
+    # Write dofs per vertex for dofmap construction of ROM
+    np.save(example.local_basis_dofs_per_vert(args.nreal, args.cell), modes_per_vertex)
 
-        # reverse translation
-        unit_cell.translate(-dx_unit_cell)
-
-    # end of loop over cells
-    max_modes_per_verts = np.array(max_modes_per_vertex, dtype=np.int32)
-    assert max_modes_per_verts.shape == (global_quad_grid.num_cells, 4)
-    np.save(
-        example.local_basis_dofs_per_vert(args.nreal, args.method, args.distribution),
-        max_modes_per_verts,
-    )
+    if args.debug:
+        outstream_xdmf = outstream.with_suffix(".xdmf")
+        viz = FenicsxVisualizer(G.space)
+        viz.visualize(G, filename=outstream_xdmf.as_posix())
 
 
 if __name__ == "__main__":

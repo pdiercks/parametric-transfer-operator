@@ -239,14 +239,15 @@ class BeamData:
         config = map.get(cell, "inner")
         return config
 
-    def local_basis_npy(self, nr: int, name: str, distr: str, cell: int) -> Path:
+    def local_basis_npy(self, nr: int, cell: int, method="hapod", distr="normal") -> Path:
         """final basis for loc rom assembly"""
-        dir = self.bases_path(nr, name, distr)
+        dir = self.bases_path(nr, method, distr)
         return dir / f"basis_{cell:02}.npy"
 
-    def local_basis_dofs_per_vert(self, nr: int, method: str, distr: str) -> Path:
+    def local_basis_dofs_per_vert(self, nr: int, cell: int, method="hapod", distr="normal") -> Path:
+        """Dofs per vertex for each cell"""
         dir = self.bases_path(nr, method, distr)
-        return dir / "dofs_per_vert.npy"
+        return dir / f"dofs_per_vert_{cell:02}.npy"
 
     def locrom_error(self, nreal: int, method: str, distr: str, ei: bool=False) -> Path:
         """loc ROM error"""
