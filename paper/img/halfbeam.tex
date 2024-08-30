@@ -1,0 +1,44 @@
+\documentclass[tikz]{standalone}
+\usepackage{bamcolors}
+\usepackage{stanli}
+
+\begin{document}
+\begin{tikzpicture}
+\pgfmathsetmacro{\length}{16}
+\pgfmathsetmacro{\width}{2}
+\pgfmathsetmacro{\supportdim}{0.5}
+
+\point{A}{\length/2}{0};
+\point{A2}{\length/2}{\width/2};
+\point{A3}{\length/2}{\width};
+\point{C}{\length}{0};
+
+% beam
+\draw[thick] (\length/2, 0) -- (C) -- ++(0, \width) -- ++(-\length/2, 0) -- cycle;
+
+
+\begin{scope}[scale=\supportdim]
+% left
+\support{2}{A}[-90];
+\support{2}{A2}[-90];
+\support{2}{A3}[-90];
+\hinge{1}{A};
+\hinge{1}{A2};
+\hinge{1}{A3};
+
+% right
+\support{2}{C}[0];
+\hinge{1}{C};
+\end{scope}
+
+\point{L1}{\length/2}{\width};
+\point{L2}{\length/2}{\width+0.5};
+\begin{scope}[color=BAMred1]
+\load{1}{L1}[90];
+\notation{1}{L2}{$F/2$}[above right=2pt];
+\end{scope}
+
+\notation{1}{C}{$B$}[above right=2pt];
+
+\end{tikzpicture}
+\end{document}
