@@ -78,8 +78,8 @@ class BeamData:
     methods: tuple[str, ...] = ("hapod", ) # "heuristic")
     epsilon_star: dict = field(
             default_factory=lambda: {
-                "heuristic": 0.01,
-                "hapod": 0.01,
+                "heuristic": 0.001,
+                "hapod": 0.001,
                 })
     epsilon_star_projerr: float = 0.001
     omega: float = 0.5 # ω related to HAPOD (not output functional)
@@ -221,16 +221,12 @@ class BeamData:
 
     def ntrain(self, k: int) -> int:
         """Define size of training set for k-th transfer problem"""
-
-        # FIXME
-        # put meaningful numbers
-        # this is just to test if the conditioning improves with new oversampling
         if k in (0, 10):
-            return 30
-        elif k in (1, 9):
             return 50
-        else:
+        elif k in (1, 9):
             return 100
+        else:
+            return 200
 
     def cell_to_config(self, cell: int) -> str:
         """Maps global cell index to config."""
@@ -257,6 +253,19 @@ class BeamData:
         else:
             return dir / f"locrom_error_{distr}.npz"
 
+    def rom_error_u(self, nreal: int, num_modes: int, method="hapod", ei=False) -> Path:
+        dir = self.method_folder(nreal, method)
+        if ei:
+            return dir / f"rom_error_u_ei_{num_modes}.npz"
+        else:
+            return dir / f"rom_error_u_{num_modes}.npz"
+
+    def rom_error_s(self, nreal: int, num_modes: int, method="hapod", ei=False) -> Path:
+        dir = self.method_folder(nreal, method)
+        if ei:
+            return dir / f"rom_error_s_ei_{num_modes}.npz"
+        else:
+            return dir / f"rom_error_s_{num_modes}.npz"
     @property
     def fom_minimization_data(self) -> Path:
         """FOM minimization data"""
@@ -327,6 +336,17 @@ class BeamData:
             return dir / f"run_locrom_ei_{distr}.log"
         else:
             return dir / f"run_locrom_{distr}.log"
+
+    def log_validate_rom(self, nr: int, modes: int, method="hapod", distr="normal", ei=True) -> Path:
+        dir = self.logs_path(nr, method)
+        if ei:
+            return dir / f"validate_rom_{modes}_{distr}_with_ei.log"
+        else:
+            return dir / f"validate_rom_{modes}_{distr}.log"
+
+    @property
+    def log_optimization(self) -> Path:
+        return self.logs_path(0, "hapod") / "optimization.log"
 
     def hapod_singular_values(self, nr: int, k: int) -> Path:
         """singular values of final POD for k-th transfer problem"""

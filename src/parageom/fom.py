@@ -13,8 +13,10 @@ from multi.preprocessing import create_meshtags
 from multi.product import InnerProduct
 from multi.io import read_mesh
 
-from pymor.basic import VectorOperator, StationaryModel, GenericParameterFunctional, NumpyVectorSpace, VectorFunctional
-from pymor.operators.constructions import ConstantOperator, LincombOperator
+from pymor.parameters.functionals import GenericParameterFunctional
+from pymor.operators.constructions import ConstantOperator, LincombOperator, VectorOperator, VectorFunctional
+from pymor.vectorarrays.numpy import NumpyVectorSpace
+from pymor.models.basic import StationaryModel
 from pymor.bindings.fenicsx import (
     FenicsxVectorSpace,
     FenicsxVisualizer,
@@ -138,13 +140,14 @@ def discretize_subdomain_operators(example):
     from .auxiliary_problem import discretize_auxiliary_problem
     from .matrix_based_operator import FenicsxMatrixBasedOperator
 
+    # discretize auxiliary problem on unit cell domain
     parent_subdomain_msh = example.parent_unit_cell.as_posix()
     ftags = {"bottom": 11, "left": 12, "right": 13, "top": 14, "interface": 15}
-    aux = discretize_auxiliary_problem(
-        example, parent_subdomain_msh, ftags, example.parameters["subdomain"]
-    )
-    d = df.fem.Function(aux.problem.V, name="d_trafo")
+    params = example.parameters["subdomain"]
+    aux = discretize_auxiliary_problem(example, parent_subdomain_msh, ftags, params)
+    d = df.fem.Function(aux.problem.V, name="d_trafo_unit_cell")
 
+    # create problem to define (stiffness matrix) operator
     omega = aux.problem.domain
     matparam = {"gdim": omega.gdim, "E": example.youngs_modulus, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
     problem = ParaGeomLinEla(omega, aux.problem.V, d, matparam)
@@ -155,14 +158,11 @@ def discretize_subdomain_operators(example):
         aux.solve(d, mu)
         d.x.scatter_forward()
 
-    params = example.parameters["subdomain"]
     operator = FenicsxMatrixBasedOperator(
         problem.form_lhs, params, param_setter=param_setter, name="ParaGeom"
     )
 
     # ### wrap external force as pymor operator
-    # EMOD = example.youngs_modulus
-    # TY = -example.traction_y / EMOD
     TY = -example.traction_y
     traction = df.fem.Constant(
         omega.grid, (df.default_scalar_type(0.0), df.default_scalar_type(TY))
@@ -172,7 +172,21 @@ def discretize_subdomain_operators(example):
     problem.assemble_vector(bcs=[])
     rhs = VectorOperator(operator.range.make_array([problem.b.copy()]))  # type: ignore
 
-    return operator, rhs
+    # ### Volume
+    vol_cpp = df.fem.form(problem.form_volume)
+
+    def compute_volume(mu):
+        param_setter(mu)
+        vol = df.fem.assemble_scalar(vol_cpp)
+        return vol
+    theta_vol = GenericParameterFunctional(compute_volume, params)
+
+    # global ROM
+    # loop over components of mu, compute Vol_gl = Σ v_i = Σ theta_vol(mu_i)
+    # Vol_gl can probably be implemented as another GenericParameterFunctional with global params
+    # define global output as new LincombOperator with (1-ω) Vol_gl + ω Compliance
+
+    return operator, rhs, theta_vol
 
 
 def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):

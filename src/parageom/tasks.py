@@ -65,7 +65,7 @@ def task_coarse_grid():
     """ParaGeom: Create structured coarse grids"""
     module = "src.parageom.preprocessing"
 
-    for config in list(CONFIGS) + ["global", "target"]:
+    for config in ["global"]:
         yield {
             "name": config,
             "file_dep": [],
@@ -83,7 +83,7 @@ def task_coarse_grid():
 def task_fine_grid():
     """ParaGeom: Create parent domain mesh"""
     module = "src.parageom.preprocessing"
-    for config in list(CONFIGS) + ["global", "target"]:
+    for config in ["global"]:
         yield {
             "name": config,
             "file_dep": [example.coarse_grid(config), example.parent_unit_cell],
@@ -105,41 +105,6 @@ def task_preproc():
     }
 
 
-# def task_hapod():
-#     """ParaGeom: Construct basis via HAPOD"""
-#     module = "src.parageom.hapod"
-#     nworkers = 4  # number of workers in pool
-#     distr = example.distributions[0]
-#     for nreal in range(example.num_real):
-#         for config in CONFIGS:
-#             deps = [SRC / "hapod.py"]
-#             deps.append(example.coarse_grid("global"))
-#             deps.append(example.parent_domain("global"))
-#             deps.append(example.coarse_grid("target"))
-#             deps.append(example.parent_domain("target"))
-#             deps.append(example.coarse_grid(config))
-#             deps.append(example.parent_domain(config))
-#             targets = []
-#             targets.append(
-#                 example.log_basis_construction(nreal, "hapod", distr, config)
-#             )
-#             targets.append(example.hapod_modes_npy(nreal, distr, config))
-#             targets.append(example.hapod_singular_values(nreal, distr, config))
-#             if config == "left":
-#                 targets.append(example.hapod_neumann_svals(nreal, distr, config))
-#             yield {
-#                 "name": config + ":" + str(nreal),
-#                 "file_dep": deps,
-#                 "actions": [
-#                     "python3 -m {} {} {} {} --max_workers {}".format(
-#                         module, distr, config, nreal, nworkers
-#                     )
-#                 ],
-#                 "targets": targets,
-#                 "clean": True,
-#             }
-
-
 def task_hapod():
     """ParaGeom: Construct basis via HAPOD"""
     module = "src.parageom.osp_v2"
@@ -148,20 +113,16 @@ def task_hapod():
         for k in range(11):
             deps = [SRC / "osp_v2.py"]
             deps.append(example.coarse_grid("global"))
-            # deps.append(example.parent_domain("global"))
-            # deps.append(example.coarse_grid("target"))
-            # deps.append(example.parent_domain("target"))
-            # deps.append(example.coarse_grid(config))
-            # deps.append(example.parent_domain(config))
             targets = []
-            # targets.append(
-            #     example.log_basis_construction(nreal, "hapod", distr, config)
-            # )
+            targets.append(
+                example.log_basis_construction(nreal, "hapod", k)
+            )
+            targets.append(example.path_omega_coarse(k))
+            targets.append(example.path_omega(k))
+            targets.append(example.path_omega_in(k))
             targets.append(example.hapod_modes_npy(nreal, k))
-            targets.append(example.hapod_modes_xdmf(nreal, k))
             targets.append(example.hapod_singular_values(nreal, k))
-            # if k in (0, 1, 2):
-            #     targets.append(example.hapod_neumann_svals(nreal, k))
+            targets.extend(with_h5(example.hapod_modes_xdmf(nreal, k)))
             yield {
                 "name": str(nreal) + ":" + str(k),
                 "file_dep": deps,
@@ -171,35 +132,6 @@ def task_hapod():
                 "targets": targets,
                 "clean": True,
             }
-
-
-# def task_heuristic():
-#     """ParaGeom: Construct basis via Heuristic range finder"""
-#     module = "src.parageom.heuristic"
-#     distr = example.distributions[0]
-#     for nreal in range(example.num_real):
-#         for config in CONFIGS:
-#             deps = [SRC / "heuristic.py"]
-#             deps.append(example.coarse_grid("global"))
-#             deps.append(example.parent_domain("global"))
-#             deps.append(example.coarse_grid("target"))
-#             deps.append(example.parent_domain("target"))
-#             deps.append(example.coarse_grid(config))
-#             deps.append(example.parent_domain(config))
-#             targets = []
-#             targets.append(
-#                 example.log_basis_construction(nreal, "heuristic", distr, config)
-#             )
-#             targets.append(example.heuristic_modes_npy(nreal, distr, config))
-#             yield {
-#                 "name": config + ":" + str(nreal),
-#                 "file_dep": deps,
-#                 "actions": [
-#                     "python3 -m {} {} {} {}".format(module, distr, config, nreal)
-#                 ],
-#                 "targets": targets,
-#                 "clean": True,
-#             }
 
 
 # def task_projerr():
@@ -253,6 +185,12 @@ def task_gfem():
     """ParaGeom: Build GFEM approximation"""
     module = "src.parageom.gfem"
 
+    def cell_to_transfer_problem(x) -> list[int]:
+        r = []
+        r.append(x)
+        r.append(x + 1)
+        return r
+
     def create_action(module, nreal, cell, debug=False):
         action = "python3 -m {} {} {}".format(module, nreal, cell)
         if debug:
@@ -265,8 +203,8 @@ def task_gfem():
             # TODO: add meshes as deps
             deps.append(example.coarse_grid("global"))
             deps.append(example.parent_unit_cell)
-            for k in range(11):
-                # bases for all transfer problems
+            for k in cell_to_transfer_problem(cell):
+                deps.append(example.path_omega_in(k))
                 deps.append(example.hapod_modes_npy(nreal, k))
             targets = []
             targets.append(example.local_basis_npy(nreal, cell))
@@ -281,42 +219,46 @@ def task_gfem():
                     }
 
 
-# def task_locrom():
-#     """ParaGeom: Run localized ROM"""
-#
-#     def create_action(nreal, method, distr, num_test, options):
-#         action = "python3 -m src.parageom.run_locrom {} {} {} {}".format(nreal, method, distr, num_test)
-#         for k, v in options.items():
-#             action += f" {k}"
-#             if v:
-#                 action += f" {v}"
-#         return [action]
-#
-#     distr = "normal"
-#     num_test = 20
-#     with_ei = {"no_ei": False, "ei": True}
-#     for nreal in range(example.num_real):
-#         for method in example.methods:
-#             deps = [SRC / "run_locrom.py"]
-#             deps.append(example.coarse_grid("global"))
-#             deps.append(example.parent_domain("global"))
-#             deps.append(example.parent_unit_cell)
-#             for cell in range(5):
-#                 deps.append(example.local_basis_npy(nreal, method, distr, cell))
-#             deps.append(example.local_basis_dofs_per_vert(nreal, method, distr))
-#             options = {}
-#             for k, v in with_ei.items():
-#                 targets = [example.locrom_error(nreal, method, distr, ei=v), example.log_run_locrom(nreal, method, distr, ei=v)]
-#                 options["--output"] = targets[0]
-#                 if v:
-#                     options["--ei"] = ""
-#                 yield {
-#                         "name": ":".join([method, k, str(nreal)]),
-#                         "file_dep": deps,
-#                         "actions": create_action(nreal, method, distr, num_test, options),
-#                         "targets": targets,
-#                         "clean": True,
-#                         }
+def task_validate_rom():
+    """ParaGeom: Validate ROM"""
+
+    def create_action(nreal, num_params, num_modes, options):
+        action = "python3 -m src.parageom.validate_rom {} {} {}".format(nreal, num_params, num_modes)
+        for k, v in options.items():
+            action += f" {k}"
+            if v:
+                action += f" {v}"
+        return [action]
+
+    num_params = 200
+    number_of_modes = [20, 40, 60, 80, 100]
+    with_ei = {"no_ei": False, "ei": True}
+    num_cells = example.nx * example.ny
+
+    for nreal in range(example.num_real):
+        for num_modes in number_of_modes:
+            deps = [SRC / "validate_rom.py"]
+            deps.append(example.coarse_grid("global"))
+            deps.append(example.parent_domain("global"))
+            deps.append(example.parent_unit_cell)
+            for cell in range(num_cells):
+                deps.append(example.local_basis_npy(nreal, cell))
+                deps.append(example.local_basis_dofs_per_vert(nreal, cell))
+
+            options = {}
+            for k, v in with_ei.items():
+                targets = []
+                targets.append(example.rom_error_u(nreal, num_modes, ei=v))
+                targets.append(example.rom_error_s(nreal, num_modes, ei=v))
+                if v:
+                    options["--ei"] = ""
+                yield {
+                        "name": ":".join([str(nreal), str(num_modes), k]),
+                        "file_dep": deps,
+                        "actions": create_action(nreal, num_params, num_modes, options),
+                        "targets": targets,
+                        "clean": True,
+                        }
 
 
 # def task_fig_locrom_error():
@@ -336,9 +278,9 @@ def task_gfem():
 #             "targets": [example.fig_locrom_error],
 #             "clean": True,
 #             }
-#
-#
-#
+
+
+
 # def task_optimization():
 #     """ParaGeom: Determine optimal design"""
 #     module = "src.parageom.optimization"
@@ -366,8 +308,8 @@ def task_gfem():
 #                 "targets": targets,
 #                 "clean": True,
 #                 }
-#
-#
+
+
 # def task_pp_stress():
 #     """ParaGeom: Post-process stress"""
 #     module = "src.parageom.pp_stress"

@@ -1,6 +1,5 @@
 """oversampling version 2"""
 
-import pathlib
 import typing
 from dataclasses import dataclass
 import dolfinx as df

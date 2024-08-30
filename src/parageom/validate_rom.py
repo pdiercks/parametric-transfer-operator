@@ -1,23 +1,36 @@
+import pathlib
+from time import perf_counter
+
 from mpi4py import MPI
 import ufl
 import basix
 import dolfinx as df
 import numpy as np
-from pymor.tools.random import new_rng
-from pymor.models.basic import StationaryModel
 from multi.io import read_mesh
 from multi.domain import StructuredQuadGrid
 
+from pymor.core.defaults import set_defaults
+from pymor.core.logger import getLogger
+from pymor.tools.random import new_rng
+from pymor.models.basic import StationaryModel
+from pymor.parameters.functionals import GenericParameterFunctional
+from pymor.vectorarrays.numpy import NumpyVectorSpace
+from pymor.operators.constructions import ConstantOperator, LincombOperator, VectorFunctional
 
-def main():
-    """Eval ROM for same parameter value twice.
-    Call reconstruct in-between.
-    See if solutions are equal.
-    """
+
+def main(args):
     from .tasks import example
     from .dofmap_gfem import GFEMDofMap
     from .locmor import reconstruct, assemble_gfem_system
-    # from .stress_analysis import project
+
+    stem = pathlib.Path(__file__).stem
+    logfilename = example.log_validate_rom(args.nreal, args.num_modes, ei=args.ei).as_posix()
+    set_defaults({"pymor.core.logger.getLogger.filename": logfilename})
+    if args.debug:
+        loglevel = 10 # debug
+    else:
+        loglevel = 20 # info
+    logger = getLogger(stem, level=loglevel)
 
     # ### FOM
     fom, parageom_fom = build_fom(example)
@@ -26,7 +39,6 @@ def main():
     # ### Global function for displacment
     d_rom = df.fem.Function(V, name="urom")
     d_fom = df.fem.Function(V, name="ufom")
-    other_d_rom = df.fem.Function(V)
 
     # ### Quadrature space for stress
     basix_celltype = getattr(basix.CellType, V.mesh.topology.cell_type.name)
@@ -53,8 +65,6 @@ def main():
     cells = np.arange(0, num_cells, dtype=np.int32)
 
     def compute_principal_components(f):
-        # FIXME
-        # how to avoid hardcoding reshape?
         values = f.reshape(cells.size, 4, 4)
         fxx = values[:, :, 0]
         fyy = values[:, :, 1]
@@ -63,17 +73,19 @@ def main():
         fmax = (fxx+fyy) / 2 + np.sqrt(((fxx-fyy)/2)**2 + fxy**2)
         return fmin, fmax
 
+    # TODO: add stress plots in other postproc script?
+
     # ### Quadrature space for principal stress
-    qs = basix.ufl.quadrature_element(basix_celltype, value_shape=(2,), # type: ignore
-                                      scheme="default", degree=q_degree)
-    Q = df.fem.functionspace(V.mesh, qs)
-    p_stress_fom = df.fem.Function(Q)
-    p_stress_rom = df.fem.Function(Q)
+    # qs = basix.ufl.quadrature_element(basix_celltype, value_shape=(2,), # type: ignore
+    #                                   scheme="default", degree=q_degree)
+    # Q = df.fem.functionspace(V.mesh, qs)
+    # p_stress_fom = df.fem.Function(Q)
+    # p_stress_rom = df.fem.Function(Q)
 
     # ### Lagrange space for stress output
-    W = df.fem.functionspace(V.mesh, ("P", 2, (2,))) # output space: linear Lagrange elements
-    proj_stress_fom = df.fem.Function(W)
-    proj_stress_rom = df.fem.Function(W)
+    # W = df.fem.functionspace(V.mesh, ("P", 2, (2,))) # output space: linear Lagrange elements
+    # proj_stress_fom = df.fem.Function(W)
+    # proj_stress_rom = df.fem.Function(W)
 
     # ### Function for displacement on unit cell (for reconstruction)
     unit_cell_domain = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, kwargs={"gdim": 2})[0]
@@ -81,38 +93,32 @@ def main():
     d_local = df.fem.Function(V_i, name="u_i")
 
     # ### Build localized ROM
-    print("Building ROM ...")
     coarse_grid_path = example.coarse_grid("global")
-
     coarse_domain = read_mesh(coarse_grid_path, MPI.COMM_WORLD, cell_tags=None, kwargs={"gdim": 2})[0]
     struct_grid = StructuredQuadGrid(coarse_domain)
     dofmap = GFEMDofMap(struct_grid)
     params = example.parameters["global"]
-    num_modes = 50
+    num_modes = args.num_modes
 
     rom = None
-    use_ei = False
-    if use_ei:
-        rom, modes = build_rom(example, dofmap, params, num_modes, use_ei=use_ei)
+    if args.ei:
+        logger.info("Building ROM with EI ...")
+        tic = perf_counter()
+        rom, modes = build_rom(example, dofmap, params, num_modes, ω=args.omega, use_ei=args.ei)
+        logger.info(f"Took {perf_counter()-tic} to build ROM.")
         rom_data = {}
     else:
-        rom_data = build_rom(example, dofmap, params, num_modes, use_ei=use_ei)
+        logger.info("Building ROM without EI ...")
+        # here time is not interesting as the assembly has to be carried out
+        # every time model is evaluated for new `mu`
+        rom_data = build_rom(example, dofmap, params, num_modes, use_ei=args.ei)
 
     P = params.space(example.mu_range)
     with new_rng(example.validation_set_seed):
-        validation_set = P.sample_randomly(100)
-
-    # mu = validation_set[79]
-    # u = rom.solve(mu)
-    # print(u)
-    # reconstruct(u.to_numpy(), dofmap, modes, d_local, d_rom) # type: ignore
-    # uu = rom.solve(mu)
-    # print(uu)
-    # assert np.allclose(u.to_numpy(), uu.to_numpy()) # type: ignore
+        validation_set = P.sample_randomly(args.num_params)
 
     fom_sols = fom.solution_space.empty()
     rom_sols = fom.solution_space.empty()
-    other_rom_sols = fom.solution_space.empty()
 
     def compute_stress_error_norms(fom, rom):
         fom_norm = np.linalg.norm(fom)
@@ -133,7 +139,7 @@ def main():
         fom_sols.append(U_fom)
         d_fom.x.array[:] = U_fom.to_numpy().flatten() # type: ignore
 
-        if use_ei:
+        if args.ei:
             assert rom is not None
             urb = rom.solve(mu)
         else:
@@ -146,21 +152,12 @@ def main():
                 rom_data["dofs_per_vert"],
                 rom_data["max_dofs_per_vert"],
             )
-            rom = StationaryModel(operator, rhs, name="locROM")
+            rom = StationaryModel(operator, rhs, output_functional=None, name="ROM")
             urb = rom.solve(mu)
         reconstruct(urb.to_numpy(), dofmap, modes, d_local, d_rom) # type: ignore
         U_rom = fom.solution_space.make_array([d_rom.x.petsc_vec.copy()]) # type: ignore
         rom_sols.append(U_rom)
 
-        # try different solver for rom
-        # print("Trying different solver (dense)")
-        # A = rom.operator.assemble(mu).matrix.todense()
-        # b = rom.rhs.as_range_array(mu).to_numpy().flatten()
-        # x = np.linalg.solve(A, b)
-        #
-        # breakpoint()
-        # reconstruct(x.reshape(urb.to_numpy().shape), dofmap, modes, d_local, other_d_rom)
-        # other_rom_sols.append(fom.solution_space.make_array([other_d_rom.x.petsc_vec.copy()])) # type: ignore
         stress_expr_rom.eval(V.mesh, entities=cells, values=stress_rom.x.array.reshape(cells.size, -1))
         s_rom = compute_principal_components(stress_rom.x.array.reshape(cells.size, -1))
 
@@ -179,35 +176,38 @@ def main():
     u_errors.scal(1 / fom_sols.amax()[1])
     nodal_uerr = u_errors.amax()[1]
 
-    print(f"\nValidation set size = {len(validation_set)}\nNum modes = {num_modes}\n")
+    logger.info(f"""Summary
+    Validation set size = {len(validation_set)}
+    Num modes = {num_modes}
+    With EI = {str(args.ei)}
 
-    print(f"""Displacement
+    Displacement
           Relative Error in Energy Norm:
           ---------------------
           min = {np.min(errn)}
           max = {np.max(errn)}
           avg = {np.average(errn)}
+          Worst mu = {np.argmax(errn)}
 
           Max Nodal Relative Error:
           ----------------
           min = {np.min(nodal_uerr)}
-          max = {np.min(nodal_uerr)}
-          avg = {np.min(nodal_uerr)}
-          """)
+          max = {np.max(nodal_uerr)}
+          avg = {np.average(nodal_uerr)}
 
-    print(f"""Stress
+    Stress
           min (max) rel err = {np.min(max_rel_err_stress)}
           max (max) rel err = {np.max(max_rel_err_stress)}
           avg (max) rel err = {np.average(max_rel_err_stress)}
-          """)
+          Worst mu = {np.argmax(max_rel_err_stress)}
+    """)
 
-    print(f"Worst mu (displacement): {np.argmax(errn)}")
-    print(f"Worst mu (stress): {np.argmax(max_rel_err_stress)}")
+    # ### Write targets
+    output_u = example.rom_error_u(args.nreal, num_modes, ei=args.ei).as_posix()
+    np.savez(output_u, relerr=errn, nodal_err=nodal_uerr)
 
-    breakpoint()
-
-    # for loop over validation set, but const. num_modes
-    # expect that error in U and S are of the same order --> no outliers
+    output_s = example.rom_error_s(args.nreal, num_modes, ei=args.ei).as_posix()
+    np.savez(output_s, relerr=max_rel_err_stress)
 
 
 def build_fom(example, ω=0.5):
@@ -229,7 +229,7 @@ def build_fom(example, ω=0.5):
     return fom, parageom
 
 
-def build_rom(example, dofmap, params, num_modes, nreal=0, method="hapod", distribution="normal", use_ei=False):
+def build_rom(example, dofmap, params, num_modes, ω=0.5, nreal=0, method="hapod", distribution="normal", use_ei=False):
     from pymor.operators.constructions import VectorOperator
     from pymor.models.basic import StationaryModel
     from .fom import discretize_subdomain_operators
@@ -237,15 +237,15 @@ def build_rom(example, dofmap, params, num_modes, nreal=0, method="hapod", distr
     from .ei import interpolate_subdomain_operator
 
     # local high fidelity operators
-    operator_local, rhs_local = discretize_subdomain_operators(example)
+    operator_local, rhs_local, theta_vol = discretize_subdomain_operators(example)
 
     # ### Reduced bases
     num_coarse_grid_cells = dofmap.grid.num_cells
     local_bases = []
     max_dofs_per_vert = []
     for cell in range(num_coarse_grid_cells):
-        local_bases.append(np.load(example.local_basis_npy(nreal, cell)))
-        max_dofs_per_vert.append(np.load(example.local_basis_dofs_per_vert(nreal, cell)))
+        local_bases.append(np.load(example.local_basis_npy(nreal, cell, method=method, distr=distribution)))
+        max_dofs_per_vert.append(np.load(example.local_basis_dofs_per_vert(nreal, cell, method=method, distr=distribution)))
 
     # ### Maximum number of modes per vertex
     max_dofs_per_vert = np.array(max_dofs_per_vert)
@@ -258,37 +258,31 @@ def build_rom(example, dofmap, params, num_modes, nreal=0, method="hapod", distr
     dofs_per_vert[max_dofs_per_vert > num_modes] = num_modes
     dofmap.distribute_dofs(dofs_per_vert)
 
-    # TODO integrate output again
-    # define second (global) auxiliary problem to be able to compute volume
-    # otherwise define volume_operator on unit cell level and take the sum over all cells
+    # ### Volume output
+    def compute_volume(mu):
+        vol = 0.0
+        for mu_i in mu.to_numpy():
+            loc_mu = theta_vol.parameters.parse([mu_i])
+            vol += theta_vol.evaluate(loc_mu)
+        return vol
 
-    # However, ParaGeomLinEla is also required to compute stress if I want to keep
-    # the FOM and ROM objects separate.
-    # from .auxiliary_problem import discretize_auxiliary_problem
-    #
-    # coarse_grid_path = example.coarse_grid("global").as_posix()
-    # parent_domain_path = example.parent_domain("global").as_posix()
-    # interface_tags = [i for i in range(15, 25)]
-    # auxiliary_problem = discretize_auxiliary_problem(
-    #     example,
-    #     parent_domain_path,
-    #     interface_tags,
-    #     example.parameters["global"],
-    #     coarse_grid=coarse_grid_path,
-    # )
-    # trafo_disp = df.fem.Function(auxiliary_problem.problem.V, name="d_μ_rom")
-    #
-    # omega = auxiliary_problem.problem.domain
-    # matparam = {"gdim": omega.gdim, "E": example.youngs_modulus, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
-    # parageom = ParaGeomLinEla(omega, auxiliary_problem.problem.V, trafo_disp, matparam)
+    theta_vol_gl = GenericParameterFunctional(compute_volume, params)
+    initial_mu = params.parse([0.1 for _ in range(num_coarse_grid_cells)])
+    vol_ref = theta_vol_gl.evaluate(initial_mu)
+    vol_va = NumpyVectorSpace(1).ones(1)
+    vol_va.scal( (1. - ω) / vol_ref )
 
-    # ### Issue with Stress computation
-    # this would require global `trafo_displacement` which does not exist for ROM
-    # in case of the ROM we only have a local (unit cell) auxiliary problem
-
-    # Conlusion
-    # compute output via local operators
-    # use global ParaGeomLinEla for stress computation
+    # V =  one_op(vol_va) * theta_vol_gl
+    # initial_mu --> U_ref
+    # compliance ( Uref, rhs)
+    # ω
+    # J = V + ω compliance
+    # output_args = {
+    #         "vol_va": vol_va,
+    #         "theta_vol_gl": theta_vol_gl,
+    #         "initial_mu": initial_mu,
+    #         "omega": ω
+    #         }
 
     # EI
     wrapped_op = None
@@ -306,18 +300,21 @@ def build_rom(example, dofmap, params, num_modes, nreal=0, method="hapod", distr
         operator, rhs, selected_modes = assemble_gfem_system_with_ei(
                 dofmap, wrapped_op, rhs_local, local_bases, dofs_per_vert, max_dofs_per_vert,
                 params)
-        rom = StationaryModel(operator, rhs, name="ROM_with_ei")
+
+        # Compliance
+        U_ref = operator.apply_inverse(rhs.as_range_array(), mu=initial_mu)
+        compl_ref = rhs.as_range_array().inner(U_ref).item()
+        scaled_fext = rhs.as_range_array()
+        scaled_fext.scal(1. / compl_ref)
+        compliance = VectorFunctional(scaled_fext, product=None, name="compliance")
+
+        # Output definition
+        one_op = ConstantOperator(vol_va, source=operator.source)
+        output = LincombOperator([one_op, compliance], [theta_vol_gl, ω])
+
+        rom = StationaryModel(operator, rhs, output_functional=output, name="ROM_with_ei")
         return rom, selected_modes
     else:
-        # operator, rhs, selected_modes = assemble_gfem_system(
-        #     dofmap,
-        #     operator_local,
-        #     rhs_local,
-        #     mu,
-        #     local_bases,
-        #     dofs_per_vert,
-        #     max_dofs_per_vert,
-        # )
         return {
                 "dofmap": dofmap,
                 "operator_local": operator_local,
@@ -330,4 +327,19 @@ def build_rom(example, dofmap, params, num_modes, nreal=0, method="hapod", distr
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Compute ROM error over validation set.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument("nreal", type=int, help="The nreal-th realization of the local bases.")
+    parser.add_argument("num_params", type=int, help="Size of the validation set.")
+    parser.add_argument("num_modes", type=int, help="Number of modes per vertex of ROM.")
+    parser.add_argument("--ei", action="store_true", help="Use EI.")
+    parser.add_argument("--omega", type=float, help="Weighting for output functional.", default=0.5)
+    parser.add_argument("--debug", action='store_true', help="Run in debug mode.")
+    # TODO add arg --write-stress-output
+    args = parser.parse_args(sys.argv[1:])
+    main(args)
