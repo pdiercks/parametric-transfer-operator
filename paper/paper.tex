@@ -418,12 +418,13 @@ The assembly of the global system matrix follows the usual assembly routine for 
 
 \subsection{Graded concrete slab} % (fold)
 \label{sub:Graded concrete slab}
-The numerical example investigated here is motivated by \textit{graded concrete} in which voids are created by inserting hollow bodies into the concrete formwork with the goal of mass reduction, see~\cref{fig:gradientenbeton}.
+The numerical example investigated here is motivated by \textit{graded concrete} in which voids are created by inserting hollow bodies into the concrete formwork with the goal of mass reduction, see~\gradientenbetonurl.
 The problem is simplified and we consider a two dimensional beam under plane stress conditions as shown in~\cref{fig:beam_sketch}.
 The coarse grid partition of half of the beam body $\varOmega^{\p}_{\gl}=[0, 10a]\times[0, a]$ is given by $10$ quadrilateral cells of size $a$, where $a$ is the unit length of the unit cell.
 Each unit cell, \ie{} subdomain $\varOmega^{\p}_i$, is taken as a square of size $a$ with a circular void with radius $R$ and is partitioned in \added{384} isoparametric quadrilateral FEs of polynomial degree two, see~\cref{fig:oversampling_domain}\,(b).
 With regard to the geometrical parametrization, we consider the variation of the radius $R$ in each subdomain.
-For the global problem this results in a parameter space $\mathcal{P}_{\gl}=[R_{-}, R_{+}]^{10}$, such that a parameter value $\m\in\mathbb{P}_{\gl}$ has parameter components $\m_i\in[R_{-},R_{+}], i=1, \ldots, 10$, with ranges chosen as $R_{-}=0.1a, R_{+}=0.3a$.
+For the global problem this results in a parameter space $\mathcal{P}_{\gl}=[R_{-}, R_{+}]^{10}$, such that a parameter value $\m\in\mathcal{P}_{\gl}$ has parameter components $\m_i\in[R_{-},R_{+}], i=1, \ldots, 10$, with ranges chosen as $R_{-}=0.1a, R_{+}=0.3a$.
+For the parent domain we set $\bar{\m}_i=0.2a, i=1, \ldots, 10$ as the reference value.
 The point load is distributed as a constant traction over the length of one unit cell (on the far left).
 
 \paragraph{Full order model}
@@ -439,18 +440,17 @@ For each problem the oversampling layer has size $a \times a$, \ie{} the target 
 
 The input parameters to~\cref{algo:rrfpod} are $\varepsilon^{\ast}=0.001\,, n_t=\dim(\mathcal{S})$ and $\varepsilon_{\mathrm{algofail}}=1\cdot\,10^{-14}$ for $k=1, \ldots, 11$, where $\dim(\mathcal{S})$ denotes the dimension of the source space of the transfer operator and corresponds to the number of degrees of freedom on the boundary $\varGamma^{\p}_{\out}$ in the FE model.
 The number of training samples is chosen as $N_{\train}=50$ ($k=1, 11$), $N_{\train}=100$ ($k=2, 10$) and $N_{\train}=200$ elsewhere, as the local parameter spaces have different dimensions.
+The singular values of the POD at the end of~\cref{algo:rrfpod} for each oversampling problem show a rapid decay~(\cref{fig:singular_values}).
+As expected, a less rapid decay is observed for the larger oversampling domains.
+Furthermore, for $k=1, 2, 3$ in comparison to the oversampling problems of the same size on the right ($k=9, 10, 11$), a difference in the total number of snapshots generated is observed which is due to the additional \textsc{Neumann} problems.
 
-\begin{itemize}
-    \item \added{number of snapshots for each POD}
-    \item difference to full order model: only use operators on unit cell domain in the online phase
-\end{itemize}
-
-\begin{figure}
-    \begin{center}
-        \includegraphics[keepaspectratio,height=4cm]{gradientenbeton_formwork.jpg}
-    \end{center}
-    \caption{Formwork for a graded concrete slab. Weight savings are achieved by placing hollow spheres along a structured grid inside the formwork. Source:\gradientenbetonurl.}\label{fig:gradientenbeton}
-\end{figure}
+% There is not enough space for this figure
+% \begin{figure}
+%     \begin{center}
+%         \includegraphics[keepaspectratio,height=4cm]{gradientenbeton_formwork.jpg}
+%     \end{center}
+%     \caption{Formwork for a graded concrete slab. Weight savings are achieved by placing hollow spheres along a structured grid inside the formwork. Source:\gradientenbetonurl.}\label{fig:gradientenbeton}
+% \end{figure}
 
 \begin{figure}[h]
     \centering
@@ -466,18 +466,26 @@ The number of training samples is chosen as $N_{\train}=50$ ($k=1, 11$), $N_{\tr
        \label{fig:beam_sketch}
 \end{figure} 
 
+\begin{figure}
+    \begin{center}
+        \includegraphics[width=0.6\textwidth]{singular_values.pdf}
+    \end{center}
+    \caption{Decay of singular values for each of the $11$ oversampling problems. The total number of basis functions and the total number of snapshots are given in the legend.}\label{fig:singular_values}
+\end{figure}
+
 % subsection Graded concrete slab (end)
 
 \subsection{Reduced order model validation} % (fold)
 \label{sub:Reduced order model validation}
 
 For the validation of the ROM, the relative error with respect to the FOM is computed over a parameter set of size $200$.
-The error in the displacements in measured in the energy norm (over the domain $\varOmega^{\p}_{\gl}$) and defined as
+The error in the displacements is measured in the energy norm (over the domain $\varOmega^{\p}_{\gl}$) and defined as
 \begin{equation}
     e_u(\m) := \frac{\norm{\bm{u}_{\fom} - \bm{u}_{\rom}}}{\norm{\bm{u}_{\fom}}}\,.
     \label{eq:error_u}
 \end{equation}
-The error in the first principal component of the \textsc{Cauchy} stress is defined as
+Apart from the displacement field as the primary unknown, we are interested in the first principal component of the \textsc{Cauchy} stress as this will be used to define a stress constraint for the optimization problem.
+The error in the stress is defined as
 \begin{equation}
     e_{\sigma}(\m) = \frac{\vert\vb{s}_{\fom} - \vb{s}_{\rom}\vert}{\vert \mathrm{max}(\vb{s}_{\fom})\vert}\,.
     \label{eq:error_sigma}
@@ -485,12 +493,16 @@ The error in the first principal component of the \textsc{Cauchy} stress is defi
 Here, $\vb{s}\in\mathbb{R}^{N_g}$ denotes the vector holding the first principal stress values at the $N_g$ integration points of the mesh.
 For ease of notation, the parameter-dependence is omitted for $\bm{u}$ and $\vb{s}$.
 The minimum, average and maximum of $e_u$ and $e_{\sigma}$ over the validation set are shown in~\cref{fig:relerr}.
+With regard to the error in the displacement, the average value is much smaller than the maximum over the validation set.
+In both cases, for local basis size ca. $> 75$ the error decreases only very slowly with increasing number of basis functions.
+This is due to the rather moderate size of the training set, as \eg{} $N_{\train}=200$ is used for a local parameter space $\mathcal{P}^k=[R_{-}, R_{+}]^4$ for $k=3, \ldots, 9$.
+However, the error in the stress is less sensitive to variations in the parameter $\m$ and a pointwise maximum relative error below $1\%$ is acceptable for the current application.
 
 \begin{figure}
     \begin{center}
-        \includegraphics[width=0.65\textwidth]{relerr.pdf}
+        \includegraphics[width=0.6\textwidth]{relerr.pdf}
     \end{center}
-    \caption{}\label{fig:relerr}
+    \caption{Minimum, average (dashed) and maximum relative error over the validation set of size $200$.}\label{fig:relerr}
 \end{figure}
 
 
