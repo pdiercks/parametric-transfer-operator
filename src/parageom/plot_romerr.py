@@ -12,7 +12,7 @@ def main(cli):
     red = bamcd["red"][0]
 
     nreal = cli.nreal
-    number_of_modes = [20, 40, 60, 80, 100]
+    number_of_modes = [20, 40, 60, 80, 100, 120, 140, 160]
 
     erru = defaultdict(list)
     errs = defaultdict(list)

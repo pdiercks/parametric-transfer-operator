@@ -248,7 +248,7 @@ def main(args):
     with example.fom_minimization_data.open("wb") as fh:
         dump(fom_minimization_data, fh)
 
-    with example.rom_minimization_data(args.distr, args.name).open("wb") as fh:
+    with example.rom_minimization_data.open("wb") as fh:
         dump(rom_minimization_data, fh)
 
 
@@ -360,12 +360,12 @@ def solve_optimization_problem(
 
     c2 = eval_rf_2(opt_result.x)
     strictly_positive = np.all(c2 >= 0.)
-    negative_vals = c2[c2 < 0.]
-    min_value = np.amin(negative_vals)
-    # nearly_zero = np.all(np.isclose(negative_vals, 0., atol=1e-4))
     if strictly_positive:
         return opt_result
     else:
+        negative_vals = c2[c2 < 0.]
+        assert negative_vals.size > 0
+        min_value = np.amin(negative_vals)
         logger.warning(f"Constraint not satisfied by optimal solution (max constraint violation is {np.abs(min_value):2.e}!")
         return opt_result
 

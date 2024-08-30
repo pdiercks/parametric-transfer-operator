@@ -231,8 +231,9 @@ def task_validate_rom():
         return [action]
 
     num_params = 200
-    number_of_modes = [20, 40, 60, 80, 100]
-    with_ei = {"no_ei": False, "ei": True}
+    number_of_modes = [20, 40, 60, 80, 100, 120, 140, 160]
+    # with_ei = {"no_ei": False, "ei": True}
+    with_ei = {"ei": True}
     num_cells = example.nx * example.ny
 
     for nreal in range(example.num_real):
@@ -281,33 +282,31 @@ def task_validate_rom():
 
 
 
-# def task_optimization():
-#     """ParaGeom: Determine optimal design"""
-#     module = "src.parageom.optimization"
-#     distr = example.distributions[0]
-#
-#     num_modes = 120
-#     minimizer = "SLSQP"
-#     omega = example.omega
-#
-#     nreal = 0 # do optimization only for single realization
-#     for method in example.methods:
-#         deps = [SRC / "optimization.py"]
-#         deps.append(example.coarse_grid("global"))
-#         deps.append(example.parent_domain("global"))
-#         deps.append(example.parent_unit_cell)
-#         for cell in range(5):
-#             deps.append(example.local_basis_npy(nreal, method, distr, cell))
-#         deps.append(example.local_basis_dofs_per_vert(nreal, method, distr))
-#         targets = [example.fom_minimization_data,
-#                    example.rom_minimization_data(distr, method)]
-#         yield {
-#                 "name": method,
-#                 "file_dep": deps,
-#                 "actions": ["python3 -m {} {} {} --num_modes {} --method {} --omega {}".format(module, distr, method, num_modes, minimizer, omega)],
-#                 "targets": targets,
-#                 "clean": True,
-#                 }
+def task_optimization():
+    """ParaGeom: Determine optimal design"""
+    module = "src.parageom.optimization"
+
+    num_modes = 100
+    minimizer = "SLSQP"
+    omega = example.omega
+
+    nreal = 0 # do optimization only for single realization
+    deps = [SRC / "optimization.py"]
+    deps.append(example.coarse_grid("global"))
+    deps.append(example.parent_domain("global"))
+    deps.append(example.parent_unit_cell)
+    for cell in range(example.nx * example.ny):
+        deps.append(example.local_basis_npy(nreal, cell))
+        deps.append(example.local_basis_dofs_per_vert(nreal, cell))
+    targets = [example.fom_minimization_data,
+               example.rom_minimization_data,
+               example.log_optimization]
+    return {
+            "file_dep": deps,
+            "actions": ["python3 -m {} {} --minimizer {} --omega {} --ei".format(module, num_modes, minimizer, omega)],
+            "targets": targets,
+            "clean": True,
+            }
 
 
 # def task_pp_stress():

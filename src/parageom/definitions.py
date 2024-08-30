@@ -271,9 +271,10 @@ class BeamData:
         """FOM minimization data"""
         return self.rf / "fom_minimization_data.out"
 
-    def rom_minimization_data(self, distr: str, name: str) -> Path:
+    @property
+    def rom_minimization_data(self) -> Path:
         """ROM minimization data"""
-        return self.rf / f"rom_minimization_data_{distr}_{name}.out"
+        return self.rf / "rom_minimization_data.out"
 
     def pp_stress(self, method: str) -> dict[str, Path]:
         """Postprocessing of stress at optimal design"""
