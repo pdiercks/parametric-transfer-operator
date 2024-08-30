@@ -36,6 +36,7 @@ sorting=none,%remove this to have things sorted, e.g. use style=alphabetic
 \usepackage{tikz}
 \usepackage{standalone}
 \usepackage{booktabs}
+\usepackage{tabularx}
 \usepackage{pgfplotstable}
 \pgfplotsset{compat=1.18}
 \usetikzlibrary{%
@@ -380,11 +381,11 @@ The components of the FE matrix of the $i-$th coarse grid cell are given by
     \begin{split}
         a^i_{kl} &= \int_{\varOmega^{\p}_i} \left(\pdv{\bm{\psi}_k}{\bm{x}^{\p}}\vdot\bm{F}^{-1}_{\m}\right)\vdot\!\vdot \mathbb{C} \vdot\!\vdot
     \left(\pdv{\bm{\psi}_l}{\bm{x}^{\p}}\vdot\bm{F}^{-1}_{\m}\right)\det(\bm{F}_{\m})\dd{\bm{x}^{\p}}\,,\\
-                 &= ({V}^\top)_{km} {K}_{mn}(\mu){V}_{nl}\,.
+                 &= ({V}^\top)_{km} {K}_{mn}(\m){V}_{nl}\,.
     \end{split}
     \label{eq:element_matrix}
 \end{align}
-Here, $\bm{V}$ is the matrix that holds the FE vectors of the GFEM functions $\bm\psi_i$ as column vectors and $\bm{K}(\mu)$ is the stiffness matrix of the subdomain $\varOmega^{\p}_i$ (\ie{} unit cell).
+Here, $\bm{V}$ is the matrix that holds the FE vectors of the GFEM functions $\bm\psi_i$ as column vectors and $\bm{K}(\m)$ is the stiffness matrix of the subdomain $\varOmega^{\p}_i$ (\ie{} unit cell).
 Since $\bm{K}$ is dependent on the parameter $\m$, integration over the full fine scale mesh of the unit cell is required whenever the model is evaluated for a new parameter value which will drastically reduce the computational efficiency of our method.
 
 To overcome this problem, the stiffness matrix $\bm{K}(\m)$ is approximated by Empirical Interpolation~(see \cite{Barrault2004‘empirical,Chaturantabut2010Nonlinear} and in particular \cite{Negri2015Efficient} for the matrix version termed MDEIM employed here), such that
@@ -421,10 +422,10 @@ The assembly of the global system matrix follows the usual assembly routine for 
 The numerical example investigated here is motivated by \textit{graded concrete} in which voids are created by inserting hollow bodies into the concrete formwork with the goal of mass reduction, see~\gradientenbetonurl.
 The problem is simplified and we consider a two dimensional beam under plane stress conditions as shown in~\cref{fig:beam_sketch}.
 The coarse grid partition of half of the beam body $\varOmega^{\p}_{\gl}=[0, 10a]\times[0, a]$ is given by $10$ quadrilateral cells of size $a$, where $a$ is the unit length of the unit cell.
-Each unit cell, \ie{} subdomain $\varOmega^{\p}_i$, is taken as a square of size $a$ with a circular void with radius $R$ and is partitioned in \added{384} isoparametric quadrilateral FEs of polynomial degree two, see~\cref{fig:oversampling_domain}\,(b).
+Each unit cell, \ie{} subdomain $\varOmega^{\p}_i$, is taken as a square of size $a$ with a circular void with radius $R$ and is partitioned in 384 isoparametric quadrilateral FEs of polynomial degree two, see~\cref{fig:oversampling_domain}\,(b).
 With regard to the geometrical parametrization, we consider the variation of the radius $R$ in each subdomain.
-For the global problem this results in a parameter space $\mathcal{P}_{\gl}=[R_{-}, R_{+}]^{10}$, such that a parameter value $\m\in\mathcal{P}_{\gl}$ has parameter components $\m_i\in[R_{-},R_{+}], i=1, \ldots, 10$, with ranges chosen as $R_{-}=0.1a, R_{+}=0.3a$.
-For the parent domain we set $\bar{\m}_i=0.2a, i=1, \ldots, 10$ as the reference value.
+For the global problem this results in a parameter space $\mathcal{P}_{\gl}=[R_{-}, R_{+}]^{10}$, such that a parameter value $\m\in\mathcal{P}_{\gl}$ has parameter components $\mu_i\in[R_{-},R_{+}], i=1, \ldots, 10$, with ranges chosen as $R_{-}=0.1a, R_{+}=0.3a$.
+For the parent domain we set $\bar{\mu}_i=0.2a, i=1, \ldots, 10$ as the reference value.
 The point load is distributed as a constant traction over the length of one unit cell (on the far left).
 
 \paragraph{Full order model}
@@ -497,6 +498,7 @@ With regard to the error in the displacement, the average value is much smaller 
 In both cases, for local basis size ca. $> 75$ the error decreases only very slowly with increasing number of basis functions.
 This is due to the rather moderate size of the training set, as \eg{} $N_{\train}=200$ is used for a local parameter space $\mathcal{P}^k=[R_{-}, R_{+}]^4$ for $k=3, \ldots, 9$.
 However, the error in the stress is less sensitive to variations in the parameter $\m$ and a pointwise maximum relative error below $1\%$ is acceptable for the current application.
+% \comment[id=pd]{Actually, this is probably only because the ROM stress is computed on the full mesh but with reduced $u$ as input. Reduced stress computation?}
 
 \begin{figure}
     \begin{center}
@@ -510,101 +512,61 @@ However, the error in the stress is less sensitive to variations in the paramete
 
 \subsection{Shape optimization} % (fold)
 \label{sub:Shape optimization}
+The formulation of the shape optimization problem seeks to minimize an objective function, $J(\m, \bm{u}(\m))$, with constraints, $g_q(\m, \bm{u}(\m)) \le 0$, used to limit the first principal stress at each integration point, $q$, with $q=1, \ldots, N_g$.
+\begin{align}
+    \begin{split}
+        \min_{\m\in\mathcal{P}_{\gl}} &J(\m, \bm{u}(\m))\,,\\
+        \mathrm{s.t.}\quad & g_q(\m, \bm{u}(\m))\le 0, \quad q=1, \ldots, N_q\,,\\
+        \mathrm{with}\quad &\bm{K}(\m)\bm{u}(\m)=\bm{f}\,.
+    \end{split}
+    \label{eq:shape_opt}
+\end{align}
+The objective function is defined as a weighted sum of mass $m(\m)$ and compliance $C(\bm{u}(\m))$.
+\begin{equation}
+    J(\m, \bm{u}(\m))= (1-\omega)\frac{m(\m)}{m(\bar\m)}+\omega \frac{C(\bm{u}(\m))}{C(\bm{u}(\bar\m))}\,,\quad 0\le \omega\le 1\,.
+    \label{eq:output}
+\end{equation}
+The compliance is included, since we do not actively constrain the second principal component and, therefore, designs leading to high compressive stresses would not be detected.
+The reference values $m(\bar\m)$ and $C(\bm{u}(\bar\m))$ are thus used to normalize.
+The definition of the stress constraint follows a risk factor approach~\cite{Pastore2019Topology} and is written as
+\begin{equation}
+    g_q(\m, \bm{u}(\m)) = \frac{\vb{s}_q}{\sigma_{+}} - 1\,,\quad q=1,\ldots,N_q\,,
+    \label{eq:constraint}
+\end{equation}
+with the components of the vector of first principal stress $\vb{s}_q$ and an upper bound $\sigma_{+}$ on the admissible tensile stress.
+Note that $\vb{s}$ depends on $\bm{u}$ and thus also $\m$ although not explicitly written.
 
-\begin{itemize}
-    \item problem definiot
-    \item output computation (difference with ROM)
-    \item result for both models
-\end{itemize}
+The shape optimization problem~\cref{eq:shape_opt} is then solved using the FOM and the ROM.
+Note that the computation of the ROM output $J_n(\m, \bm{u}_n(\m))$, with reduced displacement solution $\bm{u}_n(\m)$, is not dependent on the dimension of the FOM.
+The results are obtained using sequential least squares programming~\cite{kraft1988software} (SLSQP) and finite difference approximation of the gradients, and are given in~\cref{tab:opt_result}.
+% The relative error in the output $J$ is $\approx\,0.4\%$, while the relative error in the mass $m$ is $\approx\,0.5\%$.
+The absolute error in the optimum is $\sqrt{\sum_{i=1}^{10}(\mu_i^{\ast}-\mu_{n,i}^{\ast})^2} \approx 2.44\cdot 10^{-2}$, with the optimum, $\m^{\ast}$, found by the FOM and the optimum, $\m_n^{\ast}$, found by the ROM, respectively.
+While the ROM is able to converge to a solution close to the FOM solution, over three times more iterations and function evaluations are necessary.
+
+\begin{table}
+    \caption{Result of the optimization. For the ROM a local basis size of $100$ is used. $\m^{\ast}$ is used as a placeholder for the optimum found by the respective model.}\label{tab:opt_result}
+    \begin{center}
+        \begin{tabularx}{\textwidth}{XXXXX}
+            \toprule
+            Model & $J(\m^{\ast})$ & $m(\m^{\ast})$ & Iterations & Function calls\\\midrule
+            FOM   &  0.941         &  7.855  & 4          & 45\\
+            ROM   &  0.946         &  7.897  & 13         & 155\\
+            \bottomrule
+        \end{tabularx}
+    \end{center}
+\end{table}
 
 % subsection Shape optimization (end)
 
 \section{CONCLUSIONS} % (fold)
 \label{sec:conclusions}
+In this contribution a hyper-reduced localized model order reduction framework for the shape optimization of lattice structures is presented.
+The data compression strategy, adopted from~\cite{Taddei2018Localization}, is shown to work well with range approximation by random sampling.
+Furthermore, the ROM solution of the considered shape optimization problem is in good agreement with the FOM solution and this is regarded as a first proof of concept.
+A thorough comparison of the computational efficiency including runtime measurements is planned for future work, as this is out of the scope of the current investigation.
+Other directions of future research include the exploration of offline training stategies in which the variation in the parameter value $\m$ and the boundary data $\bm{g}$ are addressed simultaneously, instead of sequentially as this may lead to redundant data in the snapshot set $\bm{S}$.
 
 % section CONCLUSION (end)
-
-% \begin{figure}[!htb]
-% \minipage{0.49\textwidth}
-%   \includegraphics[]{./figures/beam/fig_loc_svals_left.pdf}
-%   \caption{Singular valus left}\label{fig:loc_svals_left}
-% \endminipage\hfill
-% \minipage{0.49\textwidth}
-%   \includegraphics[]{./figures/beam/fig_loc_svals_right.pdf}
-%   \caption{Singular valus right}\label{fig:loc_svals_right}
-% \endminipage\hfill\\%
-% \begin{center}
-% \minipage{0.49\textwidth}
-%   \includegraphics[]{./figures/beam/fig_loc_svals_inner.pdf}
-%   \caption{Singular valus inner}\label{fig:loc_svals_inner}
-% \endminipage
-% \end{center}
-% \end{figure}
-
-
-% \begin{figure}[!htb]
-% \minipage{0.49\textwidth}
-%   \includegraphics{./figures/beam/fig_proj_error_left_hapod.pdf}
-%   \caption{Projection error hapod}\label{fig:proj_error_left_hapod}
-% \endminipage\hfill
-% \minipage{0.49\textwidth}
-%   \includegraphics{./figures/beam/fig_proj_error_right_hapod.pdf}
-%   \caption{Projection error hapod}\label{fig:proj_error_right_hapod}
-% \endminipage\hfill\\
-% \begin{center}
-% \minipage{0.49\textwidth}%
-%   \includegraphics{./figures/beam/fig_proj_error_inner_hapod.pdf}
-%   \caption{Projection error hapod}\label{fig:proj_error_inner_hapod}
-% \endminipage
-% \end{center}
-% \end{figure}
-
-% \begin{table}
-%     \centering
-%     \caption{HAPOD inner}\label{tab:hapod_inner}
-%     \input{./src/beam/tables/hapod_inner.tex}
-% \end{table}
-
-% \begin{figure}[!htb]
-% \minipage{0.49\textwidth}
-%   \includegraphics{./figures/beam/fig_proj_error_left_heuristic.pdf}
-%   \caption{Projection error }\label{fig:proj_error_left_heuristic}
-% \endminipage\hfill
-% \minipage{0.49\textwidth}
-%   \includegraphics{./figures/beam/fig_proj_error_right_heuristic.pdf}
-%   \caption{Projection error }\label{fig:proj_error_right_heuristic}
-% \endminipage\hfill\\
-% \begin{center}
-% \minipage{0.49\textwidth}%
-%   \includegraphics{./figures/beam/fig_proj_error_inner_heuristic.pdf}
-%   \caption{Projection error }\label{fig:proj_error_inner_heuristic}
-% \endminipage
-% \end{center}
-% \end{figure}
-
-% \begin{table}
-%     \centering
-%     \caption{Heuristic rrf inner}\label{tab:heuristic_inner}
-%     \input{./src/beam/tables/heuristic_inner.tex}
-% \end{table}
-
-% \begin{figure}[!htb]
-%     \centering
-%     \includegraphics{./figures/beam/fig_loc_rom_error.pdf}
-%     \caption{Local ROM error relative to FOM.}\label{fig:loc_rom_error}
-% \end{figure}
-
-% \begin{table}
-%     \caption{Result of the optimization with FOM and ROM.}\label{tab:minimization_data}
-%     \centering
-%     \input{./src/beam/tables/minimization_data.tex}
-% \end{table}
-
-% \begin{table}
-%     \caption{Comparison of reduced optimal solution $\mu_N^{\ast}$ and true optimal solution $\mu^{\ast}$.}\label{tab:minimization_comparison}
-%     \centering
-%     \input{./src/beam/tables/minimization_comparison.tex}
-% \end{table}
 
 % references
 \printbibliography[title=REFERENCES]
