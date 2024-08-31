@@ -10,6 +10,7 @@
 \usepackage{upgreek}
 \usepackage{physics}
 \usepackage{cleveref}
+\usepackage{csquotes}
 \usepackage{algorithm, algorithmicx, algpseudocode}
 
 \usepackage[%
@@ -30,7 +31,7 @@ sorting=none,%remove this to have things sorted, e.g. use style=alphabetic
 \addbibresource{main.bib}
 \addbibresource{references.bib}
 
-\usepackage[commentmarkup=uwave]{changes}
+\usepackage[final,commentmarkup=uwave]{changes}
 \usepackage{xspace}
 
 \usepackage{tikz}
@@ -92,7 +93,6 @@ $^{2}$ Centre for Analysis, Scientific Computing and Applications (CASA), Depart
 However, regarding multiscale problems, this direct numerical approach is not feasible for a number of reasons.
 The model has to take into account both the structural and unit cell (UC) scale, because the objective function to be minimized is a global quantity, while the parameters are related to the shape or material parameters of the UC.
 In the absence of a clear separation of scales, the direct resolution of both scales in the numerical model leads to a significant increase in computational cost, which makes it impossible to repeatedly evaluate the model during the optimization process.
- 
 The main goal of this contribution is to overcome the aforementioned limitations and develop an efficient computational framework for the optimal design of lattice structures.
 To this end, parametric model order reduction is combined with domain decomposition methods.
 % The change in geometry of each UC within the lattice is modelled by introducing a transformation that maps the reference to the physical domain.
@@ -100,36 +100,36 @@ In offline simulations, suitable localized approximation spaces, that account fo
 The global approximation space is constructed from the local spaces via the partition of unity method.
 The reduced order model is validated on the example of a stress-constrained shape optimization problem.
 }
-
 % TODO adjust abovecaptionskip if necessary
 % it seems the default is 6pt (see class file)
 % \setlength{\abovecaptionskip}{3pt plus 3pt minus 2pt}
-
 \begin{document}
 \thispagestyle{empty}
 
 \section{INTRODUCTION}%
 \label{sec:introduction}
-
-Additive manufacturing (AM), commonly known as 3D printing, is a manufacturing technique that allows for the production of a wide range of structures and complex geometries.
-The objects are build successively by adding material layer by layer from three-dimensional models.
+Additive manufacturing \deleted{(AM), commonly known as 3D printing, }is a manufacturing technique that allows for the production of a wide range of structures and complex geometries.
+\deleted{The objects are build successively by adding material layer by layer from three-dimensional models.}
 The technology offers numerous advantages over conventional manufacturing, including greater design flexibility, reduced material waste, and the possibility to produce complex structures with tailored material properties.
-It has been used in a wide range of applications, including aerospace, biomechanical, automotive, and construction industries~\cite{Plessis2022Properties,Wu2016critical}.
-
-A common engineering practice is to optimize the geometry of a structure by an iterative process, in which an objective function is minimized by systematically choosing parameter values $\bm\mu$ (design variables) and computing the value of the function.
-In structural mechanics, a prominent example of an objective function is mass or compliance which is a function of the parameter-dependent displacement field $\bm{u}(\bm\mu)$.
-In each iteration of the optimization process, the geometry is manually changed in the CAD model and the high fidelity finite element (FE) model, also called full order model (FOM), is simply re-evaluated.
+It has been used in a wide range of applications, including the construction industry~\cite{Wu2016critical}.
+\added{The great flexibility regarding the geometry motivates the solution of topology or shape optimization problems to determine the optimal design for a structural problem.}
+\added{In this contribution, we focus on shape optimization in the context of multiscale problems, \ie{} our aim is to optimize the geometrical parameters of the microstructure, \eg{} the unit cell of a lattice structure.}
+\added{However, the solution of the optimization problem requires many evaluations of the numerical model, which may be infeasible if solving the high fidelity finite element (FE) model, also called full order model (FOM) is a computationally demanding task.}
+\added{Reduced order models (ROMs) are powerful tools to mitigate this problem, but for multiscale or large-scale industrial applications with high-dimensional parameter spaces, the nowadays established \enquote{single-domain} approaches are limited~\cite{Ballani2018component}, and the construction of a fast-to-evaluate and accurate ROM is a challenging task.}
+\deleted{A common engineering practice is to optimize the geometry of a structure by an iterative process, in which an objective function is minimized by systematically choosing parameter values $\bm\mu$ (design variables) and computing the value of the function.}
+\deleted{In structural mechanics, a prominent example of an objective function is mass or compliance which is a function of the parameter-dependent displacement field $\bm{u}(\bm\mu)$.}
+\deleted{In each iteration of the optimization process, the geometry is manually changed in the CAD model and the high fidelity finite element (FE) model, also called full order model (FOM), is simply re-evaluated.
 While this approach is not only an ineffective use of resources, it is also infeasible when solving the FE model is a computationally demanding task, \eg{} in multiscale or large-scale industrial applications.
-Due to the prohibitive cost of even a single FOM solution, the iterative design process cannot be performed using direct numerical simulations.
+Due to the prohibitive cost of even a single FOM solution, the iterative design process cannot be performed using direct numerical simulations.}
+
 Therefore, we propose a framework based on localized, also called component-based (CB), parametric model order reduction (pMOR).
 The main idea is to precompute, in a localized manner, empirical basis functions which approximate the solution for some part of the domain without the need to solve the global FOM even once.
 The global approximation is obtained by a suitable coupling of the local reduced spaces spanned by the aforementioned basis functions, in which one naturally relies on domain decomposition (DD) strategies.
-A review of concepts in localized model order reduction is presented in~\cite{BuhrReview}.
+A review of concepts in localized \replaced{pMOR}{model order reduction} is presented in~\cite{BuhrReview}.
 In particular, regarding lattice structures, this approach allows to take advantage of the repetitiveness of the lattice, such that a computation of the local basis is required only for few components, \ie{} unit cells.
-
 The computation of the local basis is an essential task in localized pMOR and is often done using the concept of oversampling~\cite{Hou1997Multiscale}.
 In this approach, the target subdomain $\varOmega_{\mathrm{in}}$, \ie{} that part of the domain for which one would like to construct basis functions, is extended and boundary conditions are prescribed on the boundary of the larger so-called oversampling domain $\varOmega$ to explore possible solutions.
-In the literature, this oversampling problem is also expressed in terms of a \textit{transfer operator} $\bm{T}$ that maps the values on the boundary $\partial\varOmega$ to the unknown solution restricted to the target subdomain $\bm{u}(\bm{\mu})\vert_{\varOmega_{\mathrm{in}}}$.
+In the literature, this oversampling problem is also expressed in terms of a \textit{transfer operator} $\bm{T}$ that maps the values on the boundary $\partial\varOmega$ to the unknown solution restricted to the target subdomain $\bm{u}\vert_{\varOmega_{\mathrm{in}}}$.
 The construction of (optimal) local approximation spaces then comprises the calculation of the left singular vectors of this transfer operator~\cite{Babuska2011Optimal,Smetana2016Optimal}.
 The direct calculation via eigenvalue problems is, however, computationally expensive and the range of the transfer operator, and thus the optimal local approximation spaces can be efficiently approximated by random sampling~\cite{Buhr2018Randomized}.
 Here, the authors treat non-parametrized partial differential equations (PDEs) and to our knowledge the extension to the parametric setting for linear problems has not been done yet.
@@ -140,19 +140,15 @@ The contributions of the present work are given as follows.
 First, as references~\cite{Smetana2016Optimal,Taddei2018Localization} do not make use of range approximation via random sampling, a suitable training strategy to construct local approximation spaces for parameterized linear problems via random sampling is discussed.
 Herein, the approach given in~\cite{Taddei2018Localization}, identified as a \textit{distributed approximate POD} (see also~\cite{Himpe2018Hierarchical}), is adopted to range approximation via random sampling.
 Second, a framework for the shape optimization of lattice structures is proposed.
-It combines the aforementioned algorithm to construct local approximation spaces with an auxiliary problem, as in~\cite{Guo2022Learning}, to facilitate geometrical parametrizations of the unit cell and the matrix version~\cite{Negri2015Efficient} of the empirical interpolation method (EIM)~\cite{Barrault2004‘empirical,Chaturantabut2010Nonlinear} to ensure online efficiency of the final reduced order model (ROM).
+It combines the aforementioned algorithm to construct local approximation spaces with an auxiliary problem, as in~\cite{Guo2022Learning}, to facilitate geometrical parametrizations of the unit cell and the matrix version~\cite{Negri2015Efficient} of the empirical interpolation method (EIM)~\cite{Barrault2004‘empirical,Chaturantabut2010Nonlinear} to ensure online efficiency of the final \replaced{ROM}{reduced order model (ROM)}.
 Furthermore, the global approximation space is constructed from the local spaces using the partition of unity method or generalized finite element method (GFEM)~\cite{BABUSKA1997,Babuska2004Generalized}.
 
 The rest of the article is organized as follows.
 In~\cref{sec:method}, the building blocks of the shape optimization framework are described.
 In particular, the range approximation of a parametric transfer operator is discussed.
 \Cref{sec:numerical experiments} comprises the numerical experiments.
-Based on the example of a graded concrete slab, the quality of the local spaces generated by the proposed method is analyzed, the resulting ROM is validated, and results for the solution of a shape optimization problem are presented.
+Based on the example of a graded concrete slab, the quality of the local spaces generated by the proposed method is analyzed, the resulting ROM is validated, and results for the solution of a \added{stress-constrained }shape optimization problem are presented.
 Finally, conclusions are given in~\cref{sec:conclusions}.
-
-\comment[id=pd]{TODO: add note on notation where appropriate.}
-
-\comment[id=pd]{TODO: shorten introduction.}
 
 \section{METHOD}%
 \label{sec:method}
@@ -166,6 +162,8 @@ Finally, the hyper-reduction (in the form of empirical interpolation) to ensure 
 \subsection{Auxiliary Problem} % (fold)
 \label{sub:Auxiliary Problem}
 The approach adopted in this work to facilitate geometrical parameterizations belongs to the class of surface-based deformations~\cite{Botsch2010Polygon} and is based on transformations $\Phi_{\bm\mu}$ that map each material point $\bm{x}_{\mathrm{p}}$ of a parameter-independent reference or parent domain $\varOmega^{\mathrm{p}}$ to a point $\bm{x}_{\bm\mu}$ in the parameter-dependent current or physical domain $\varOmega^{\bm\mu}$.
+Throughout the paper, the parameter value (design variables) are denoted by $\m$ and dependence on the parameter is indicated by a sub- or superscript $(\cdot)_{\m}, (\cdot)^{\m}$.
+The sub- or superscript $(\cdot)_{\p}, (\cdot)^{\p}$ indicates that the quantity does not depend on the parameter.
 In the context of shape optimization of lattice structures, our objective is to determine the mapping $\Phi_{\bm\mu}$ for a single unit cell, see~\cref{fig:transformationmap}, and use it to describe the change in geometry of each unit cell throughout the structure.
 % The auxiliary problem is formulated here for a single unit cell, and for ease of notation the subscript $i$ as employed in the remainder of the article is dropped.
 An auxiliary problem based on the equations of linear elasticity is solved to obtain such domain transformations, following the approach outlined in~\cite{Guo2022Learning}, and briefly repeated here for completeness.
@@ -187,16 +185,20 @@ The stiffness tetrad $\hat{\mathbb{C}}$ of the auxiliary problem is defined as
     \label{eq:aux_tetrad}
 \end{equation}
 With $\bm{x}_{\bm\mu}$ known for all points on the parent interface $\partial\varOmega^{\mathrm{p}}_{\mathrm{int}}$, the desired transformation (\eg{} enlarging/shrinking of the voids radius) is enforced by prescribing~\cref{eq:aux_2,eq:aux_3}.
-
 Given the transformation displacement $\bm{d}(\bm{x}_{\mathrm{p}};\bm\mu)$, the variational formulation is formulated over the parameter-independent parent domain $\varOmega^{\mathrm{p}}$ instead of the parameter-dependent physical domain $\varOmega^{\bm\mu}$.
 This introduces the parameter dependence in the variational formulation as shown in the following subsections, but has the advantage that numerical integration can be carried out over the fixed parent domain and thus no re-meshing is required.
 However, for each new parameter value $\bm\mu$ for which the model is to be evaluated, we first need to solve the auxiliary problem.
 Nevertheless, this does not pose a problem, since the solution of the auxiliary problem is well amenable to acceleration via established MOR techniques and we refer to~\cite{Guo2022Learning} for further details.
 
+%\begin{figure}
+%    \centering
+%    \include{./img/transformationmap.tex}
+%    \caption{Transformation map $\Phi_{\bm\mu}$ from parent to physical domain on the example of the unit square domain with a circular void placed in the center. The parameter $\bm\mu$ controls the radius of the void.}\label{fig:transformationmap}
+%\end{figure}
 \begin{figure}
-    \centering
-    \include{./img/transformationmap.tex}
-    \caption{Transformation map $\Phi_{\bm\mu}$ from parent to physical domain on the example of the unit square domain with a circular void placed in the center. The parameter $\bm\mu$ controls the radius of the void.}\label{fig:transformationmap}
+	\centering
+	\includegraphics[width=0.65\textwidth]{transformationmap.pdf}
+	\caption{Transformation map $\Phi_{\bm\mu}$ from parent to physical domain on the example of the unit square domain with a circular void placed in the center. The parameter $\bm\mu$ controls the radius of the void.}\label{fig:transformationmap}
 \end{figure}
 
 % subsection Auxiliary Problem (end)
@@ -287,19 +289,18 @@ Therefore, an additional \textsc{Neumann} problem\footnote{The case of inhomogen
 \end{align}
 \Cref{eq:neumann_problem} is solved on the parent domain employing the pull back as above.
 Also, for construction of a sufficiently rich local basis it has to be solved for many parameter values $\m$, but a sampling of the boundary values on $\varGamma^{\m}_{\out}$ is not required.
-% - setting, global domain = union of non overlapping subdomains = unit cells
-% - introduction of coarse grid where each cell corresponds to unit cell subdomain
-% - goal of constructing local spaces for only parts of the domain
-% - definition of oversampling problem and transfer operator
-% these are details of the specific problem we solve later
-% - the oversampling problem should be formulated for union of parent unit cells
-% - weak formulation is not required here? Should be first introduced in section 2.3?
-% - comment on number of archetypes/configurations
 
-\begin{figure}
-    \centering
-    \include{./img/oversampling_domain.tex}
-    \caption{Exemplary coarse grid discretization of the global domain $\varOmega^{\m}_{\gl}$, with target subdomain $\varOmega^{\m}_i$ within oversampling domain $\varOmega^{\m}$ in grey (a) and fine grid discretization of the unit cell (b).}\label{fig:oversampling_domain}
+%\begin{figure}[h]
+%	\centering
+%    \include{./img/oversampling_domain.tex}
+%    \caption{Exemplary coarse grid discretization of the global domain $\varOmega^{\m}_{\gl}$, with target subdomain $\varOmega^{\m}_i$ within oversampling domain $\varOmega^{\m}$ in grey (a) and fine grid discretization of the unit cell (b).}%
+%    \label{fig:oversampling_domain}
+%\end{figure}
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=0.65\textwidth]{oversampling_domain.pdf}
+	\caption{Exemplary coarse grid discretization of the global domain $\varOmega^{\m}_{\gl}$, with target subdomain $\varOmega^{\m}_i$ within oversampling domain $\varOmega^{\m}$ in grey (a) and fine grid discretization of the unit cell (b).}%
+	\label{fig:oversampling_domain}
 \end{figure}
 
 % subsection Construction of local approximation spaces (end)
@@ -358,12 +359,12 @@ The dimension of the local space $X^n$, \ie{} the number of local basis function
 Given local approximation spaces $X^n_i$ for each target subdomain $\varOmega_i^{\p}$, the construction of a global approximation via the GFEM is discussed.
 The difficulty is that the basis functions of the local spaces $X^n_i$ and $X^n_j$ of two neighboring subdomains $\varOmega_i^{\p}$ and $\varOmega_j^{\p}$ are not conforming on the shared interface $\varGamma^{\p}_{ij}=\partial\varOmega_i^{\p}\cap\partial\varOmega_j^{\p}$.
 However, given a suitably\footnote{According to Definition 1 of~\cite{BABUSKA1997}.} defined partition of unity $\{{\varphi}_i\}$, the local basis functions can be included in the global FE space by multiplication with the standard FE shape functions ${\varphi}_i$, such that a conforming approximation is obtained.
-The global GFEM space is defined as
-\begin{equation}
-	\label{eq:Xgfem}
-    X_{\mathrm{GFEM}}:= \sum_{i} \varphi_iX^n_i = \left\lbrace\sum_i\varphi_i\bm\xi_i \;\big|\; \bm\xi_i\in X^n_i	\right\rbrace\,.
-\end{equation}
-Furthermore, the GFEM function denoted as $\bm{\psi}(\bm{x}) = \varphi(\bm{x})\bm{\xi}(\bm{x}), \bm{x}\in\omega_{\alpha}$ for a patch $\omega_{\alpha}$ is shown in~\cref{fig:gfem} to illustrate the procedure of constructing the GFEM functions.
+%The global GFEM space is defined as
+%\begin{equation}
+%	\label{eq:Xgfem}
+%    X_{\mathrm{GFEM}}:= \sum_{i} \varphi_iX^n_i = \left\lbrace\sum_i\varphi_i\bm\xi_i \;\big|\; \bm\xi_i\in X^n_i	\right\rbrace\,.
+%\end{equation}
+The GFEM function denoted as $\bm{\psi}(\bm{x}) = \varphi(\bm{x})\bm{\xi}(\bm{x}), \bm{x}\in\omega_{\alpha}$ for a patch $\omega_{\alpha}$ is shown in~\cref{fig:gfem} to illustrate the procedure of constructing the GFEM functions.
 \begin{figure}[h]
     \centering
     \subfloat[Linear hat function $\varphi(\bm{x})$]{%
@@ -378,7 +379,7 @@ Furthermore, the GFEM function denoted as $\bm{\psi}(\bm{x}) = \varphi(\bm{x})\b
           \includegraphics[height=5cm]{gfem_function.pdf}%
           \label{fig:gfem_right}%
        }
-       \caption{Construction of GFEM functions.}
+       \caption{Construction of GFEM functions.}%
        \label{fig:gfem}
 \end{figure} 
 
@@ -416,7 +417,6 @@ The suffix $(\cdot)_{\mathcal{I}}$ indicates the restricted evaluation, reduced 
 The basis $\bm{\Phi}=[\vecm(\bm{K}_1), \ldots, \vecm(\bm{K}_Q)]$ and the interpolation indices $\mathcal{I}$ are determined by applying the DEIM algorithm as proposed in~\cite{Chaturantabut2010Nonlinear} to a set of snapshots $\{\vecm(\bm{K}(\m_1)), \ldots, \vecm(\bm{K}(\m_m))\}$, $m>0$.
 By reversing the $\vecm(\cdot)$ operation, the approximation $\bm{K}_Q(\m)$ can be formed using~\cref{eq:K_ei} once the interpolation coefficients are determined by solution of \cref{eq:interp}.
 For more details on the overall procedure the reader is referred to~\cite{Negri2015Efficient}.
-
 Finally, with a fast method to compute $\bm{K}_Q(\m)$, the calculation of the FE matrices $a^i_{kl}$ of each coarse grid cell are independent of the underlying fine grid discretization of the unit cell.
 The assembly of the global system matrix follows the usual assembly routine for FE methods.
 
@@ -539,7 +539,7 @@ The objective function is defined as a weighted sum of mass $m(\m)$ and complian
     \label{eq:output}
 \end{equation}
 The compliance is included, since we do not actively constrain the second principal component and, therefore, designs leading to high compressive stresses would not be detected.
-The reference values $m(\bar\m)$ and $C(\bm{u}(\bar\m))$ are thus used to normalize.
+The reference values $m(\bar\m)$ and $C(\bm{u}(\bar\m))$ are used to normalize.
 The definition of the stress constraint follows a risk factor approach~\cite{Pastore2019Topology} and is written as
 \begin{equation}
     g_q(\m, \bm{u}(\m)) = \frac{\vb{s}_q}{\sigma_{+}} - 1\,,\quad q=1,\ldots,N_q\,,
@@ -547,7 +547,7 @@ The definition of the stress constraint follows a risk factor approach~\cite{Pas
 \end{equation}
 with the components of the vector of first principal stress $\vb{s}_q$ and an upper bound $\sigma_{+}$ on the admissible tensile stress.
 Note that $\vb{s}$ depends on $\bm{u}$ and thus also $\m$ although not explicitly written.
-
+The load $F$ is chosen so that the parameter value with $\mu_i=R_{+}, i=1, \ldots, 10$ yields $g_q>0$ (infeasible design), such that this trivial minimum of $m(\m)$ is excluded from the set of possible solutions.
 The shape optimization problem~\cref{eq:shape_opt} is then solved using the FOM and the ROM.
 Note that the computation of the ROM output $J_n(\m, \bm{u}_n(\m))$, with reduced displacement solution $\bm{u}_n(\m)$, is not dependent on the dimension of the FOM.
 The results are obtained using sequential least squares programming~\cite{kraft1988software} (SLSQP) and finite difference approximation of the gradients, and are given in~\cref{tab:opt_result}.
@@ -576,7 +576,7 @@ In this contribution a hyper-reduced localized model order reduction framework f
 The data compression strategy, adopted from~\cite{Taddei2018Localization}, is shown to work well with range approximation by random sampling.
 Furthermore, the ROM solution of the considered shape optimization problem is in good agreement with the FOM solution and this is regarded as a first proof of concept.
 A thorough comparison of the computational efficiency including runtime measurements is planned for future work, as this is out of the scope of the current investigation.
-Other directions of future research include the exploration of offline training stategies in which the variation in the parameter value $\m$ and the boundary data $\bm{g}$ are addressed simultaneously, instead of sequentially as this may lead to redundant data in the snapshot set $\bm{S}$.
+Other directions of future research include the exploration of offline training strategies in which the variation in the parameter value $\m$ and the boundary data $\bm{g}$ are addressed simultaneously and suitable sampling distributions of the boundary data $\bm{g}$.
 
 % section CONCLUSION (end)
 

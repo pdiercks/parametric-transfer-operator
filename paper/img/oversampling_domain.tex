@@ -1,6 +1,5 @@
 \documentclass{standalone}
 
-
 \usepackage{amsmath,amssymb,physics,bm}
 \usepackage{tikz}
 \usetikzlibrary{%
@@ -13,12 +12,11 @@
 }
 \usepackage{bamcolors}
 
-\usepackage[active, tightpage]{preview}
-\PreviewEnvironment{tikzpicture}
-\setlength\PreviewBorder{2mm}
+%\usepackage[active, tightpage]{preview}
+%\PreviewEnvironment{tikzpicture}
+%\setlength\PreviewBorder{2mm}
 
 \begin{document}
-
 \begin{tikzpicture}
     \pgfmathsetmacro\w{5}% width
     \pgfmathsetmacro\h{0.6 * \w}% height
@@ -64,14 +62,9 @@
     \node[] (1) at (\w-\w/\Nx/2, \h/\Ny/2) {};
     \path (1) ++(3cm, 1cm) coordinate (2);
     \node[inner sep=0pt] (unit cell) at (2) {\includegraphics[keepaspectratio,width=2.25cm]{unit_cell.png}};
-    % \path[thick,-stealth, BAMgrad080] (1) edge[bend right] node [below] {} (unit cell);
     \path[thick,-stealth, BAMgrad080] (A) edge[bend right] node [below] {} (unit cell);
-
     % (a), (b) identifier for figure
-    \node[below = 4mm] at (\w/2, 0) {(a)};
-    \node[below = 5mm of unit cell] {(b)};
-
+    \node[below = 4mm, inner sep=0] at (\w/2, 0) {(a)};
+    \node[below = 5mm of unit cell, inner sep=0] {(b)};
 \end{tikzpicture}
-
-
 \end{document}
