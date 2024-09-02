@@ -3,7 +3,7 @@ from multi.plotting_context import PlottingContext
 
 
 def main(cli):
-    from .tasks import example
+    from parageom.tasks import example
 
     pod = {
     0     :    "58/420",

@@ -1,6 +1,14 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
-name = "muto"
+name = "parageom"
 readme = "README.md"
+version = "0.1.0"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/parageom"]
 
 [tool.doit]
 backend = "dbm"

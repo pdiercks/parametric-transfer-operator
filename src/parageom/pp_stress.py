@@ -13,9 +13,9 @@ from pymor.models.basic import StationaryModel
 
 def main(args):
     """compute principal stress using FOM and ROM"""
-    from .tasks import example
-    from .auxiliary_problem import discretize_auxiliary_problem
-    from .fom import discretize_fom, ParaGeomLinEla
+    from parageom.tasks import example
+    from parageom.auxiliary_problem import discretize_auxiliary_problem
+    from parageom.fom import discretize_fom, ParaGeomLinEla
 
     # ### Build FOM
     coarse_grid_path = example.coarse_grid("global").as_posix()
@@ -93,7 +93,7 @@ def main(args):
 
 
 def compute_principal_stress(model, mu, u, stress, parageom, rec_data=None, xdmf_filename=None):
-    from .stress_analysis import principal_stress_2d, project
+    from parageom.stress_analysis import principal_stress_2d, project
 
     V = u.function_space
     domain = V.mesh
@@ -143,10 +143,10 @@ def compute_principal_stress(model, mu, u, stress, parageom, rec_data=None, xdmf
 
 
 def build_localized_rom(cli, example, global_auxp, trafo_disp, parameters, ω=0.5):
-    from .fom import discretize_subdomain_operators, ParaGeomLinEla
-    from .ei import interpolate_subdomain_operator
-    from .locmor import EISubdomainOperatorWrapper, assemble_gfem_system_with_ei
-    from .dofmap_gfem import GFEMDofMap
+    from parageom.fom import discretize_subdomain_operators, ParaGeomLinEla
+    from parageom.ei import interpolate_subdomain_operator
+    from parageom.locmor import EISubdomainOperatorWrapper, assemble_gfem_system_with_ei
+    from parageom.dofmap_gfem import GFEMDofMap
 
     nreal = 0
 

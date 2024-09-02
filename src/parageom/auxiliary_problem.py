@@ -15,7 +15,7 @@ from multi.problems import LinearElasticityProblem
 
 from pymor.parameters.base import Mu, Parameters
 
-from .definitions import BeamData
+from parageom.definitions import BeamData
 
 
 class GlobalAuxiliaryProblem:
@@ -293,7 +293,7 @@ def discretize_auxiliary_problem(example: BeamData, fine_grid: str, facet_tags: 
 
 
 def main():
-    from .tasks import example
+    from parageom.tasks import example
     from dolfinx.io.utils import XDMFFile
 
     # transformation displacement is used to construct

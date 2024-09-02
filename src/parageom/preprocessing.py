@@ -194,7 +194,7 @@ def create_fine_scale_grid(example, typus: str, output: str):
 if __name__ == "__main__":
     import sys
     import argparse
-    from .tasks import example
+    from parageom.tasks import example
 
     parser = argparse.ArgumentParser(
         description="Preprocessing for the parageom example."

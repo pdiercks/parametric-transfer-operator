@@ -32,10 +32,10 @@ ModelWrapper = namedtuple(
 
 def main(args):
     """solve optimization problem for different models"""
-    from .tasks import example
-    from .validate_rom import build_fom, build_rom
-    from .dofmap_gfem import GFEMDofMap
-    from .locmor import reconstruct
+    from parageom.tasks import example
+    from parageom.validate_rom import build_fom, build_rom
+    from parageom.dofmap_gfem import GFEMDofMap
+    from parageom.locmor import reconstruct
 
     stem = pathlib.Path(__file__).stem
     # always use first realization for optimization, nreal=0

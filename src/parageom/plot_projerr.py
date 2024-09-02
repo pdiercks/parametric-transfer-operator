@@ -4,7 +4,7 @@ from multi.plotting_context import PlottingContext
 
 
 def postproc(nreal: int, method: str, distr: str, config: str, eps: float):
-    from .tasks import example
+    from parageom.tasks import example
 
     instream = example.projerr(nreal, method, distr, config)
     data = np.load(instream)
@@ -24,7 +24,7 @@ def postproc(nreal: int, method: str, distr: str, config: str, eps: float):
 
 
 def main(cli):
-    from .tasks import example
+    from parageom.tasks import example
 
     distr = example.distributions[0]
     bamcd = read_bam_colors()

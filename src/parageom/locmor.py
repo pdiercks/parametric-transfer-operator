@@ -34,9 +34,9 @@ from multi.io import read_mesh
 from multi.interpolation import make_mapping
 from multi.sampling import create_random_values
 from multi.utils import LogMixin
-from .definitions import BeamData
-from .matrix_based_operator import FenicsxMatrixBasedOperator
-from .dofmap_gfem import GFEMDofMap
+from parageom.definitions import BeamData
+from parageom.matrix_based_operator import FenicsxMatrixBasedOperator
+from parageom.dofmap_gfem import GFEMDofMap
 
 
 EISubdomainOperatorWrapper = namedtuple(
@@ -285,7 +285,7 @@ def assemble_gfem_system(
 
     """
 
-    from .dofmap_gfem import select_modes
+    from parageom.dofmap_gfem import select_modes
 
     # no need to apply bcs as basis functions should
     # satisfy these automatically
@@ -408,7 +408,7 @@ def assemble_gfem_system_with_ei(
 
     """
 
-    from .dofmap_gfem import select_modes
+    from parageom.dofmap_gfem import select_modes
 
     # TODO: try to set BCs to better condition system matrix
 
@@ -681,9 +681,9 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
         configuration: The configuration/archetype.
     """
 
-    from .fom import ParaGeomLinEla
-    from .auxiliary_problem import GlobalAuxiliaryProblem
-    from .matrix_based_operator import FenicsxMatrixBasedOperator, BCGeom, BCTopo, _create_dirichlet_bcs
+    from parageom.fom import ParaGeomLinEla
+    from parageom.auxiliary_problem import GlobalAuxiliaryProblem
+    from parageom.matrix_based_operator import FenicsxMatrixBasedOperator, BCGeom, BCTopo, _create_dirichlet_bcs
     from multi.preprocessing import create_meshtags
 
     global_coarse_domain, _, _ = read_mesh(example.coarse_grid("global"), MPI.COMM_WORLD,
@@ -973,7 +973,5 @@ def discretize_transfer_problem(example: BeamData, configuration: str) -> tuple[
 
 
 if __name__ == "__main__":
-    from .tasks import example
-    # discretize_transfer_problem(example, "left")
+    from parageom.tasks import example
     discretize_transfer_problem(example, "right")
-    # discretize_transfer_problem(example, "inner")

@@ -4,7 +4,7 @@ import os
 import shutil
 from pathlib import Path
 from doit.tools import run_once
-from .definitions import BeamData, ROOT
+from parageom.definitions import BeamData, ROOT
 
 os.environ["PYMOR_COLORS_DISABLE"] = "1"
 example = BeamData(name="parageom", run_mode="DEBUG")
@@ -44,7 +44,7 @@ def with_h5(xdmf: Path) -> list[Path]:
 
 def task_parent_unit_cell():
     """ParaGeom: Create mesh for parent unit cell"""
-    from .preprocessing import discretize_unit_cell
+    from parageom.preprocessing import discretize_unit_cell
 
     def create_parent_unit_cell(targets):
         unit_length = example.unit_length
@@ -63,15 +63,13 @@ def task_parent_unit_cell():
 
 def task_coarse_grid():
     """ParaGeom: Create structured coarse grids"""
-    module = "src.parageom.preprocessing"
-
     for config in ["global"]:
         yield {
             "name": config,
-            "file_dep": [],
+            "file_dep": [SRC / "preprocessing.py"],
             "actions": [
-                "python3 -m {} {} {} --output %(targets)s".format(
-                    module, config, "coarse"
+                "python3 %(dependencies)s {} {} --output %(targets)s".format(
+                    config, "coarse"
                 )
             ],
             "targets": [example.coarse_grid(config)],
@@ -82,16 +80,11 @@ def task_coarse_grid():
 
 def task_fine_grid():
     """ParaGeom: Create parent domain mesh"""
-    module = "src.parageom.preprocessing"
     for config in ["global"]:
         yield {
             "name": config,
-            "file_dep": [example.coarse_grid(config), example.parent_unit_cell],
-            "actions": [
-                "python3 -m {} {} {} --output %(targets)s".format(
-                    module, config, "fine"
-                )
-            ],
+            "file_dep": [example.coarse_grid(config), example.parent_unit_cell, SRC / "preprocessing.py"],
+            "actions": ["python3 src/parageom/preprocessing.py {} {} --output %(targets)s".format(config, "fine")],
             "targets": [example.parent_domain(config)],
             "clean": True,
         }
@@ -107,11 +100,10 @@ def task_preproc():
 
 def task_hapod():
     """ParaGeom: Construct basis via HAPOD"""
-    module = "src.parageom.osp_v2"
 
     for nreal in range(example.num_real):
         for k in range(11):
-            deps = [SRC / "osp_v2.py"]
+            deps = [SRC / "hapod.py"]
             deps.append(example.coarse_grid("global"))
             targets = []
             targets.append(
@@ -126,9 +118,7 @@ def task_hapod():
             yield {
                 "name": str(nreal) + ":" + str(k),
                 "file_dep": deps,
-                "actions": [
-                    "python3 -m {} {} {} --debug".format(module, nreal, k)
-                ],
+                "actions": ["python3 src/parageom/hapod.py {} {} --debug".format(nreal, k)],
                 "targets": targets,
                 "clean": True,
             }
@@ -183,7 +173,7 @@ def task_hapod():
 
 def task_gfem():
     """ParaGeom: Build GFEM approximation"""
-    module = "src.parageom.gfem"
+    source = SRC / "gfem.py"
 
     def cell_to_transfer_problem(x) -> list[int]:
         r = []
@@ -191,8 +181,8 @@ def task_gfem():
         r.append(x + 1)
         return r
 
-    def create_action(module, nreal, cell, debug=False):
-        action = "python3 -m {} {} {}".format(module, nreal, cell)
+    def create_action(script, nreal, cell, debug=False):
+        action = "python3 {} {} {}".format(script, nreal, cell)
         if debug:
             action += " --debug"
         return action
@@ -213,7 +203,7 @@ def task_gfem():
             yield {
                     "name": str(nreal) + ":" + str(cell),
                     "file_dep": deps,
-                    "actions": [create_action(module, nreal, cell, debug=True)],
+                    "actions": [create_action(source.as_posix(), nreal, cell, debug=True)],
                     "targets": targets,
                     "clean": True,
                     }
@@ -223,7 +213,7 @@ def task_validate_rom():
     """ParaGeom: Validate ROM"""
 
     def create_action(nreal, num_params, num_modes, options):
-        action = "python3 -m src.parageom.validate_rom {} {} {}".format(nreal, num_params, num_modes)
+        action = "python3 src/parageom/validate_rom.py {} {} {}".format(nreal, num_params, num_modes)
         for k, v in options.items():
             action += f" {k}"
             if v:
@@ -284,7 +274,7 @@ def task_validate_rom():
 
 def task_optimization():
     """ParaGeom: Determine optimal design"""
-    module = "src.parageom.optimization"
+    source = SRC / "optimization.py"
 
     num_modes = 100
     minimizer = "SLSQP"
@@ -303,7 +293,7 @@ def task_optimization():
                example.log_optimization]
     return {
             "file_dep": deps,
-            "actions": ["python3 -m {} {} --minimizer {} --omega {} --ei".format(module, num_modes, minimizer, omega)],
+            "actions": ["python3 {} {} --minimizer {} --omega {} --ei".format(source.as_posix(), num_modes, minimizer, omega)],
             "targets": targets,
             "clean": True,
             }
