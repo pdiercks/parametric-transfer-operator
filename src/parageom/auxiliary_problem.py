@@ -15,6 +15,8 @@ from multi.problems import LinearElasticityProblem
 
 from pymor.parameters.base import Mu, Parameters
 
+from .definitions import BeamData
+
 
 class GlobalAuxiliaryProblem:
     """Represents auxiliary problem on global parent domain."""
@@ -250,18 +252,20 @@ class AuxiliaryProblem:
         solver.solve(p.b, u.vector)
 
 
-def discretize_auxiliary_problem(fine_grid: str, degree: int, facet_tags: Union[dict[str, int], list[int]], param: dict[str, int], gdim: int = 2, coarse_grid: Optional[str] = None):
+def discretize_auxiliary_problem(example: BeamData, fine_grid: str, facet_tags: Union[dict[str, int], list[int]], param: dict[str, int], coarse_grid: Optional[str] = None):
     """Discretizes the auxiliary problem to compute transformation displacement.
 
     Args:
+        example: The example data class.
         fine_grid: The parent domain.
-        degree: Polynomial degree of geometry interpolation.
         facet_tags: Tags for all boundaries (AuxiliaryProblem) or several interfaces (GlobalAuxiliaryProblem).
         param: Dictionary mapping parameter names to parameter dimensions.
-        gdim: Geometrical dimension of the mesh.
         coarse_grid: Optional provide coarse grid.
 
     """
+    degree = example.geom_deg
+    gdim = example.gdim
+
     comm = MPI.COMM_SELF
     domain, ct, ft = gmshio.read_from_msh(fine_grid, comm, gdim=gdim)
     omega = RectangularDomain(domain, cell_tags=ct, facet_tags=ft)
@@ -269,7 +273,7 @@ def discretize_auxiliary_problem(fine_grid: str, degree: int, facet_tags: Union[
     # linear elasticity problem
     emod = df.fem.Constant(omega.grid, df.default_scalar_type(1.0))
     nu = df.fem.Constant(omega.grid, df.default_scalar_type(0.25))
-    mat = LinearElasticMaterial(gdim, E=emod, NU=nu)
+    mat = LinearElasticMaterial(gdim, E=emod, NU=nu, plane_stress=example.plane_stress)
     ve = element("P", domain.basix_cell(), degree, shape=(gdim,))
     V = df.fem.functionspace(domain, ve)
     problem = LinearElasticityProblem(omega, V, phases=mat)
@@ -296,13 +300,13 @@ def main():
     # phyiscal domains/meshes
     # need to use same degree as degree that should be
     # used for the geometry interpolation afterwards
-    degree = example.geom_deg
+    assert example.fe_deg == example.geom_deg
 
     # discretize auxiliary problem for parent unit cell
     mshfile = example.parent_unit_cell.as_posix()
     ftags = {"bottom": 11, "left": 12, "right": 13, "top": 14, "interface": 15}
     param = {"R": 1}
-    auxp = discretize_auxiliary_problem(mshfile, degree, ftags, param)
+    auxp = discretize_auxiliary_problem(example, mshfile, ftags, param)
 
     # output function
     d = df.fem.Function(auxp.problem.V)
@@ -323,7 +327,7 @@ def main():
     global_coarse_domain = example.coarse_grid("global").as_posix()
     param = {"R": 10}
     int_tags = [i for i in range(15, 25)]
-    auxp = discretize_auxiliary_problem(global_domain_msh, degree, int_tags, param, coarse_grid=global_coarse_domain)
+    auxp = discretize_auxiliary_problem(example, global_domain_msh, int_tags, param, coarse_grid=global_coarse_domain)
 
     d = df.fem.Function(auxp.problem.V)
     xdmf = XDMFFile(d.function_space.mesh.comm, "./transformation_global_domain.xdmf", "w")

@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import dolfinx as df
-from multi.boundary import within_range
+from multi.boundary import within_range, plane_at, point_at
 import numpy as np
 from pymor.parameters.base import Parameters
 
@@ -50,15 +50,16 @@ class BeamData:
 
     name: str = "parageom"
     gdim: int = 2
-    l_char: float = 100.0  # [mm], characteristic length = unit length
+    l_char: float = 1.0  # [mm], characteristic length = unit length
     unit_length: float = 1.0  # dimensionless unit length
     nx: int = 10
     ny: int = 1
     geom_deg: int = 2
     fe_deg: int = 2
     poisson_ratio: float = 0.2
-    youngs_modulus: float = 20e3  # [MPa]
-    traction_y: float = 5.0  # [MPa]
+    youngs_modulus: float = 30e3  # [MPa]
+    plane_stress: bool = True
+    traction_y: float = 0.0375 # [MPa]
     parameters: dict = field(
         default_factory=lambda: {
             "subdomain": Parameters({"R": 1}),
@@ -70,22 +71,23 @@ class BeamData:
     )
     training_set_seed: int = 767667058
     testing_set_seed: int = 545445836
-    validation_set_seed: int = 9818890
+    validation_set_seed: int = 241690
     projerr_seed: int = 923719053
     configurations: tuple[str, str, str] = ("left", "inner", "right")
     distributions: tuple[str, ...] = ("normal",)
-    methods: tuple[str, ...] = ("hapod", "heuristic")
+    methods: tuple[str, ...] = ("hapod", ) # "heuristic")
     epsilon_star: dict = field(
             default_factory=lambda: {
-                "heuristic": 0.01,
-                "hapod": 0.01,
+                "heuristic": 0.001,
+                "hapod": 0.001,
                 })
     epsilon_star_projerr: float = 0.001
-    omega: float = 0.5
+    omega: float = 0.5 # ω related to HAPOD (not output functional)
     rrf_ttol: float = 10e-2
     rrf_ftol: float = 1e-10
     rrf_num_testvecs: int = 20
     neumann_rtol: float = 1e-5
+    mdeim_rtol: float = 1e-5
     run_mode: str = "DEBUG"
 
     def __post_init__(self):
@@ -217,16 +219,14 @@ class BeamData:
         map = {"inner": 1, "left": 0, "right": 1}
         return map[config]
 
-    def ntrain(self, config: str) -> int:
-        """Define size of training set"""
-        if self.run_mode == "DEBUG":
-            map = {"left": 60, "inner": 80, "right": 60}
-            return map[config]
-        elif self.run_mode == "PRODUCTION":
-            map = {"left": 150, "inner": 200, "right": 150}
-            return map[config]
+    def ntrain(self, k: int) -> int:
+        """Define size of training set for k-th transfer problem"""
+        if k in (0, 10):
+            return 50
+        elif k in (1, 9):
+            return 100
         else:
-            raise NotImplementedError
+            return 200
 
     def cell_to_config(self, cell: int) -> str:
         """Maps global cell index to config."""
@@ -235,14 +235,15 @@ class BeamData:
         config = map.get(cell, "inner")
         return config
 
-    def local_basis_npy(self, nr: int, name: str, distr: str, cell: int) -> Path:
+    def local_basis_npy(self, nr: int, cell: int, method="hapod", distr="normal") -> Path:
         """final basis for loc rom assembly"""
-        dir = self.bases_path(nr, name, distr)
+        dir = self.bases_path(nr, method, distr)
         return dir / f"basis_{cell:02}.npy"
 
-    def local_basis_dofs_per_vert(self, nr: int, method: str, distr: str) -> Path:
+    def local_basis_dofs_per_vert(self, nr: int, cell: int, method="hapod", distr="normal") -> Path:
+        """Dofs per vertex for each cell"""
         dir = self.bases_path(nr, method, distr)
-        return dir / "dofs_per_vert.npy"
+        return dir / f"dofs_per_vert_{cell:02}.npy"
 
     def locrom_error(self, nreal: int, method: str, distr: str, ei: bool=False) -> Path:
         """loc ROM error"""
@@ -252,15 +253,38 @@ class BeamData:
         else:
             return dir / f"locrom_error_{distr}.npz"
 
-    # @property
-    # def fom_minimization_data(self) -> Path:
-    #     """FOM minimization data"""
-    #     return self.rf / "fom_minimization_data.out"
-    #
-    # def rom_minimization_data(self, distr: str, name: str) -> Path:
-    #     """ROM minimization data"""
-    #     return self.rf / f"rom_minimization_data_{distr}_{name}.out"
-    #
+    def rom_error_u(self, nreal: int, num_modes: int, method="hapod", ei=False) -> Path:
+        dir = self.method_folder(nreal, method)
+        if ei:
+            return dir / f"rom_error_u_ei_{num_modes}.npz"
+        else:
+            return dir / f"rom_error_u_{num_modes}.npz"
+
+    def rom_error_s(self, nreal: int, num_modes: int, method="hapod", ei=False) -> Path:
+        dir = self.method_folder(nreal, method)
+        if ei:
+            return dir / f"rom_error_s_ei_{num_modes}.npz"
+        else:
+            return dir / f"rom_error_s_{num_modes}.npz"
+    @property
+    def fom_minimization_data(self) -> Path:
+        """FOM minimization data"""
+        return self.rf / "fom_minimization_data.out"
+
+    @property
+    def rom_minimization_data(self) -> Path:
+        """ROM minimization data"""
+        return self.rf / "rom_minimization_data.out"
+
+    def pp_stress(self, method: str) -> dict[str, Path]:
+        """Postprocessing of stress at optimal design"""
+        folder = self.method_folder(0, method)
+        return {
+                "fom": folder / "stress_fom.xdmf",
+                "rom": folder / "stress_rom.xdmf",
+                "err": folder / "stress_err.xdmf"
+                }
+
     # @property
     # def minimization_data_table(self) -> Path:
     #     return self.rf / "minimization_data.csv"
@@ -297,15 +321,15 @@ class BeamData:
         np.save(outpath, realizations)
 
     def log_basis_construction(
-        self, nr: int, method: str, distr: str, config: str
+            self, nr: int, method: str, k: int
     ) -> Path:
-        return self.logs_path(nr, method) / f"basis_construction_{distr}_{config}.log"
+        return self.logs_path(nr, method) / f"basis_construction_{k:02}.log"
 
     def log_projerr(self, nr: int, method: str, distr: str, config: str) -> Path:
         return self.logs_path(nr, method) / f"projerr_{distr}_{config}.log"
 
-    def log_gfem(self, nr: int, method: str, distr: str) -> Path:
-        return self.logs_path(nr, method) / f"gfem_{distr}.log"
+    def log_gfem(self, nr: int, cell: int, method="hapod") -> Path:
+        return self.logs_path(nr, method) / f"gfem_{cell:02}.log"
 
     def log_run_locrom(self, nr: int, method: str, distr: str, ei: bool=False) -> Path:
         dir = self.logs_path(nr, method)
@@ -314,24 +338,39 @@ class BeamData:
         else:
             return dir / f"run_locrom_{distr}.log"
 
-    def hapod_singular_values(self, nr: int, distr: str, conf: str) -> Path:
-        """singular values of final POD"""
-        return self.method_folder(nr, "hapod") / f"singular_values_{distr}_{conf}.npy"
+    def log_validate_rom(self, nr: int, modes: int, method="hapod", distr="normal", ei=True) -> Path:
+        dir = self.logs_path(nr, method)
+        if ei:
+            return dir / f"validate_rom_{modes}_{distr}_with_ei.log"
+        else:
+            return dir / f"validate_rom_{modes}_{distr}.log"
 
-    def hapod_modes_xdmf(self, nr: int, distr: str, config: str) -> Path:
-        """modes of the final POD"""
+    @property
+    def log_optimization(self) -> Path:
+        return self.logs_path(0, "hapod") / "optimization.log"
+
+    def hapod_singular_values(self, nr: int, k: int) -> Path:
+        """singular values of final POD for k-th transfer problem"""
+        return self.method_folder(nr, "hapod") / f"singular_values_{k:02}.npy"
+
+    def hapod_neumann_svals(self, nr: int, k: int) -> Path:
+        """singular values of POD of neumann data for k-th transfer problem"""
+        return self.method_folder(nr, "hapod") / f"neumann_singular_values_{k:02}.npy"
+
+    def hapod_modes_xdmf(self, nr: int, k: int) -> Path:
+        """modes of the final POD for k-th transfer problem"""
         dir = self.method_folder(nr, "hapod") / "pod_modes"
-        return dir / f"modes_{distr}_{config}.xdmf"
+        return dir / f"modes_{k:02}.xdmf"
 
     def heuristic_modes_xdmf(self, nr: int, distr: str, config: str) -> Path:
         """modes computed by heuristic range finder"""
         dir = self.method_folder(nr, "heuristic") / "modes"
         return dir / f"modes_{distr}_{config}.xdmf"
 
-    def hapod_modes_npy(self, nr: int, distr: str, config: str) -> Path:
-        """modes of the final POD"""
+    def hapod_modes_npy(self, nr: int, k: int) -> Path:
+        """modes of the final POD for k-th transfer problem"""
         dir = self.method_folder(nr, "hapod") / "pod_modes"
-        return dir / f"modes_{distr}_{config}.npy"
+        return dir / f"modes_{k:02}.npy"
 
     def heuristic_modes_npy(self, nr: int, distr: str, config: str) -> Path:
         """modes computed by heuristic range finder"""
@@ -342,9 +381,18 @@ class BeamData:
         dir = self.method_folder(nr, method)
         return dir / f"projerr_{distr}_{config}.npz"
 
-    @property
-    def target_subdomain(self) -> Path:
-        return self.parent_domain("target")
+    # @property
+    # def target_subdomain(self) -> Path:
+    #     return self.parent_domain("target")
+
+    def path_omega(self, k: int) -> Path:
+        return self.grids_path / f"omega_{k:02}.msh"
+
+    def path_omega_coarse(self, k: int) -> Path:
+        return self.grids_path / f"omega_coarse_{k:02}.msh"
+
+    def path_omega_in(self, k: int) -> Path:
+        return self.grids_path / f"omega_in_{k:02}.msh"
 
     def config_to_omega_in(self, config: str, local=True) -> list[int]:
         """Maps config to cell local index/indices of oversampling domain that correspond to omega in."""
@@ -382,7 +430,7 @@ class BeamData:
         return cells
 
     def boundaries(self, domain: df.mesh.Mesh):
-        """Returns Dirichlet boundaries of the global domain.
+        """Returns boundaries (Dirichlet, Neumann) of the global domain.
 
         Args:
             domain: The global domain.
@@ -400,92 +448,113 @@ class BeamData:
         return {
             "support_left": (
                 int(101),
-                within_range([xmin[0], xmin[1], xmin[2]], [a / 2, xmin[1], xmin[2]]),
+                plane_at(xmin[0], "x"),
             ),
             "support_right": (
                 int(102),
-                within_range(
-                    [xmax[0] - a / 2, xmin[1], xmin[2]], [xmax[0], xmin[1], xmin[2]]
-                ),
+                point_at([xmax[0], xmin[1], xmin[2]])
             ),
+            "support_top": (
+                int(194),
+                within_range([xmin[0], xmax[1], xmin[2]], [a, xmax[1], xmin[2]]),
+                ),
         }
 
     def get_dirichlet(
             self, domain: df.mesh.Mesh, config: str
-    ) -> Optional[dict]:
+    ) -> Optional[list[dict]]:
+        # NOTE
+        # this only defines markers using `within_range`
+        # code needs to use df.mesh.locate_entities_boundary
         boundaries = self.boundaries(domain)
         _, left = boundaries["support_left"]
         _, right = boundaries["support_right"]
 
-        # NOTE
-        # this only defines markers using `within_range`
-        # code needs to use df.mesh.locate_entities_boundary
+        bcs = []
+        zero = df.default_scalar_type(0.0)
 
         if config == "left":
-            u_origin = (df.default_scalar_type(0.0), df.default_scalar_type(0.0))
-            dirichlet = {
-                "value": u_origin,
+            fix_ux = {
+                "value": zero,
                 "boundary": left,
                 "entity_dim": 1,
-                "sub": None,
+                "sub": 0,
             }
+            bcs.append(fix_ux)
+            return bcs
         elif config == "inner":
-            dirichlet = None
+            return None
         elif config == "right":
-            u_bottom_right = df.default_scalar_type(0.0)
-            dirichlet = {
-                "value": u_bottom_right,
+            fix_uy = {
+                "value": zero,
                 "boundary": right,
-                "entity_dim": 1,
+                "entity_dim": 0,
                 "sub": 1,
             }
-        else:
-            raise NotImplementedError
-        return dirichlet
-
-    @property
-    def get_neumann(self) -> None:
-        return None
-
-    def get_kernel_set(self, cell_index: int) -> tuple[int, ...]:
-        """return indices of rigid body modes to be used"""
-        if cell_index in (0, 1):
-            # left, only rotation is free
-            return (2,)
-        elif cell_index in (4, 5):
-            # inner, use all rigid body modes
-            return (0, 1, 2)
-        elif cell_index in (8, 9):
-            # right, only trans y is constrained
-            return (0, 2)
+            bcs.append(fix_uy)
+            return bcs
         else:
             raise NotImplementedError
 
-    def get_gamma_out(self, cell_index: Optional[int] = None) -> Callable:
-        unit_length = self.unit_length
-        y = self.height
-        tol = 1e-4
+    def get_neumann(self, domain: df.mesh.Mesh, config: str) -> Optional[tuple[int, Callable]]:
+        boundaries = self.boundaries(domain)
+        tag, marker = boundaries["support_top"]
 
-        # NOTE
-        # this only defines the marker
-        # code needs to use df.mesh.locate_entities_boundary
-
-        if cell_index in (0, 1):
-            x = 3 * unit_length
-            start = [x, 0.0 + tol, 0.0]
-            end = [x, y - tol, 0.0]
-            gamma_out = within_range(start, end)
-        elif cell_index in (4, 5):
-            x_left = 3 * unit_length
-            x_right = 7 * unit_length
-            left = within_range([x_left, 0.0 + tol, 0.0], [x_left, y - tol, 0.0])
-            right = within_range([x_right, 0.0 + tol, 0.0], [x_right, y - tol, 0.0])
-
-            def gamma_out(x):
-                return np.logical_or(left(x), right(x))
-        elif cell_index in (8, 9):
-            x = 7 * unit_length
-            gamma_out = within_range([x, 0.0 + tol, 0.0], [x, y - tol, 0.0])
+        if config == "left":
+            return (tag, marker)
+        elif config == "inner":
+            return None
+        elif config == "right":
+            return None
         else:
             raise NotImplementedError
-        return gamma_out
+
+    # def get_kernel_set(self, cell_index: int) -> tuple[int, ...]:
+    #     """return indices of rigid body modes to be used"""
+    #     assert cell_index in (0, 1, 4, 5, 8, 9)
+    #
+    #     # never remove kernel if Dirichlet (even if only component-wise)
+    #     # is present. This can destroy the condition, because
+    #     # kernel.inner(U) cannot be trusted to compute zero coefficient
+    #     # for the constrained component ...
+    #
+    #     kernel = set([0, 1, 2])
+    #     if cell_index in (0, 1):
+    #         # left: u_x is fixed for left boundary
+    #         kernel.remove(0)
+    #     # elif cell_index in (4, 5):
+    #     #     # inner, use all rigid body modes
+    #     elif cell_index in (8, 9):
+    #         # right, only trans y is constrained
+    #         # right: u_y is fixed for a single point
+    #         kernel.remove(1)
+    #     return tuple(kernel)
+
+    # def get_gamma_out(self, cell_index: Optional[int] = None) -> Callable:
+    #     unit_length = self.unit_length
+    #     y = self.height
+    #     tol = 1e-4
+    #
+    #     # NOTE
+    #     # this only defines the marker
+    #     # code needs to use df.mesh.locate_entities_boundary
+    #
+    #     if cell_index in (0, 1):
+    #         x = 3 * unit_length
+    #         start = [x, 0.0 + tol, 0.0]
+    #         end = [x, y - tol, 0.0]
+    #         gamma_out = within_range(start, end)
+    #     elif cell_index in (4, 5):
+    #         x_left = 3 * unit_length
+    #         x_right = 7 * unit_length
+    #         left = within_range([x_left, 0.0 + tol, 0.0], [x_left, y - tol, 0.0])
+    #         right = within_range([x_right, 0.0 + tol, 0.0], [x_right, y - tol, 0.0])
+    #
+    #         def gamma_out(x):
+    #             return np.logical_or(left(x), right(x))
+    #     elif cell_index in (8, 9):
+    #         x = 7 * unit_length
+    #         gamma_out = within_range([x, 0.0 + tol, 0.0], [x, y - tol, 0.0])
+    #     else:
+    #         raise NotImplementedError
+    #     return gamma_out

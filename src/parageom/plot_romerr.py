@@ -1,71 +1,61 @@
 import numpy as np
+from collections import defaultdict
 from multi.postprocessing import read_bam_colors
 from multi.plotting_context import PlottingContext
-
-
-def postproc(nreal: int, method: str, distr: str):
-    from .tasks import example
-
-    instream = example.locrom_error(nreal, method, distr)
-    data = np.load(instream)
-    max_dpv = np.load(example.local_basis_dofs_per_vert(nreal, method, distr))
-
-    # now check values in data
-    # and max dofs per vert
-
-    breakpoint()
 
 
 def main(cli):
     from .tasks import example
 
-    distr = example.distributions[0]
     bamcd = read_bam_colors()
     blue = bamcd["blue"][0]
     red = bamcd["red"][0]
 
-    marker = {
-        "h1_semi": "x",
-        "max": "o",
-    }
-    norm_label = {"h1_semi": "H1-semi", "max": "max"}
-    err_ = "max_relerr"
+    nreal = cli.nreal
+    number_of_modes = [20, 40, 60, 80, 100, 120, 140, 160]
+
+    erru = defaultdict(list)
+    errs = defaultdict(list)
+
+    # define data to gather via keys
+    keys = ["relerr"]
+
+    # append 1.0 for num_modes=0
+    for key in keys:
+        erru["min_"+key].append(1.0)
+        erru["max_"+key].append(1.0)
+        erru["avg_"+key].append(1.0)
+        errs["min_"+key].append(1.0)
+        errs["max_"+key].append(1.0)
+        errs["avg_"+key].append(1.0)
+
+    for num_modes in number_of_modes:
+        data_u = np.load(example.rom_error_u(nreal, num_modes, ei=cli.ei))
+        data_s = np.load(example.rom_error_s(nreal, num_modes, ei=cli.ei))
+
+        for key in keys:
+            erru["min_"+key].append(np.min(data_u[key]))
+            erru["max_"+key].append(np.max(data_u[key]))
+            erru["avg_"+key].append(np.average(data_u[key]))
+
+            errs["min_"+key].append(np.min(data_s[key]))
+            errs["max_"+key].append(np.max(data_s[key]))
+            errs["avg_"+key].append(np.average(data_s[key]))
+
+    number_of_modes = [0,] + number_of_modes
 
     args = [__file__, cli.outfile]
     styles = [example.plotting_style.as_posix()]
     with PlottingContext(args, styles) as fig:
         ax = fig.subplots()
-        for method in example.methods:
-            infile = example.locrom_error(cli.nreal, method, distr)
-            data = np.load(infile)
-            num_dofs = data["ndofs"]
-            for norm in cli.norm:
-                err = data["_".join([err_, norm])]
-                mark = marker[norm]
-                if method == "heuristic":
-                    label = f"HRRF, {norm_label[norm]}"
-                    color = blue
-                elif method == "hapod":
-                    label = f"RRF+POD, {norm_label[norm]}"
-                    color = red
-                ax.semilogy(num_dofs, err, color=color, marker=mark, label=label)  # type: ignore
-
-            if cli.ei:
-                infile = example.locrom_error(cli.nreal, method, distr, ei=True)
-                data = np.load(infile)
-                num_dofs = data["ndofs"]
-                for norm in cli.norm:
-                    err = data["_".join([err_, norm])]
-                    mark = marker[norm]
-                    if method == "heuristic":
-                        label = f"HRRF+EI, {norm_label[norm]}"
-                        color = blue
-                    elif method == "hapod":
-                        label = f"RRF+POD+EI, {norm_label[norm]}"
-                        color = red
-                    ax.semilogy(num_dofs, err, color=color, linestyle="dotted", marker=mark, label=label)  # type: ignore
+        ax.semilogy(number_of_modes, erru["avg_relerr"], color=red, linestyle="dashed", marker=".")
+        ax.semilogy(number_of_modes, errs["avg_relerr"], color=blue, linestyle="dashed", marker=".")
+        ax.fill_between(number_of_modes, erru["min_relerr"], erru["max_relerr"], alpha=0.2, color=red)
+        ax.fill_between(number_of_modes, errs["min_relerr"], errs["max_relerr"], alpha=0.2, color=blue)
+        ax.semilogy(number_of_modes, erru["max_relerr"], color=red, linestyle="solid", marker="o", label=r"$e_u$")  # type: ignore
+        ax.semilogy(number_of_modes, errs["max_relerr"], color=blue, linestyle="solid", marker="o", label=r"$e_{\sigma}$")
         ax.legend(loc="best")  # type: ignore
-        ax.set_xlabel("Number of DOFs")  # type: ignore
+        ax.set_xlabel("Local basis size")  # type: ignore
         ax.set_ylabel("Relative error")  # type: ignore
 
 
@@ -75,8 +65,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("nreal", type=int, help="The n-th realization.")
-    parser.add_argument("--norm", nargs="+", type=str, required=True, help="Plot relative error in given norms")
-    parser.add_argument("--ei", action="store_true", help="Additionally plot error of loc ROM with EI.")
+    parser.add_argument("--ei", action="store_true", help="Plot data of validation of ROM with EI.")
     parser.add_argument("outfile", type=str, help="Write plot to path (pdf).")
     args = parser.parse_args(sys.argv[1:])
     main(args)

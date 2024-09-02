@@ -69,6 +69,7 @@ def main(args):
     logger.info(f"Computing spectral basis with method {args.method} ...")
     basis = None
     epsilon_star = example.epsilon_star_projerr
+    Nin = transfer.rhs.dofs.size
 
     if args.method == "hapod":
         from .hapod import adaptive_rrf_normal
@@ -76,13 +77,19 @@ def main(args):
         snapshots = transfer.range.empty()
         spectral_basis_sizes = list()
 
-        Nin = transfer.rhs.dofs.size
-        epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2.0) * epsilon_star
-        epsilon_pod = epsilon_star * np.sqrt(Nin * ntrain)
+        # epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2.0) * epsilon_star
+        # epsilon_pod = np.sqrt(Nin * ntrain) * example.omega * epsilon_star
 
-        # scaling
-        epsilon_alpha /= example.l_char
-        epsilon_pod /= example.l_char
+        # total number of input vectors is at most Nin * ntrain
+        # but as usually much less vectors than Nin are computed per transfer operator
+
+        # we use Nin=1 here to ensure that sufficient number of spectral modes is generated
+        # for each transfer operator
+        epsilon_alpha = np.sqrt(1 - example.omega**2) * epsilon_star
+        epsilon_pod = np.sqrt(ntrain) * example.omega * epsilon_star
+
+        # as number of testvectors we use Nin
+        # the l2-mean error will be computed over set of testvectors
 
         for mu, seed_seq in zip(training_set, seed_seqs_rrf):
             with new_rng(seed_seq):
@@ -90,15 +97,14 @@ def main(args):
                 rb = adaptive_rrf_normal(
                     logger,
                     transfer,
-                    error_tol=example.rrf_ttol / example.l_char,
+                    error_tol=example.rrf_ttol,
                     failure_tolerance=example.rrf_ftol,
-                    num_testvecs=example.rrf_num_testvecs,
+                    num_testvecs=Nin,
                     l2_err=epsilon_alpha,
-                    sampling_options={"scale": 0.1},
                 )
                 logger.info(f"\nSpectral Basis length: {len(rb)}.")
                 spectral_basis_sizes.append(len(rb))
-                snapshots.append(rb)
+                snapshots.append(rb) # type: ignore
         logger.info(
             f"Average length of spectral basis: {np.average(spectral_basis_sizes)}."
         )
@@ -131,27 +137,14 @@ def main(args):
     if not orthonormal:
         raise ValueError("Basis is not orthonormal wrt range product.")
 
-    # Definition of validation set
-    # make sure that this is always the same set of parameters
-    # and also same set of boundary data
-    # but different from μ and g used in the training
-    # purely random testing would be better ??
-    # test_set = sample_lhs(
-    #     parameter_space,
-    #     name=parameter_name,
-    #     samples=30,
-    #     criterion="center",
-    #     random_state=example.projerr_seed,
-    # )
-
-    test_set = parameter_space.sample_randomly(50)
-    test_data = transfer.range.empty(reserve=len(test_set))
-
-    logger.info(f"Computing test set of size {len(test_set)}...")
+    # Definition of test set (μ) and test data (g)
+    logger.info(f"Computing test set of size {ntrain * Nin}...")
     with new_rng(example.projerr_seed):
+        test_set = parameter_space.sample_randomly(ntrain)
+        test_data = transfer.range.empty(reserve=len(test_set))
         for mu in test_set:
             transfer.assemble_operator(mu)
-            g = transfer.generate_random_boundary_data(1, args.distr, {"scale": 0.1})
+            g = transfer.generate_random_boundary_data(Nin, args.distr)
             test_data.append(transfer.solve(g))
 
     aerrs = defaultdict(list)
@@ -164,10 +157,10 @@ def main(args):
         if key == "max":
             return lc * U.amax()[1]
         else:
-            assert key in ("h1-semi", "euclidean")
+            assert key in (transfer.range_product.name, "euclidean")
             return lc * U.norm(value)
 
-    products = {"h1-semi": transfer.range_product, "euclidean": None, "max": False}
+    products = {transfer.range_product.name: transfer.range_product, "euclidean": None, "max": False}
     test_norms = {}
     for k, v in products.items():
         test_norms[k] = compute_norm(test_data, k, v)
@@ -194,30 +187,16 @@ def main(args):
             rerrs[k].append(np.max(rel_err))
             l2errs[k].append(l2_err)
 
-    # Summary
-    # epsilon_star = 0.1
-    # aerrs['max'][-1] = 0.0634 (in mm, because norm is scaled with lc)
-    # rerrs['max'][-1] = 0.0613
-    # aerrs['h1-semi'][-1] = 0.198
-    # l2errs['h1-semi'][-1] = 0.0078 (<1e-2=epsilon_star**2)
-
-    # Summary
-    # epsilon_star = 0.01
-    # aerrs['max'][-1] = 0.0035 (in mm, because norm is scaled with lc)
-    # rerrs['max'][-1] = 0.00523
-    # aerrs['h1-semi'][-1] = 0.018
-    # l2errs['h1-semi'][-1] = 5.7e-05 (<1e-4=epsilon_star**2)
-
     if args.output is not None:
         np.savez(
             args.output,
-            rerr_h1_semi=rerrs["h1-semi"],
+            rerr_h1_semi=rerrs[transfer.range_product.name],
             rerr_euclidean=rerrs["euclidean"],
             rerr_max=rerrs["max"],
-            aerr_h1_semi=aerrs["h1-semi"],
+            aerr_h1_semi=aerrs[transfer.range_product.name],
             aerr_euclidean=aerrs["euclidean"],
             aerr_max=aerrs["max"],
-            l2err_h1_semi=l2errs["h1-semi"],
+            l2err_h1_semi=l2errs[transfer.range_product.name],
             l2err_euclidean=l2errs["euclidean"],
             l2err_max=l2errs["max"],
         )
