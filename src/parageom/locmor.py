@@ -64,7 +64,7 @@ class COOMatrixOperator(Operator):
         indexptr: np.ndarray,
         num_cells: int,
         shape: Tuple[int, int],
-        parameters: Parameters = {},
+        parameters: Parameters = {}, # type: ignore
         solver_options: Optional[dict] = None,
         name: Optional[str] = None,
     ):
@@ -147,7 +147,7 @@ class GlobalParaGeomOperator(Operator):
         indexptr: np.ndarray,
         num_cells: int,
         shape: Tuple[int, int],
-        parameters: Parameters = {},
+        parameters: Parameters = {}, # type: ignore
         solver_options: Optional[dict] = None,
         name: Optional[str] = None,
     ):
