@@ -1,5 +1,6 @@
+from dolfinx.io import XDMFFile # type: ignore
 from mpi4py import MPI
-from multi.domain import StructuredQuadGrid
+from multi.domain import RectangularDomain, StructuredQuadGrid
 from multi.io import read_mesh
 from multi.projection import orthogonal_part
 import numpy as np
@@ -166,14 +167,28 @@ def main(args):
     set_defaults({"pymor.core.logger.getLogger.filename": logfilename})
     logger = getLogger("hapod", level=loglevel)
 
-    # ### Coarse grid partition
-    coarse_grid_path = example.coarse_grid("global")
+    # ### Coarse grid partition of omega
+    coarse_grid_path = example.path_omega_coarse(args.k)
     coarse_domain = read_mesh(coarse_grid_path, MPI.COMM_WORLD, cell_tags=None, kwargs={"gdim": example.gdim})[0]
-    struct_grid_gl = StructuredQuadGrid(coarse_domain)
+    struct_grid = StructuredQuadGrid(coarse_domain)
+
+    # ### Fine grid partition of omega
+    path_omega = example.path_omega(args.k)
+    with XDMFFile(MPI.COMM_WORLD, path_omega.as_posix(), "r") as xdmf:
+        omega_mesh = xdmf.read_mesh()
+        omega_ct = xdmf.read_meshtags(omega_mesh, name="Cell tags")
+        omega_ft = xdmf.read_meshtags(omega_mesh, name="mesh_tags")
+    omega = RectangularDomain(omega_mesh, cell_tags=omega_ct, facet_tags=omega_ft)
+
+    # ### Fine grid partition of omega_in
+    path_omega_in = example.path_omega_in(args.k)
+    with XDMFFile(MPI.COMM_WORLD, path_omega_in.as_posix(), "r") as xdmf:
+        omega_in_mesh = xdmf.read_mesh()
+    omega_in = RectangularDomain(omega_in_mesh)
 
     logger.info(f"Discretizing transfer problem for k = {args.k:02} ...")
     osp_config = oversampling_config_factory(args.k)
-    transfer, fext = discretize_transfer_problem(example, struct_grid_gl, osp_config, debug=args.debug)
+    transfer, fext = discretize_transfer_problem(example, struct_grid, omega, omega_in, osp_config, debug=args.debug)
 
     # ### Generate training seed for each of the 11 oversampling problems
     myseeds = np.random.SeedSequence(example.training_set_seed).generate_state(11)

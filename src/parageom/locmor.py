@@ -4,12 +4,10 @@ from typing import Any, Callable, Optional, Tuple, Union
 
 import dolfinx as df
 import dolfinx.fem.petsc
-from mpi4py import MPI
 from multi.boundary import plane_at, point_at, within_range
 from multi.dofmap import DofMap
 from multi.domain import RectangularDomain, StructuredQuadGrid
 from multi.interpolation import make_mapping
-from multi.io import read_mesh
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinearElasticityProblem
 from multi.projection import orthogonal_part
@@ -769,69 +767,22 @@ def oversampling_config_factory(k):
         return OversamplingConfig(k, cells_omega[k], cells_omega_in[k], kernel[k], gamma_out[k])
 
 
-def discretize_transfer_problem(example: BeamData, struct_grid_gl: StructuredQuadGrid, osp_config: OversamplingConfig, debug: bool=False):
+def discretize_transfer_problem(example: BeamData, coarse_omega: StructuredQuadGrid, omega: RectangularDomain,  omega_in: RectangularDomain, osp_config: OversamplingConfig, debug: bool=False):
     """Discretize transfer problem.
 
     Args:
         example: The data class for the example problem.
-        struct_grid_gl: Global coarse grid.
+        coarse_omega: Coarse grid of the oversampling domain Ω.
+        omega: Fine grid of the oversampling domain Ω.
+        omega_in: Fine grid of the target subdomain Ω_in.
         osp_config: Configuration of this transfer problem.
     """
-    from parageom.preprocessing import create_structured_coarse_grid_v2, create_fine_scale_grid_v2
     from parageom.auxiliary_problem import GlobalAuxiliaryProblem
     from parageom.fom import ParaGeomLinEla
     from parageom.matrix_based_operator import _create_dirichlet_bcs, BCTopo, BCGeom
     from parageom.locmor import ParametricTransferProblem, DirichletLift
-    from multi.preprocessing import create_meshtags
 
     cells_omega = osp_config.cells_omega
-    cells_omega_in = osp_config.cells_omega_in
-
-    # create coarse grid partition of oversampling domain
-    outstream = example.path_omega_coarse(osp_config.index)
-    create_structured_coarse_grid_v2(example, struct_grid_gl, cells_omega, outstream.as_posix())
-    coarse_omega = read_mesh(outstream, MPI.COMM_WORLD, kwargs={"gdim": example.gdim})[0]
-    struct_grid_omega = StructuredQuadGrid(coarse_omega)
-    assert struct_grid_omega.num_cells == cells_omega.size
-
-    # create fine grid partition of oversampling domain
-    output = example.path_omega(osp_config.index)
-    create_fine_scale_grid_v2(example, struct_grid_gl, cells_omega, output.as_posix())
-    omega, omega_ct, omega_ft = read_mesh(output, MPI.COMM_WORLD, kwargs={"gdim": example.gdim})
-    omega = RectangularDomain(omega, cell_tags=omega_ct, facet_tags=omega_ft)
-    # create facets
-    # facet tags for void interfaces start from 15 (see create_fine_scale_grid_v2)
-    # i.e. 15 ... 24 for max number of cells
-
-    facet_tag_definitions = {}
-    for tag, key in zip([int(11), int(12), int(13)], ["bottom", "left", "right"]):
-        facet_tag_definitions[key] = (tag, omega.str_to_marker(key))
-
-    # add tags for neumann boundary
-    top_tag = None
-    if osp_config.gamma_n is not None:
-        top_tag = int(194)
-        top_locator = osp_config.gamma_n
-        facet_tag_definitions["top"] = (top_tag, top_locator)
-
-    # update already existing facet tags
-    # this will add tags for "top" boundary
-    omega.facet_tags = create_meshtags(omega.grid, omega.tdim-1, facet_tag_definitions, tags=omega.facet_tags)[0]
-
-    assert omega.facet_tags.find(11).size == example.num_intervals * cells_omega.size  # bottom
-    assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
-    assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
-    for itag in range(15, 15 + cells_omega.size):
-        assert omega.facet_tags.find(itag).size == example.num_intervals * 4  # void
-    # create fine grid partition of target subdomain
-    output = example.path_omega_in(osp_config.index)
-    create_fine_scale_grid_v2(example, struct_grid_gl, cells_omega_in, output.as_posix())
-    omega_in, omega_in_ct, omega_in_ft = read_mesh(output, MPI.COMM_WORLD, kwargs={"gdim": example.gdim})
-    omega_in = RectangularDomain(omega_in, cell_tags=omega_in_ct, facet_tags=omega_in_ft)
-
-    # create necessary connectivities
-    omega.grid.topology.create_connectivity(0, 2)
-    omega_in.grid.topology.create_connectivity(0, 2)
 
     # ### Function Spaces
     V = df.fem.functionspace(omega.grid, ("P", example.geom_deg, (example.gdim,)))
@@ -863,7 +814,7 @@ def discretize_transfer_problem(example: BeamData, struct_grid_gl: StructuredQua
     problem = LinearElasticityProblem(omega, V, phases=mat)
     params = Parameters({"R": cells_omega.size})
     auxiliary_problem = GlobalAuxiliaryProblem(
-        problem, aux_tags, params, struct_grid_omega, interface_locators=interface_locators
+        problem, aux_tags, params, coarse_omega, interface_locators=interface_locators
     )
     d_trafo = df.fem.Function(V, name="d_trafo")
 
@@ -1001,7 +952,7 @@ def discretize_transfer_problem(example: BeamData, struct_grid_gl: StructuredQua
     )
 
     if osp_config.gamma_n is not None:
-        assert top_tag is not None
+        top_tag = example.neumann_tag
         assert omega.facet_tags.find(top_tag).size == example.num_intervals * 1  # top
         dA = ufl.Measure("ds", domain=omega.grid, subdomain_data=omega.facet_tags)
         t_y = -example.traction_y
@@ -1010,7 +961,7 @@ def discretize_transfer_problem(example: BeamData, struct_grid_gl: StructuredQua
             (df.default_scalar_type(0.0), df.default_scalar_type(t_y)),
         )
         v = ufl.TestFunction(V)
-        L = ufl.inner(v, traction) * dA(facet_tag_definitions["top"][0])
+        L = ufl.inner(v, traction) * dA(top_tag)
         Lcpp = df.fem.form(L)
         f_ext = dolfinx.fem.petsc.create_vector(Lcpp)  # type: ignore
 

@@ -9,7 +9,6 @@ from parageom.definitions import BeamData, ROOT
 os.environ["PYMOR_COLORS_DISABLE"] = "1"
 example = BeamData(name="parageom", run_mode="DEBUG")
 SRC = ROOT / "src" / f"{example.name}"
-CONFIGS = example.configurations
 
 
 def rm_rf(task, dryrun):
@@ -63,38 +62,56 @@ def task_parent_unit_cell():
 
 def task_coarse_grid():
     """ParaGeom: Create structured coarse grids"""
-    for config in ["global"]:
-        yield {
-            "name": config,
-            "file_dep": [SRC / "preprocessing.py"],
-            "actions": [
-                "python3 %(dependencies)s {} {} --output %(targets)s".format(
-                    config, "coarse"
-                )
-            ],
-            "targets": [example.coarse_grid(config)],
-            "clean": True,
-            "uptodate": [run_once],
-        }
+    from parageom.preprocessing import create_structured_coarse_grid
+
+    def create_global_coarse_grid(targets):
+        create_structured_coarse_grid(example, "global", targets[0])
+
+    return {
+        "file_dep": [SRC / "preprocessing.py"],
+        "actions": [create_global_coarse_grid],
+        "targets": [example.coarse_grid("global")],
+        "clean": True,
+        "uptodate": [run_once],
+    }
 
 
 def task_fine_grid():
     """ParaGeom: Create parent domain mesh"""
-    for config in ["global"]:
+    from parageom.preprocessing import create_fine_scale_grid
+
+    def create_global_fine_grid(targets):
+        create_fine_scale_grid(example, "global", targets[0])
+
+    return {
+        "file_dep": [example.coarse_grid("global"), example.parent_unit_cell, SRC / "preprocessing.py"],
+        "actions": [create_global_fine_grid],
+        "targets": [example.parent_domain("global")],
+        "clean": True,
+    }
+
+
+def task_oversampling_grid():
+    """ParaGeom: Create grids for oversampling"""
+    source = SRC / "preprocessing.py"
+    for k in range(11):
+        targets = [example.path_omega_coarse(k)]
+        targets.extend(with_h5(example.path_omega(k)))
+        targets.extend(with_h5(example.path_omega_in(k)))
         yield {
-            "name": config,
-            "file_dep": [example.coarse_grid(config), example.parent_unit_cell, SRC / "preprocessing.py"],
-            "actions": ["python3 src/parageom/preprocessing.py {} {} --output %(targets)s".format(config, "fine")],
-            "targets": [example.parent_domain(config)],
-            "clean": True,
-        }
+                "name": f"{k}",
+                "file_dep": [source, example.coarse_grid("global")],
+                "actions": ["python3 {} {}".format(source, k)],
+                "targets": targets,
+                "clean": True,
+                }
 
 
 def task_preproc():
     """ParaGeom: All tasks related to preprocessing"""
     return {
         "actions": None,
-        "task_dep": ["coarse_grid", "fine_grid", "parent_unit_cell"],
+        "task_dep": ["coarse_grid", "fine_grid", "parent_unit_cell", "oversampling_grid"],
     }
 
 
@@ -105,13 +122,13 @@ def task_hapod():
         for k in range(11):
             deps = [SRC / "hapod.py"]
             deps.append(example.coarse_grid("global"))
+            deps.append(example.path_omega_coarse(k))
+            deps.extend(with_h5(example.path_omega(k)))
+            deps.extend(with_h5(example.path_omega_in(k)))
             targets = []
             targets.append(
                 example.log_basis_construction(nreal, "hapod", k)
             )
-            targets.append(example.path_omega_coarse(k))
-            targets.append(example.path_omega(k))
-            targets.append(example.path_omega_in(k))
             targets.append(example.hapod_modes_npy(nreal, k))
             targets.append(example.hapod_singular_values(nreal, k))
             targets.append(example.hapod_info(nreal, k))
