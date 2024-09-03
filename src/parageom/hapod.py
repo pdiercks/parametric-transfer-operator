@@ -7,6 +7,7 @@ from pymor.algorithms.gram_schmidt import gram_schmidt
 from pymor.algorithms.pod import pod
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
+from pymor.core.pickle import dump
 from pymor.operators.interface import Operator
 from pymor.parameters.base import ParameterSpace
 from pymor.tools.random import new_rng
@@ -266,6 +267,16 @@ def main(args):
         example.hapod_singular_values(args.nreal, args.k),
         spectral_svals,
     )
+    hapod_info = {
+            "epsilon_star": epsilon_star,
+            "epsilon_alpha": epsilon_alpha,
+            "epsilon_pod": epsilon_pod,
+            "avg_basis_length": np.average(spectral_basis_sizes),
+            "num_snapshots": len(snapshots), # type: ignore
+            "num_modes": len(spectral_modes), # type: ignore
+            }
+    with example.hapod_info(args.nreal, args.k).open("wb") as fh:
+        dump(hapod_info, fh)
 
 
 if __name__ == "__main__":

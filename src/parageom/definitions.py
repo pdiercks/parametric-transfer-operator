@@ -357,6 +357,10 @@ class BeamData:
         """singular values of POD of neumann data for k-th transfer problem"""
         return self.method_folder(nr, "hapod") / f"neumann_singular_values_{k:02}.npy"
 
+    def hapod_info(self, nr: int, k: int) -> Path:
+        """Info on HAPOD, final POD"""
+        return self.method_folder(nr, "hapod") / f"info_{k:02}.out"
+
     def hapod_modes_xdmf(self, nr: int, k: int) -> Path:
         """modes of the final POD for k-th transfer problem"""
         dir = self.method_folder(nr, "hapod") / "pod_modes"

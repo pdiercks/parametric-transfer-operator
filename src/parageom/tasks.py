@@ -114,6 +114,7 @@ def task_hapod():
             targets.append(example.path_omega_in(k))
             targets.append(example.hapod_modes_npy(nreal, k))
             targets.append(example.hapod_singular_values(nreal, k))
+            targets.append(example.hapod_info(nreal, k))
             targets.extend(with_h5(example.hapod_modes_xdmf(nreal, k)))
             yield {
                 "name": str(nreal) + ":" + str(k),
