@@ -7,7 +7,7 @@ from doit.tools import run_once
 from parageom.definitions import BeamData, ROOT
 
 os.environ["PYMOR_COLORS_DISABLE"] = "1"
-example = BeamData(name="parageom", run_mode="DEBUG")
+example = BeamData(name="parageom", debug=True)
 SRC = ROOT / "src" / f"{example.name}"
 
 
@@ -118,9 +118,16 @@ def task_preproc():
 def task_hapod():
     """ParaGeom: Construct basis via HAPOD"""
 
+    def create_action(source, nreal, k, debug=False):
+        action = f"python3 {source} {nreal} {k}"
+        if debug:
+            action += " --debug"
+        return action
+
+    source = SRC / "hapod.py"
     for nreal in range(example.num_real):
         for k in range(11):
-            deps = [SRC / "hapod.py"]
+            deps = [source]
             deps.append(example.path_omega_coarse(k))
             deps.extend(with_h5(example.path_omega(k)))
             deps.extend(with_h5(example.path_omega_in(k)))
@@ -135,7 +142,41 @@ def task_hapod():
             yield {
                 "name": str(nreal) + ":" + str(k),
                 "file_dep": deps,
-                "actions": ["python3 src/parageom/hapod.py {} {} --debug".format(nreal, k)],
+                "actions": [create_action(source, nreal, k, debug=example.debug)],
+                "targets": targets,
+                "clean": True,
+            }
+
+
+def task_hrrf():
+    """ParaGeom: Construct basis via HRRF"""
+
+    def create_action(source, nreal, k, debug=False):
+        action = f"python3 {source} {nreal} {k}"
+        if debug:
+            action += " --debug"
+        return action
+
+    source = SRC / "heuristic.py"
+    for nreal in range(example.num_real):
+        for k in range(11):
+            deps = [source]
+            deps.append(example.path_omega_coarse(k))
+            deps.extend(with_h5(example.path_omega(k)))
+            deps.extend(with_h5(example.path_omega_in(k)))
+            targets = []
+            targets.append(
+                example.log_basis_construction(nreal, "heuristic", k)
+            )
+            targets.append(example.heuristic_modes_npy(nreal, k))
+            if k in (0, 1, 2):
+                targets.append(example.heuristic_neumann_svals(nreal, k))
+            targets.append(example.heuristic_modes_xdmf(nreal, k))
+            targets.extend(with_h5(example.hapod_modes_xdmf(nreal, k)))
+            yield {
+                "name": str(nreal) + ":" + str(k),
+                "file_dep": deps,
+                "actions": [create_action(source, nreal, k, debug=example.debug)],
                 "targets": targets,
                 "clean": True,
             }
@@ -181,9 +222,7 @@ def task_fig_projerr():
     k = 5
     for nreal in range(example.num_real):
         deps = [source]
-        # TODO re-add heuristic
-        # for method in example.methods:
-        for method in ["hapod",]:
+        for method in example.methods:
             deps.append(example.projerr(nreal, method, k))
         targets = []
         targets.append(example.fig_projerr(k))
@@ -214,23 +253,27 @@ def task_gfem():
 
     for nreal in range(example.num_real):
         for cell in range(10):
-            deps = [SRC / "gfem.py"]
-            deps.append(example.coarse_grid("global"))
-            deps.append(example.parent_unit_cell)
-            for k in cell_to_transfer_problem(cell):
-                deps.append(example.path_omega_in(k))
-                deps.append(example.hapod_modes_npy(nreal, k))
-            targets = []
-            targets.append(example.local_basis_npy(nreal, cell))
-            targets.append(example.local_basis_dofs_per_vert(nreal, cell))
-            targets.append(example.log_gfem(nreal, cell))
-            yield {
-                    "name": str(nreal) + ":" + str(cell),
-                    "file_dep": deps,
-                    "actions": [create_action(source.as_posix(), nreal, cell, debug=True)],
-                    "targets": targets,
-                    "clean": True,
-                    }
+            for method in example.methods:
+                deps = [source]
+                deps.append(example.coarse_grid("global"))
+                deps.append(example.parent_unit_cell)
+                for k in cell_to_transfer_problem(cell):
+                    deps.append(example.path_omega_in(k))
+                    if method == "hapod":
+                        deps.append(example.hapod_modes_npy(nreal, k))
+                    else:
+                        deps.append(example.heuristic_modes_npy(nreal, k))
+                targets = []
+                targets.append(example.local_basis_npy(nreal, cell, method=method))
+                targets.append(example.local_basis_dofs_per_vert(nreal, cell, method=method))
+                targets.append(example.log_gfem(nreal, cell, method=method))
+                yield {
+                        "name": ":".join([str(nreal), str(cell), method]),
+                        "file_dep": deps,
+                        "actions": [create_action(source, nreal, cell, debug=example.debug)],
+                        "targets": targets,
+                        "clean": True,
+                        }
 
 
 def task_validate_rom():

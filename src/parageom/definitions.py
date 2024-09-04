@@ -43,7 +43,7 @@ class BeamData:
         rrf_ttol: Target tolerance range finder.
         rrf_ftol: Failure tolerance range finder.
         rrf_num_testvecs: Number of testvectors range finder.
-        run_mode: DEBUG or PRODUCTION mode. Affects mesh sizes, training set, realizations.
+        debug: Run in debug mode.
 
     """
 
@@ -73,7 +73,7 @@ class BeamData:
     validation_set_seed: int = 241690
     projerr_seed: int = 923719053
     distributions: tuple[str, ...] = ("normal",)
-    methods: tuple[str, ...] = ("hapod", ) # "heuristic")
+    methods: tuple[str, ...] = ("hapod", "heuristic")
     epsilon_star: dict = field(
             default_factory=lambda: {
                 "heuristic": 0.001,
@@ -84,10 +84,10 @@ class BeamData:
     rrf_ttol: float = 10e-2
     rrf_ftol: float = 1e-10
     rrf_num_testvecs: int = 20
-    neumann_rtol: float = 1e-5
+    neumann_rtol: float = 1e-5 # hrrf pod extension
     neumann_tag: int = 194
     mdeim_rtol: float = 1e-5
-    run_mode: str = "DEBUG"
+    debug: bool = False
 
     def __post_init__(self):
         """Creates directory structure and dependent attributes"""
@@ -116,14 +116,12 @@ class BeamData:
         # set should be the same for all realizations. Therefore, the same physical meshes
         # are used for each realization.
 
-        if self.run_mode == "DEBUG":
+        if self.debug:
             self.num_real = 1
             self.num_intervals = 12
-        elif self.run_mode == "PRODUCTION":
+        else:
             self.num_real = 20
             self.num_intervals = 20
-        else:
-            raise NotImplementedError
 
         for nr in range(self.num_real):
             self.real_folder(nr).mkdir(exist_ok=True, parents=True)
@@ -365,20 +363,25 @@ class BeamData:
         dir = self.method_folder(nr, "hapod") / "pod_modes"
         return dir / f"modes_{k:02}.xdmf"
 
-    def heuristic_modes_xdmf(self, nr: int, distr: str, config: str) -> Path:
+    def heuristic_modes_xdmf(self, nr: int, k: int) -> Path:
         """modes computed by heuristic range finder"""
         dir = self.method_folder(nr, "heuristic") / "modes"
-        return dir / f"modes_{distr}_{config}.xdmf"
+        return dir / f"modes_{k:02}.xdmf"
 
     def hapod_modes_npy(self, nr: int, k: int) -> Path:
         """modes of the final POD for k-th transfer problem"""
         dir = self.method_folder(nr, "hapod") / "pod_modes"
         return dir / f"modes_{k:02}.npy"
 
-    def heuristic_modes_npy(self, nr: int, distr: str, config: str) -> Path:
-        """modes computed by heuristic range finder"""
+    def heuristic_modes_npy(self, nr: int, k: int) -> Path:
+        """modes for k-th transfer problem"""
         dir = self.method_folder(nr, "heuristic") / "modes"
-        return dir / f"modes_{distr}_{config}.npy"
+        return dir / f"modes_{k:02}.npy"
+
+    def heuristic_neumann_svals(self, nr: int, k: int) -> Path:
+        """Singular values of POD of neumann snapshots"""
+        dir = self.method_folder(nr, "heuristic")
+        return dir / f"neumann_svals_{k:02}.npy"
 
     def projerr(self, nr: int, method: str, k: int) -> Path:
         dir = self.method_folder(nr, method)

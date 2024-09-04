@@ -117,11 +117,6 @@ def adaptive_rrf_normal(
     logger.info(f"{lambda_min=}")
     logger.info(f"{testlimit=}")
 
-    def l2_mean(U, basis, product=None):
-        error = U - basis.lincomb(basis.inner(U, product).T)
-        norm = error.norm2(product)
-        return np.sum(norm) / len(U)
-
     R = tp.generate_random_boundary_data(count=num_testvecs, distribution=distribution, options=sampling_options)
     M = tp.solve(R)
     B = tp.range.empty()
@@ -139,7 +134,7 @@ def adaptive_rrf_normal(
         gram_schmidt(B, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
         M -= B.lincomb(B.inner(M, range_product).T)
         maxnorm = np.max(M.norm(range_product))
-        l2 = l2_mean(M, B, range_product)
+        l2 = np.sum(M.norm2(range_product)) / len(M)
         logger.debug(f"{maxnorm=}")
 
         l2_errors.append(l2)
