@@ -88,7 +88,11 @@ class BeamData:
     neumann_tag: int = 194
     mdeim_rtol: float = 1e-5
     debug: bool = False
-    num_modes_validation: list[int] = list(range(20, 161, 20))
+    validate_rom: dict = field(
+            default_factory=lambda: {
+                "num_params": 200,
+                "num_modes": list(range(20, 161, 20))
+                })
 
     def __post_init__(self):
         """Creates directory structure and dependent attributes"""
@@ -243,14 +247,6 @@ class BeamData:
         dir = self.bases_path(nr, method, distr)
         return dir / f"dofs_per_vert_{cell:02}.npy"
 
-    def locrom_error(self, nreal: int, method: str, distr: str, ei: bool=False) -> Path:
-        """loc ROM error"""
-        dir = self.method_folder(nreal, method)
-        if ei:
-            return dir / f"locrom_error_ei_{distr}.npz"
-        else:
-            return dir / f"locrom_error_{distr}.npz"
-
     def rom_error_u(self, nreal: int, num_modes: int, method="hapod", ei=False) -> Path:
         dir = self.method_folder(nreal, method)
         if ei:
@@ -301,9 +297,11 @@ class BeamData:
     def fig_projerr(self, k: int) -> Path:
         return self.figures_path / f"fig_projerr_{k:02}.pdf"
 
-    @property
-    def fig_locrom_error(self) -> Path:
-        return self.figures_path / "locrom_error.pdf"
+    def fig_rom_error(self, method: str, ei: bool) -> Path:
+        if ei:
+            return self.figures_path / f"rom_error_{method}_ei.pdf"
+        else:
+            return self.figures_path / f"rom_error_{method}.pdf"
 
     @property
     def realizations(self) -> Path:

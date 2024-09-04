@@ -322,24 +322,33 @@ def task_validate_rom():
                             }
 
 
-# def task_fig_locrom_error():
-#     """ParaGeom: Plot ROM error"""
-#     module = "src.parageom.plot_romerr"
-#     nreal = 0
-#     distr = "normal"
-#     norm = "max_relerr_h1_semi"
-#
-#     deps = []
-#     for method in example.methods:
-#         deps.append(example.locrom_error(nreal, method, distr, ei=False))
-#         deps.append(example.locrom_error(nreal, method, distr, ei=True))
-#     return {
-#             "file_dep": deps,
-#             "actions": ["python3 -m {} {} --norm {} --ei %(targets)s".format(module, nreal, norm)],
-#             "targets": [example.fig_locrom_error],
-#             "clean": True,
-#             }
+def task_fig_rom_error():
+    """ParaGeom: Plot ROM error"""
+    source = SRC / "plot_romerr.py"
+    nreal = 0 # TODO compute mean over all realizations ...
+    number_of_modes = example.validate_rom["num_modes"]
 
+    def create_action(method, output, ei=False):
+        action = f"python3 {source} {nreal} {method} {output}"
+        if ei:
+            action += " --ei"
+        return action
+
+    with_ei = {False: "", True: "ei"}
+    for method in example.methods:
+        for ei in [False, True]:
+            deps = [source]
+            for num_modes in number_of_modes:
+                deps.append(example.rom_error_u(nreal, num_modes, method=method, ei=ei))
+                deps.append(example.rom_error_s(nreal, num_modes, method=method, ei=ei))
+            targets = [example.fig_rom_error(method, ei=ei)]
+            yield {
+                    "name": ":".join([method, with_ei[ei]]),
+                    "file_dep": deps,
+                    "actions": [create_action(method, targets[0], ei=ei)],
+                    "targets": targets,
+                    "clean": True,
+                    }
 
 
 def task_optimization():
