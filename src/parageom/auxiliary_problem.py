@@ -76,7 +76,6 @@ class GlobalAuxiliaryProblem:
             dofs = df.fem.locate_dofs_geometrical(V, boundary_locator)
             alldofs.append(dofs)
 
-        # TODO
         # add interfaces between unit cells to _boundary_dofs
         # this way the transformation displacement add these interfaces
         # can be constrained to be zero

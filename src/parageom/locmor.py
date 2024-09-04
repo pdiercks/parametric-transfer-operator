@@ -283,8 +283,7 @@ def assemble_gfem_system(
 
     from parageom.dofmap_gfem import select_modes
 
-    # no need to apply bcs as basis functions should
-    # satisfy these automatically
+    # basis functions satisfy BCs by construction
     bc_dofs = np.array([], dtype=np.int32)
 
     lhs = defaultdict(list)
@@ -406,24 +405,7 @@ def assemble_gfem_system_with_ei(
 
     from parageom.dofmap_gfem import select_modes
 
-    # TODO: try to set BCs to better condition system matrix
-
-    # no need to apply bcs as basis functions should
-    # satisfy these automatically
-    # raise NotImplementedError("FIXME, condition number")
-    # left = dofmap.grid.locate_entities_boundary(0, plane_at(0.0, "x"))
-    # right = dofmap.grid.locate_entities_boundary(0, point_at([10., 0., 0.]))
-
-    # assert left.size == 2
-    # assert right.size == 1
-
-    # bc_dofs = []
-    # for vertex in left:
-    #     bc_dofs.append(dofmap.entity_dofs(vertex)[0])
-    # for vertex in right:
-    #     bc_dofs.append(dofmap.entity_dofs(vertex)[0])
-    #     bc_dofs.append(dofmap.entity_dofs(vertex)[1])
-    # bc_dofs = np.array(bc_dofs, dtype=np.int32)
+    # basis functions satisfy BCs by construction
     bc_dofs = np.array([], dtype=np.int32)
 
     lhs = defaultdict(list)

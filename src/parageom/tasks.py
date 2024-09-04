@@ -208,7 +208,6 @@ def task_gfem():
     for nreal in range(example.num_real):
         for cell in range(10):
             deps = [SRC / "gfem.py"]
-            # TODO: add meshes as deps
             deps.append(example.coarse_grid("global"))
             deps.append(example.parent_unit_cell)
             for k in cell_to_transfer_problem(cell):
