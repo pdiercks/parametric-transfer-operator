@@ -27,7 +27,7 @@ def enrichment_from_kernel(kernel):
 
 def main(args):
     from parageom.tasks import example
-    from parageom.hapod import oversampling_config_factory
+    from parageom.locmor import oversampling_config_factory
 
     stem = pathlib.Path(__file__).stem  # gfem
     logfilename = example.log_gfem(args.nreal, args.cell).as_posix()
