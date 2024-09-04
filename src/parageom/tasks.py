@@ -138,7 +138,8 @@ def task_hapod():
             targets.append(example.hapod_modes_npy(nreal, k))
             targets.append(example.hapod_singular_values(nreal, k))
             targets.append(example.hapod_info(nreal, k))
-            targets.extend(with_h5(example.hapod_modes_xdmf(nreal, k)))
+            if example.debug:
+                targets.extend(with_h5(example.hapod_modes_xdmf(nreal, k)))
             yield {
                 "name": str(nreal) + ":" + str(k),
                 "file_dep": deps,
@@ -171,8 +172,8 @@ def task_hrrf():
             targets.append(example.heuristic_modes_npy(nreal, k))
             if k in (0, 1, 2):
                 targets.append(example.heuristic_neumann_svals(nreal, k))
-            targets.append(example.heuristic_modes_xdmf(nreal, k))
-            targets.extend(with_h5(example.hapod_modes_xdmf(nreal, k)))
+            if example.debug:
+                targets.extend(with_h5(example.heuristic_modes_xdmf(nreal, k)))
             yield {
                 "name": str(nreal) + ":" + str(k),
                 "file_dep": deps,
