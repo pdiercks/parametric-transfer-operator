@@ -30,7 +30,7 @@ def main(args):
     from parageom.locmor import oversampling_config_factory
 
     stem = pathlib.Path(__file__).stem  # gfem
-    logfilename = example.log_gfem(args.nreal, args.cell).as_posix()
+    logfilename = example.log_gfem(args.nreal, args.cell, method=args.method).as_posix()
     set_defaults({"pymor.core.logger.getLogger.filename": logfilename})
     if args.debug:
         loglevel = 10 # debug
@@ -139,7 +139,10 @@ def main(args):
         # bases[k] = enrich_with_constant(np.load(example.hapod_modes_npy(args.nreal, k)), **enrich)
 
         # first load bases without enrichment
-        bases[k] = np.load(example.hapod_modes_npy(args.nreal, k))
+        if args.method == "hapod":
+            bases[k] = np.load(example.hapod_modes_npy(args.nreal, k))
+        else:
+            bases[k] = np.load(example.heuristic_modes_npy(args.nreal, k))
 
         # FIXME
         # in the above version there is only one enrichment possible per k
@@ -209,11 +212,11 @@ def main(args):
     # ### Write local gfem basis for cell
     source = FenicsxVectorSpace(V)
     G = source.make_array(gfem)  # type: ignore
-    outstream = example.local_basis_npy(args.nreal, args.cell)
+    outstream = example.local_basis_npy(args.nreal, args.cell, method=args.method)
     np.save(outstream, G.to_numpy())
 
     # Write dofs per vertex for dofmap construction of ROM
-    np.save(example.local_basis_dofs_per_vert(args.nreal, args.cell), modes_per_vertex)
+    np.save(example.local_basis_dofs_per_vert(args.nreal, args.cell, method=args.method), modes_per_vertex)
 
     if args.debug:
         outstream_xdmf = outstream.with_suffix(".xdmf")
@@ -230,6 +233,8 @@ if __name__ == "__main__":
     )
     parser.add_argument("nreal", type=int, help="The n-th realization.")
     parser.add_argument("cell", type=int, help="The cell for which to construct GFEM functions.")
+    parser.add_argument("method", type=str, help="The method used to construct local bases.",
+                        choices=("hapod", "heuristic"))
     parser.add_argument("--debug", action='store_true', help="Run in debug mode.")
     args = parser.parse_args(sys.argv[1:])
     main(args)
