@@ -222,9 +222,7 @@ def task_fig_projerr():
     k = 5
     for nreal in range(example.num_real):
         deps = [source]
-        # TODO re-add heuristic
-        # for method in example.methods:
-        for method in ["hapod",]:
+        for method in example.methods:
             deps.append(example.projerr(nreal, method, k))
         targets = []
         targets.append(example.fig_projerr(k))

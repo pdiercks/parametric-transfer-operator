@@ -129,20 +129,19 @@ def main(args):
             random_state=myseeds_test[args.k],
         )
 
-
-        l2_err = epsilon_star / example.l_char
-
         with new_rng(seed_seqs_rrf[0]):
             spectral_basis = heuristic_range_finder(
                 logger,
                 transfer,
                 training_set,
                 testing_set,
-                error_tol=example.rrf_ttol / example.l_char,
+                error_tol=example.rrf_ttol,
                 failure_tolerance=example.rrf_ftol,
-                num_testvecs=Nin,
-                l2_err=l2_err,
-            )
+                num_testvecs=example.rrf_num_testvecs,
+                l2_err=epsilon_star,
+                compute_neumann=False,
+                fext=None,
+            )[0]
         basis = spectral_basis
     else:
         raise NotImplementedError
