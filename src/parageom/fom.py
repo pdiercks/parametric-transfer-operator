@@ -22,7 +22,7 @@ from pymor.bindings.fenicsx import (
     FenicsxVisualizer,
     FenicsxMatrixOperator,
 )
-from .definitions import BeamData
+from parageom.definitions import BeamData
 
 
 class ParaGeomLinEla(LinearProblem):
@@ -137,8 +137,8 @@ class ParaGeomLinEla(LinearProblem):
 
 
 def discretize_subdomain_operators(example):
-    from .auxiliary_problem import discretize_auxiliary_problem
-    from .matrix_based_operator import FenicsxMatrixBasedOperator
+    from parageom.auxiliary_problem import discretize_auxiliary_problem
+    from parageom.matrix_based_operator import FenicsxMatrixBasedOperator
 
     # discretize auxiliary problem on unit cell domain
     parent_subdomain_msh = example.parent_unit_cell.as_posix()
@@ -191,7 +191,7 @@ def discretize_subdomain_operators(example):
 
 def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
     """Discretize FOM with Pull Back"""
-    from .matrix_based_operator import (
+    from parageom.matrix_based_operator import (
         FenicsxMatrixBasedOperator,
         BCTopo,
         _create_dirichlet_bcs,
@@ -347,9 +347,9 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
 
 
 if __name__ == "__main__":
-    from .tasks import example
-    from .auxiliary_problem import discretize_auxiliary_problem
-    from .stress_analysis import principal_stress_2d, project
+    from parageom.tasks import example
+    from parageom.auxiliary_problem import discretize_auxiliary_problem
+    from parageom.stress_analysis import principal_stress_2d, project
 
     coarse_grid_path = example.coarse_grid("global").as_posix()
     parent_domain_path = example.parent_domain("global").as_posix()

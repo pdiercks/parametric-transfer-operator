@@ -19,9 +19,9 @@ from pymor.operators.constructions import ConstantOperator, LincombOperator, Vec
 
 
 def main(args):
-    from .tasks import example
-    from .dofmap_gfem import GFEMDofMap
-    from .locmor import reconstruct, assemble_gfem_system
+    from parageom.tasks import example
+    from parageom.dofmap_gfem import GFEMDofMap
+    from parageom.locmor import reconstruct, assemble_gfem_system
 
     stem = pathlib.Path(__file__).stem
     logfilename = example.log_validate_rom(args.nreal, args.num_modes, ei=args.ei).as_posix()
@@ -211,8 +211,8 @@ def main(args):
 
 
 def build_fom(example, ω=0.5):
-    from .fom import discretize_fom
-    from .auxiliary_problem import discretize_auxiliary_problem
+    from parageom.fom import discretize_fom
+    from parageom.auxiliary_problem import discretize_auxiliary_problem
 
     coarse_grid_path = example.coarse_grid("global").as_posix()
     parent_domain_path = example.parent_domain("global").as_posix()
@@ -232,9 +232,9 @@ def build_fom(example, ω=0.5):
 def build_rom(example, dofmap, params, num_modes, ω=0.5, nreal=0, method="hapod", distribution="normal", use_ei=False):
     from pymor.operators.constructions import VectorOperator
     from pymor.models.basic import StationaryModel
-    from .fom import discretize_subdomain_operators
-    from .locmor import assemble_gfem_system_with_ei, EISubdomainOperatorWrapper
-    from .ei import interpolate_subdomain_operator
+    from parageom.fom import discretize_subdomain_operators
+    from parageom.locmor import assemble_gfem_system_with_ei, EISubdomainOperatorWrapper
+    from parageom.ei import interpolate_subdomain_operator
 
     # local high fidelity operators
     operator_local, rhs_local, theta_vol = discretize_subdomain_operators(example)

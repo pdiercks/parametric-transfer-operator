@@ -4,12 +4,11 @@ import os
 import shutil
 from pathlib import Path
 from doit.tools import run_once
-from .definitions import BeamData, ROOT
+from parageom.definitions import BeamData, ROOT
 
 os.environ["PYMOR_COLORS_DISABLE"] = "1"
 example = BeamData(name="parageom", run_mode="DEBUG")
 SRC = ROOT / "src" / f"{example.name}"
-CONFIGS = example.configurations
 
 
 def rm_rf(task, dryrun):
@@ -44,7 +43,7 @@ def with_h5(xdmf: Path) -> list[Path]:
 
 def task_parent_unit_cell():
     """ParaGeom: Create mesh for parent unit cell"""
-    from .preprocessing import discretize_unit_cell
+    from parageom.preprocessing import discretize_unit_cell
 
     def create_parent_unit_cell(targets):
         unit_length = example.unit_length
@@ -63,127 +62,143 @@ def task_parent_unit_cell():
 
 def task_coarse_grid():
     """ParaGeom: Create structured coarse grids"""
-    module = "src.parageom.preprocessing"
+    from parageom.preprocessing import create_structured_coarse_grid
 
-    for config in ["global"]:
-        yield {
-            "name": config,
-            "file_dep": [],
-            "actions": [
-                "python3 -m {} {} {} --output %(targets)s".format(
-                    module, config, "coarse"
-                )
-            ],
-            "targets": [example.coarse_grid(config)],
-            "clean": True,
-            "uptodate": [run_once],
-        }
+    def create_global_coarse_grid(targets):
+        create_structured_coarse_grid(example, "global", targets[0])
+
+    return {
+        "file_dep": [SRC / "preprocessing.py"],
+        "actions": [create_global_coarse_grid],
+        "targets": [example.coarse_grid("global")],
+        "clean": True,
+        "uptodate": [run_once],
+    }
 
 
 def task_fine_grid():
     """ParaGeom: Create parent domain mesh"""
-    module = "src.parageom.preprocessing"
-    for config in ["global"]:
+    from parageom.preprocessing import create_fine_scale_grid
+
+    def create_global_fine_grid(targets):
+        create_fine_scale_grid(example, "global", targets[0])
+
+    return {
+        "file_dep": [example.coarse_grid("global"), example.parent_unit_cell, SRC / "preprocessing.py"],
+        "actions": [create_global_fine_grid],
+        "targets": [example.parent_domain("global")],
+        "clean": True,
+    }
+
+
+def task_oversampling_grid():
+    """ParaGeom: Create grids for oversampling"""
+    source = SRC / "preprocessing.py"
+    for k in range(11):
+        targets = [example.path_omega_coarse(k)]
+        targets.extend(with_h5(example.path_omega(k)))
+        targets.extend(with_h5(example.path_omega_in(k)))
         yield {
-            "name": config,
-            "file_dep": [example.coarse_grid(config), example.parent_unit_cell],
-            "actions": [
-                "python3 -m {} {} {} --output %(targets)s".format(
-                    module, config, "fine"
-                )
-            ],
-            "targets": [example.parent_domain(config)],
-            "clean": True,
-        }
+                "name": f"{k}",
+                "file_dep": [source, example.coarse_grid("global")],
+                "actions": ["python3 {} {}".format(source, k)],
+                "targets": targets,
+                "clean": True,
+                }
 
 
 def task_preproc():
     """ParaGeom: All tasks related to preprocessing"""
     return {
         "actions": None,
-        "task_dep": ["coarse_grid", "fine_grid", "parent_unit_cell"],
+        "task_dep": ["coarse_grid", "fine_grid", "parent_unit_cell", "oversampling_grid"],
     }
 
 
 def task_hapod():
     """ParaGeom: Construct basis via HAPOD"""
-    module = "src.parageom.osp_v2"
 
     for nreal in range(example.num_real):
         for k in range(11):
-            deps = [SRC / "osp_v2.py"]
-            deps.append(example.coarse_grid("global"))
+            deps = [SRC / "hapod.py"]
+            deps.append(example.path_omega_coarse(k))
+            deps.extend(with_h5(example.path_omega(k)))
+            deps.extend(with_h5(example.path_omega_in(k)))
             targets = []
             targets.append(
                 example.log_basis_construction(nreal, "hapod", k)
             )
-            targets.append(example.path_omega_coarse(k))
-            targets.append(example.path_omega(k))
-            targets.append(example.path_omega_in(k))
             targets.append(example.hapod_modes_npy(nreal, k))
             targets.append(example.hapod_singular_values(nreal, k))
+            targets.append(example.hapod_info(nreal, k))
             targets.extend(with_h5(example.hapod_modes_xdmf(nreal, k)))
             yield {
                 "name": str(nreal) + ":" + str(k),
                 "file_dep": deps,
-                "actions": [
-                    "python3 -m {} {} {} --debug".format(module, nreal, k)
-                ],
+                "actions": ["python3 src/parageom/hapod.py {} {} --debug".format(nreal, k)],
                 "targets": targets,
                 "clean": True,
             }
 
 
-# def task_projerr():
-#     """ParaGeom: Compute projection error"""
-#     module = "src.parageom.projerr"
-#     distr = example.distributions[0]
-#     for nreal in range(example.num_real):
-#         for method in example.methods:
-#             for config in CONFIGS:
-#                 deps = [SRC / "projerr.py"]
-#                 deps.append(example.coarse_grid("global"))
-#                 deps.append(example.parent_domain("global"))
-#                 deps.append(example.coarse_grid("target"))
-#                 deps.append(example.parent_domain("target"))
-#                 deps.append(example.coarse_grid(config))
-#                 deps.append(example.parent_domain(config))
-#                 deps.append(example.parent_unit_cell)
-#                 targets = []
-#                 targets.append(example.projerr(nreal, method, distr, config))
-#                 targets.append(example.log_projerr(nreal, method, distr, config))
-#                 yield {
-#                         "name": method + ":" + config + ":" + str(nreal),
-#                         "file_dep": deps,
-#                         "actions": ["python3 -m {} {} {} {} {} --output {}".format(module, nreal, method, distr, config, targets[0])],
-#                         "targets": targets,
-#                         "clean": True
-#                         }
+def task_projerr():
+    """ParaGeom: Compute projection error"""
+    source = SRC / "projerr.py"
+    k = 5 # use this oversampling problem
+    # check sensitivity wrt mu rather than uncertainty in g
+    num_samples = 400
+    num_testvecs = 1
+
+    def create_action_projerr(nreal, method, output, debug=False):
+        action = f"python3 {source} {nreal} {method} {k}"
+        action += f" {num_samples} {num_testvecs}"
+        action += f" --output {output}"
+        if debug:
+            action += " --debug"
+        return action
+
+    for nreal in range(example.num_real):
+        for method in example.methods:
+                deps = [source]
+                deps.append(example.path_omega_coarse(k))
+                deps.extend(with_h5(example.path_omega(k)))
+                deps.extend(with_h5(example.path_omega_in(k)))
+                targets = []
+                targets.append(example.projerr(nreal, method, k))
+                targets.append(example.log_projerr(nreal, method, k))
+                yield {
+                        "name": ":".join([str(nreal), method, str(k)]),
+                        "file_dep": deps,
+                        "actions": [create_action_projerr(nreal, method, targets[0])],
+                        "targets": targets,
+                        "clean": True
+                        }
 
 
-# def task_fig_projerr():
-#     """ParaGeom: Plot projection error"""
-#     module = "src.parageom.plot_projerr"
-#     distr = example.distributions[0]
-#     for nreal in range(example.num_real):
-#         for config in CONFIGS:
-#             deps = [SRC / "plot_projerr.py"]
-#             for method in example.methods:
-#                 deps.append(example.projerr(nreal, method, distr, config))
-#             targets = []
-#             targets.append(example.fig_projerr(config))
-#             yield {
-#                     "name": config + ":" + str(nreal),
-#                     "file_dep": deps,
-#                     "actions": ["python3 -m {} {} {} %(targets)s".format(module, nreal, config)],
-#                     "targets": targets,
-#                     "clean": True,
-#                     }
+def task_fig_projerr():
+    """ParaGeom: Plot projection error"""
+    source = SRC / "plot_projerr.py"
+    k = 5
+    for nreal in range(example.num_real):
+        deps = [source]
+        # TODO re-add heuristic
+        # for method in example.methods:
+        for method in ["hapod",]:
+            deps.append(example.projerr(nreal, method, k))
+        targets = []
+        targets.append(example.fig_projerr(k))
+        yield {
+                "name": ":".join([str(nreal), str(k)]),
+                "file_dep": deps,
+                "actions": ["python3 {} {} {} %(targets)s".format(source, nreal, k)],
+                "targets": targets,
+                "clean": True,
+                }
 
 
 def task_gfem():
     """ParaGeom: Build GFEM approximation"""
-    module = "src.parageom.gfem"
+    source = SRC / "gfem.py"
 
     def cell_to_transfer_problem(x) -> list[int]:
         r = []
@@ -191,8 +206,8 @@ def task_gfem():
         r.append(x + 1)
         return r
 
-    def create_action(module, nreal, cell, debug=False):
-        action = "python3 -m {} {} {}".format(module, nreal, cell)
+    def create_action(script, nreal, cell, debug=False):
+        action = "python3 {} {} {}".format(script, nreal, cell)
         if debug:
             action += " --debug"
         return action
@@ -200,7 +215,6 @@ def task_gfem():
     for nreal in range(example.num_real):
         for cell in range(10):
             deps = [SRC / "gfem.py"]
-            # TODO: add meshes as deps
             deps.append(example.coarse_grid("global"))
             deps.append(example.parent_unit_cell)
             for k in cell_to_transfer_problem(cell):
@@ -213,7 +227,7 @@ def task_gfem():
             yield {
                     "name": str(nreal) + ":" + str(cell),
                     "file_dep": deps,
-                    "actions": [create_action(module, nreal, cell, debug=True)],
+                    "actions": [create_action(source.as_posix(), nreal, cell, debug=True)],
                     "targets": targets,
                     "clean": True,
                     }
@@ -223,7 +237,7 @@ def task_validate_rom():
     """ParaGeom: Validate ROM"""
 
     def create_action(nreal, num_params, num_modes, options):
-        action = "python3 -m src.parageom.validate_rom {} {} {}".format(nreal, num_params, num_modes)
+        action = "python3 src/parageom/validate_rom.py {} {} {}".format(nreal, num_params, num_modes)
         for k, v in options.items():
             action += f" {k}"
             if v:
@@ -284,7 +298,7 @@ def task_validate_rom():
 
 def task_optimization():
     """ParaGeom: Determine optimal design"""
-    module = "src.parageom.optimization"
+    source = SRC / "optimization.py"
 
     num_modes = 100
     minimizer = "SLSQP"
@@ -303,7 +317,7 @@ def task_optimization():
                example.log_optimization]
     return {
             "file_dep": deps,
-            "actions": ["python3 -m {} {} --minimizer {} --omega {} --ei".format(module, num_modes, minimizer, omega)],
+            "actions": ["python3 {} {} --minimizer {} --omega {} --ei".format(source.as_posix(), num_modes, minimizer, omega)],
             "targets": targets,
             "clean": True,
             }

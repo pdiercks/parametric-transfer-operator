@@ -37,7 +37,7 @@ def interpolate_subdomain_operator(example, operator, design: str="lhs", ntrain:
     from pymor.vectorarrays.numpy import NumpyVectorSpace
     from pymor.operators.numpy import NumpyMatrixOperator
     from pymor.algorithms.ei import deim
-    from .lhs import sample_lhs
+    from parageom.lhs import sample_lhs
 
     parameter_space = operator.parameters.space(example.mu_range)
     parameter_name = list(example.parameters["subdomain"].keys())[0]
@@ -105,8 +105,8 @@ def interpolate_subdomain_operator(example, operator, design: str="lhs", ntrain:
 
 
 if __name__ == "__main__":
-    from .tasks import example
-    from .fom import discretize_subdomain_operators
+    from parageom.tasks import example
+    from parageom.fom import discretize_subdomain_operators
     from scipy.linalg import solve
     from scipy.sparse.linalg import norm
     from pymor.operators.constructions import LincombOperator

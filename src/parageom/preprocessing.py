@@ -1,11 +1,21 @@
-import typing
+import pathlib
 import tempfile
+import typing
+
+from dolfinx.io import XDMFFile, gmshio # type: ignore
+from mpi4py import MPI
+from multi.domain import RectangularDomain, StructuredQuadGrid
+from multi.io import read_mesh
+from multi.preprocessing import (
+    create_meshtags,
+    create_rectangle,
+    create_voided_rectangle,
+    merge_mshfiles,
+)
 import numpy as np
 
-from mpi4py import MPI
-from dolfinx.io import gmshio
-from multi.preprocessing import create_voided_rectangle, create_rectangle, merge_mshfiles
-from multi.domain import StructuredQuadGrid
+from parageom.definitions import BeamData
+from parageom.locmor import OversamplingConfig
 
 
 def discretize_unit_cell(
@@ -191,32 +201,103 @@ def create_fine_scale_grid(example, typus: str, output: str):
         tmp.close()
 
 
+def discretize_oversampling_domains(example: BeamData, struct_grid_gl: StructuredQuadGrid, osp_config: OversamplingConfig):
+    """Creates meshes for the oversampling domain and target subdomain.
+
+    Args:
+        example: The data class for the example problem.
+        struct_grid_gl: Global coarse grid.
+        osp_config: Configuration of this transfer problem.
+
+    """
+
+    cells_omega = osp_config.cells_omega
+    cells_omega_in = osp_config.cells_omega_in
+
+    # For the coarse grid there is no need to convert to xdmf
+    # (since there are no meshtags)
+    # Write to xdmf anyway for consistency?
+    # In the future might want to load coarse grid in parallel
+    # and let the automatic partitioning drive the local oversampling problems
+
+    # create coarse grid partition of oversampling domain
+    outstream = example.path_omega_coarse(osp_config.index)
+    create_structured_coarse_grid_v2(example, struct_grid_gl, cells_omega, outstream.as_posix())
+    coarse_omega = read_mesh(outstream, MPI.COMM_WORLD, kwargs={"gdim": example.gdim})[0]
+    struct_grid_omega = StructuredQuadGrid(coarse_omega)
+    assert struct_grid_omega.num_cells == cells_omega.size
+
+    # create fine grid partition of oversampling domain
+    path_omega_msh = tempfile.NamedTemporaryFile(suffix=".msh")
+    create_fine_scale_grid_v2(example, struct_grid_gl, cells_omega, path_omega_msh.name)
+    omega, omega_ct, omega_ft = read_mesh(pathlib.Path(path_omega_msh.name), MPI.COMM_WORLD, kwargs={"gdim": example.gdim})
+    path_omega_msh.close() # close and delete tmp msh file
+    omega = RectangularDomain(omega, cell_tags=omega_ct, facet_tags=omega_ft)
+    # create facets
+    # facet tags for void interfaces start from 15 (see create_fine_scale_grid_v2)
+    # i.e. 15 ... 24 for max number of cells
+
+    facet_tag_definitions = {}
+    for tag, key in zip([int(11), int(12), int(13)], ["bottom", "left", "right"]):
+        facet_tag_definitions[key] = (tag, omega.str_to_marker(key))
+
+    # add tags for neumann boundary
+    top_tag = None
+    if osp_config.gamma_n is not None:
+        top_tag = example.neumann_tag
+        top_locator = osp_config.gamma_n
+        facet_tag_definitions["top"] = (top_tag, top_locator)
+
+    # update already existing facet tags
+    # this will add tags for "top" boundary
+    omega.facet_tags = create_meshtags(omega.grid, omega.tdim-1, facet_tag_definitions, tags=omega.facet_tags)[0]
+
+    assert omega.facet_tags.find(11).size == example.num_intervals * cells_omega.size  # bottom
+    assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
+    assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
+    for itag in range(15, 15 + cells_omega.size):
+        assert omega.facet_tags.find(itag).size == example.num_intervals * 4  # void
+
+    path_omega = example.path_omega(args.k)
+    with XDMFFile(MPI.COMM_WORLD, path_omega.as_posix(), "w") as xdmf:
+        xdmf.write_mesh(omega.grid)
+        xdmf.write_meshtags(omega.cell_tags, omega.grid.geometry)
+        xdmf.write_meshtags(omega.facet_tags, omega.grid.geometry)
+
+
+    # create fine grid partition of target subdomain
+    path_omega_in_msh = tempfile.NamedTemporaryFile(suffix=".msh")
+    create_fine_scale_grid_v2(example, struct_grid_gl, cells_omega_in, path_omega_in_msh.name)
+    omega_in, _, _ = read_mesh(pathlib.Path(path_omega_in_msh.name), MPI.COMM_WORLD, kwargs={"gdim": example.gdim})
+    path_omega_in_msh.close()
+
+    path_omega_in = example.path_omega_in(osp_config.index)
+    with XDMFFile(MPI.COMM_WORLD, path_omega_in.as_posix(), "w") as xdmf:
+        xdmf.write_mesh(omega_in)
+
+
 if __name__ == "__main__":
     import sys
     import argparse
-    from .tasks import example
+    from parageom.tasks import example
+    from parageom.locmor import oversampling_config_factory
 
     parser = argparse.ArgumentParser(
-        description="Preprocessing for the parageom example."
+        description="Create grids for oversampling problems."
     )
     parser.add_argument(
-        "config",
-        type=str,
-        choices=("left", "inner", "right", "global", "target"),
-        help="The configuration of the domain.",
+        "k",
+        type=int,
+        help="The k-th oversampling problem.",
     )
-    parser.add_argument(
-        "type",
-        type=str,
-        choices=("coarse", "fine"),
-        help="Type of meshes that should be generated.",
-    )
-    parser.add_argument("--output", type=str, help="Write mesh to path if applicable.")
     args = parser.parse_args(sys.argv[1:])
 
-    match args.type:
-        case "coarse":
-            assert args.output
-            create_structured_coarse_grid(example, args.config, args.output)
-        case "fine":
-            create_fine_scale_grid(example, args.config, args.output)
+    # read global coarse grid
+    coarse_grid_path = example.coarse_grid("global")
+    coarse_domain = read_mesh(coarse_grid_path, MPI.COMM_WORLD, cell_tags=None, kwargs={"gdim": example.gdim})[0]
+    struct_grid_gl = StructuredQuadGrid(coarse_domain)
+
+    # oversampling configuration
+    ospconf = oversampling_config_factory(args.k)
+
+    discretize_oversampling_domains(example, struct_grid_gl, ospconf)

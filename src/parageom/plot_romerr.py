@@ -5,7 +5,7 @@ from multi.plotting_context import PlottingContext
 
 
 def main(cli):
-    from .tasks import example
+    from parageom.tasks import example
 
     bamcd = read_bam_colors()
     blue = bamcd["blue"][0]

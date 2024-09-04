@@ -1,20 +1,19 @@
-import sys
-
-from pathlib import Path
-
+from dolfinx.io import XDMFFile # type: ignore
+from mpi4py import MPI
+from multi.domain import RectangularDomain, StructuredQuadGrid
+from multi.io import read_mesh
+from multi.projection import orthogonal_part
 import numpy as np
-from scipy.sparse.linalg import LinearOperator, eigsh
-from scipy.special import erfinv
-
-from pymor.algorithms.pod import pod
 from pymor.algorithms.gram_schmidt import gram_schmidt
+from pymor.algorithms.pod import pod
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
+from pymor.core.pickle import dump
 from pymor.operators.interface import Operator
-from pymor.tools.random import new_rng
 from pymor.parameters.base import ParameterSpace
-
-from multi.projection import orthogonal_part
+from pymor.tools.random import new_rng
+from scipy.sparse.linalg import LinearOperator, eigsh
+from scipy.special import erfinv
 
 
 def adaptive_rrf_normal(
@@ -155,37 +154,54 @@ def adaptive_rrf_normal(
 
 
 def main(args):
-    from .tasks import example
-    from .lhs import sample_lhs
-    from .locmor import discretize_transfer_problem
+    from parageom.tasks import example
+    from parageom.lhs import sample_lhs
+    from parageom.locmor import discretize_transfer_problem, oversampling_config_factory
 
     if args.debug:
         loglevel = 10
     else:
         loglevel = 20
 
-    method = Path(__file__).stem  # hapod
-    logfilename = example.log_basis_construction(args.nreal, method, args.distribution, args.configuration).as_posix()
+    logfilename = example.log_basis_construction(args.nreal, "hapod", args.k).as_posix()
     set_defaults({"pymor.core.logger.getLogger.filename": logfilename})
-    logger = getLogger(method, level=loglevel)
+    logger = getLogger("hapod", level=loglevel)
 
-    # ### Generate training seed for each configuration
-    training_seeds = {}
-    for cfg, rndseed in zip(
-        example.configurations,
-        np.random.SeedSequence(example.training_set_seed).generate_state(len(example.configurations)),
-    ):
-        training_seeds[cfg] = rndseed
+    # ### Coarse grid partition of omega
+    coarse_grid_path = example.path_omega_coarse(args.k)
+    coarse_domain = read_mesh(coarse_grid_path, MPI.COMM_WORLD, cell_tags=None, kwargs={"gdim": example.gdim})[0]
+    struct_grid = StructuredQuadGrid(coarse_domain)
 
-    parameter_space = ParameterSpace(example.parameters[args.configuration], example.mu_range)
-    parameter_name = list(example.parameters[args.configuration].keys())[0]
-    ntrain = example.ntrain(args.configuration)
+    # ### Fine grid partition of omega
+    path_omega = example.path_omega(args.k)
+    with XDMFFile(MPI.COMM_WORLD, path_omega.as_posix(), "r") as xdmf:
+        omega_mesh = xdmf.read_mesh()
+        omega_ct = xdmf.read_meshtags(omega_mesh, name="Cell tags")
+        omega_ft = xdmf.read_meshtags(omega_mesh, name="mesh_tags")
+    omega = RectangularDomain(omega_mesh, cell_tags=omega_ct, facet_tags=omega_ft)
+
+    # ### Fine grid partition of omega_in
+    path_omega_in = example.path_omega_in(args.k)
+    with XDMFFile(MPI.COMM_WORLD, path_omega_in.as_posix(), "r") as xdmf:
+        omega_in_mesh = xdmf.read_mesh()
+    omega_in = RectangularDomain(omega_in_mesh)
+
+    logger.info(f"Discretizing transfer problem for k = {args.k:02} ...")
+    osp_config = oversampling_config_factory(args.k)
+    transfer, fext = discretize_transfer_problem(example, struct_grid, omega, omega_in, osp_config, debug=args.debug)
+
+    # ### Generate training seed for each of the 11 oversampling problems
+    myseeds = np.random.SeedSequence(example.training_set_seed).generate_state(11)
+
+    parameter_space = ParameterSpace(transfer.operator.parameters, example.mu_range)
+    parameter_name = "R"
+    ntrain = example.ntrain(args.k)
     training_set = sample_lhs(
         parameter_space,
         name=parameter_name,
         samples=ntrain,
         criterion="center",
-        random_state=training_seeds[args.configuration],
+        random_state=myseeds[args.k],
     )
     logger.info("Starting range approximation of transfer operators" f" for training set of size {len(training_set)}.")
 
@@ -194,9 +210,9 @@ def main(args):
     this = realizations[args.nreal]
     seed_seqs_rrf = np.random.SeedSequence(this).generate_state(ntrain)
 
-    transfer, FEXT = discretize_transfer_problem(example, args.configuration)
-    require_neumann_data = np.any(np.nonzero(FEXT.to_numpy())[1])
-    if args.configuration == "left":
+    # start range approximation with `transfer` and `F_ext`
+    require_neumann_data = np.any(np.nonzero(fext.to_numpy())[1])
+    if 0 in osp_config.cells_omega:
         assert require_neumann_data
     else:
         assert not require_neumann_data
@@ -208,20 +224,8 @@ def main(args):
 
     epsilon_star = example.epsilon_star["hapod"]
     Nin = transfer.rhs.dofs.size
-    # epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2.0) * epsilon_star
-    # epsilon_pod = epsilon_star * np.sqrt(Nin * ntrain)
     epsilon_alpha = np.sqrt(1 - example.omega**2.0) * epsilon_star
     epsilon_pod = np.sqrt(ntrain) * example.omega * epsilon_star
-
-    # breakpoint()
-    # mu = training_set.pop()
-    # transfer.assemble_operator(mu)
-    # g = transfer.generate_random_boundary_data(1, "normal")
-    # U = transfer.solve(g)
-    #
-    # from pymor.bindings.fenicsx import FenicsxVisualizer
-    # viz = FenicsxVisualizer(U.space)
-    # viz.visualize(U, filename="U_left_kernel_12.xdmf")
 
     for mu, seed_seq in zip(training_set, seed_seqs_rrf):
         with new_rng(seed_seq):
@@ -240,8 +244,8 @@ def main(args):
 
             if require_neumann_data:
                 logger.info("\nSolving for additional Neumann mode ...")
-                U_neumann = transfer.op.apply_inverse(FEXT)
-                U_in_neumann = transfer.range.from_numpy(U_neumann.dofs(transfer._restriction))
+                U_neumann = transfer.op.apply_inverse(fext)
+                U_in_neumann = transfer.range.from_numpy(U_neumann.dofs(transfer._restriction)) # type: ignore
 
                 # ### Remove kernel after restriction to target subdomain
                 if transfer.kernel is not None:
@@ -256,46 +260,38 @@ def main(args):
                 neumann_snapshots.append(U_orth)  # type: ignore
 
     logger.info(f"Average length of spectral basis: {np.average(spectral_basis_sizes)}.")
-    with logger.block("Computing POD of spectral bases ..."):
-        spectral_modes, spectral_svals = pod(snapshots, product=transfer.range_product, l2_err=epsilon_pod)
+    if len(neumann_snapshots) > 0: # type: ignore
+        logger.info("Appending Neumann snapshots to global snapshot set.")
+        snapshots.append(neumann_snapshots) # type: ignore
 
-    basis_length = len(spectral_modes)
-    if require_neumann_data:
-        with logger.block("Computing POD of neumann snapshots ..."):
-            neumann_modes, neumann_svals = pod(
-                neumann_snapshots, product=transfer.range_product, rtol=example.neumann_rtol
-            )
-        with logger.block("Extending spectral basis by Neumann modes via GS ..."):
-            spectral_modes.append(neumann_modes)
-            gram_schmidt(spectral_modes, product=transfer.range_product, offset=basis_length, check=False, copy=False)
-    else:
-        neumann_modes = []
-        neumann_snapshots = []
-        neumann_svals = []
-
-    logger.info(f"Spectral basis size (after POD): {basis_length}.")
-    logger.info(f"Neumann modes/snapshots: {len(neumann_modes)}/{len(neumann_snapshots)}")
-    logger.info(f"Final basis length: {len(spectral_modes)}.")
+    logger.info("Computing final POD")
+    spectral_modes, spectral_svals = pod(snapshots, product=transfer.range_product, l2_err=epsilon_pod) # type: ignore
 
     if logger.level == 10:  # DEBUG
         from pymor.bindings.fenicsx import FenicsxVisualizer
 
         viz = FenicsxVisualizer(transfer.range)
-        viz.visualize(spectral_modes, filename=f"hapod_{args.configuration}.xdmf")
-
-        if require_neumann_data:
-            viz.visualize(neumann_modes, filename=f"hapod_neumann_{args.configuration}.xdmf")
+        hapod_modes_xdmf = example.hapod_modes_xdmf(args.nreal, args.k).as_posix()
+        viz.visualize(spectral_modes, filename=hapod_modes_xdmf)
 
     np.save(
-        example.hapod_modes_npy(args.nreal, args.distribution, args.configuration),
+        example.hapod_modes_npy(args.nreal, args.k),
         spectral_modes.to_numpy(),
     )
     np.save(
-        example.hapod_singular_values(args.nreal, args.distribution, args.configuration),
+        example.hapod_singular_values(args.nreal, args.k),
         spectral_svals,
     )
-    if np.any(neumann_svals) and args.configuration == "left":
-        np.save(example.hapod_neumann_svals(args.nreal, args.distribution, args.configuration), neumann_svals)
+    hapod_info = {
+            "epsilon_star": epsilon_star,
+            "epsilon_alpha": epsilon_alpha,
+            "epsilon_pod": epsilon_pod,
+            "avg_basis_length": np.average(spectral_basis_sizes),
+            "num_snapshots": len(snapshots), # type: ignore
+            "num_modes": len(spectral_modes), # type: ignore
+            }
+    with example.hapod_info(args.nreal, args.k).open("wb") as fh:
+        dump(hapod_info, fh)
 
 
 if __name__ == "__main__":
@@ -303,18 +299,11 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Computes fine scale edge basis functions via transfer problems and subsequently the POD of these sets of basis functions.",
+        description="Oversampling for ParaGeom example using HAPOD",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("distribution", type=str, help="The distribution to draw samples from.")
-    parser.add_argument(
-        "configuration",
-        type=str,
-        help="The type of oversampling problem.",
-        choices=("inner", "left", "right"),
-    )
     parser.add_argument("nreal", type=int, help="The n-th realization of the problem.")
-    parser.add_argument("--max_workers", type=int, default=4, help="The max number of workers.")
+    parser.add_argument("k", type=int, help="The oversampling problem for target subdomain Ω_in^k.")
     parser.add_argument("--debug", action="store_true", help="Run in debug mode.")
     args = parser.parse_args(sys.argv[1:])
     main(args)

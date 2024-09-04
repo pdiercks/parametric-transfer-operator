@@ -37,7 +37,6 @@ class BeamData:
         validation_set_seed: Seeding for the validation set (run_locrom.py).
         projerr_seed: Seeding for the testing set to compute the projection error.
         parameters: Dict of dict mapping parameter name to parameter dimension for each configuration etc.
-        configurations: The configurations, i.e. oversampling problems.
         distributions: The distributions used in the randomized range finder.
         methods: Methods used for basis construction.
         range_product: The inner product to use (rrf, projection error).
@@ -73,7 +72,6 @@ class BeamData:
     testing_set_seed: int = 545445836
     validation_set_seed: int = 241690
     projerr_seed: int = 923719053
-    configurations: tuple[str, str, str] = ("left", "inner", "right")
     distributions: tuple[str, ...] = ("normal",)
     methods: tuple[str, ...] = ("hapod", ) # "heuristic")
     epsilon_star: dict = field(
@@ -87,6 +85,7 @@ class BeamData:
     rrf_ftol: float = 1e-10
     rrf_num_testvecs: int = 20
     neumann_rtol: float = 1e-5
+    neumann_tag: int = 194
     mdeim_rtol: float = 1e-5
     run_mode: str = "DEBUG"
 
@@ -107,7 +106,7 @@ class BeamData:
         # naming convention: oversampling_{index}.msh
         # store the training set, such that via {index} the
         # parameter value can be determined
-        for config in list(self.configurations) + ["global", "target"]:
+        for config in ["global"]:
             p = self.grids_path / config
             p.mkdir(exist_ok=True, parents=True)
 
@@ -183,11 +182,11 @@ class BeamData:
 
     def coarse_grid(self, config: str) -> Path:
         """Global coarse grid"""
-        assert config in list(self.configurations) + ["global", "target"]
+        assert config in ["global"]
         return self.grids_path / config / "coarse_grid.msh"
 
     def parent_domain(self, config: str) -> Path:
-        assert config in list(self.configurations) + ["global", "target"]
+        assert config in ["global"]
         return self.grids_path / config / "parent_domain.msh"
 
     @property
@@ -300,8 +299,8 @@ class BeamData:
     # @property
     # def fig_rom_opt(self) -> Path:
     #     return self.figures_path / "fig_rom_opt.pdf"
-    def fig_projerr(self, config: str) -> Path:
-        return self.figures_path / f"fig_projerr_{config}.pdf"
+    def fig_projerr(self, k: int) -> Path:
+        return self.figures_path / f"fig_projerr_{k:02}.pdf"
 
     @property
     def fig_locrom_error(self) -> Path:
@@ -325,8 +324,8 @@ class BeamData:
     ) -> Path:
         return self.logs_path(nr, method) / f"basis_construction_{k:02}.log"
 
-    def log_projerr(self, nr: int, method: str, distr: str, config: str) -> Path:
-        return self.logs_path(nr, method) / f"projerr_{distr}_{config}.log"
+    def log_projerr(self, nr: int, method: str, k: int) -> Path:
+        return self.logs_path(nr, method) / f"projerr_{k}.log"
 
     def log_gfem(self, nr: int, cell: int, method="hapod") -> Path:
         return self.logs_path(nr, method) / f"gfem_{cell:02}.log"
@@ -357,6 +356,10 @@ class BeamData:
         """singular values of POD of neumann data for k-th transfer problem"""
         return self.method_folder(nr, "hapod") / f"neumann_singular_values_{k:02}.npy"
 
+    def hapod_info(self, nr: int, k: int) -> Path:
+        """Info on HAPOD, final POD"""
+        return self.method_folder(nr, "hapod") / f"info_{k:02}.out"
+
     def hapod_modes_xdmf(self, nr: int, k: int) -> Path:
         """modes of the final POD for k-th transfer problem"""
         dir = self.method_folder(nr, "hapod") / "pod_modes"
@@ -377,22 +380,18 @@ class BeamData:
         dir = self.method_folder(nr, "heuristic") / "modes"
         return dir / f"modes_{distr}_{config}.npy"
 
-    def projerr(self, nr: int, method: str, distr: str, config: str) -> Path:
+    def projerr(self, nr: int, method: str, k: int) -> Path:
         dir = self.method_folder(nr, method)
-        return dir / f"projerr_{distr}_{config}.npz"
-
-    # @property
-    # def target_subdomain(self) -> Path:
-    #     return self.parent_domain("target")
+        return dir / f"projerr_{k}.npz"
 
     def path_omega(self, k: int) -> Path:
-        return self.grids_path / f"omega_{k:02}.msh"
+        return self.grids_path / f"omega_{k:02}.xdmf"
 
     def path_omega_coarse(self, k: int) -> Path:
         return self.grids_path / f"omega_coarse_{k:02}.msh"
 
     def path_omega_in(self, k: int) -> Path:
-        return self.grids_path / f"omega_in_{k:02}.msh"
+        return self.grids_path / f"omega_in_{k:02}.xdmf"
 
     def config_to_omega_in(self, config: str, local=True) -> list[int]:
         """Maps config to cell local index/indices of oversampling domain that correspond to omega in."""

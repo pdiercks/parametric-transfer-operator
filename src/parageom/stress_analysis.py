@@ -6,7 +6,7 @@ import numpy as np
 import dolfinx as df
 from dolfinx.fem.petsc import apply_lifting, assemble_matrix, assemble_vector, set_bc
 from petsc4py import PETSc
-from .fom import ParaGeomLinEla
+from parageom.fom import ParaGeomLinEla
 
 
 def principal_stress_2d(u: df.fem.Function, parageom: ParaGeomLinEla, q_degree: int, cells: np.ndarray, values: np.ndarray):
