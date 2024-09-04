@@ -246,8 +246,8 @@ def task_gfem():
         r.append(x + 1)
         return r
 
-    def create_action(script, nreal, cell, debug=False):
-        action = "python3 {} {} {}".format(script, nreal, cell)
+    def create_action(script, nreal, cell, method, debug=False):
+        action = "python3 {} {} {} {}".format(script, nreal, cell, method)
         if debug:
             action += " --debug"
         return action
@@ -271,7 +271,7 @@ def task_gfem():
                 yield {
                         "name": ":".join([str(nreal), str(cell), method]),
                         "file_dep": deps,
-                        "actions": [create_action(source, nreal, cell, debug=example.debug)],
+                        "actions": [create_action(source, nreal, cell, method, debug=example.debug)],
                         "targets": targets,
                         "clean": True,
                         }
