@@ -88,6 +88,7 @@ class BeamData:
     neumann_tag: int = 194
     mdeim_rtol: float = 1e-5
     debug: bool = False
+    num_modes_validation: list[int] = list(range(20, 161, 20))
 
     def __post_init__(self):
         """Creates directory structure and dependent attributes"""

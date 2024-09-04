@@ -289,8 +289,8 @@ def task_validate_rom():
         return [action]
 
     source = SRC / "validate_rom.py"
-    num_params = 200
-    number_of_modes = [20, 40, 60, 80, 100, 120, 140, 160]
+    num_params = example.validate_rom["num_params"]
+    number_of_modes = example.validate_rom["num_modes"]
     with_ei = {"no_ei": False, "ei": True}
     # with_ei = {"ei": True}
     num_cells = example.nx * example.ny
