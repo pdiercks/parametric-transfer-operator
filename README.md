@@ -41,12 +41,14 @@ The compute environment can be instantiated with [`pixi`](https://prefix.dev/).
 See `pyproject.toml` and the related `pixi` sections for the definition of _dependencies_ and _tasks_ that may by executed via `pixi run <task>`.
 
 ### Steps
-1. Download source code for non-conda dependencies `pymor` and `multicode`.
+1. Download source code for non-conda dependencies `pymor` and `multicode`. Run the following commands each from the root of the project.
 ```sh
 export PYMORSRC=./.pymorsrc # do not change this, see pyproject.toml
-export MULTISRC=./.multisrc
-git clone git@github.com:pdiercks/pymor.git PYMORSRC && cd PYMORSRC && git checkout feniscx-pd
-git clone https://git.bam.de/mechanics/pdiercks/multicode.git MULTISRC
+git clone -b fenicsx-pd --single-branch git@github.com:pdiercks/pymor.git $PYMORSRC
+```
+```sh
+export MULTISRC=./.multisrc # do not change this, see pyproject.toml
+git clone -b main --single-branch https://git.bam.de/mechanics/pdiercks/multicode.git $MULTISRC
 ```
 
 2. Install the environment.
