@@ -279,44 +279,46 @@ def task_gfem():
 def task_validate_rom():
     """ParaGeom: Validate ROM"""
 
-    def create_action(nreal, num_params, num_modes, options):
-        action = "python3 src/parageom/validate_rom.py {} {} {}".format(nreal, num_params, num_modes)
+    def create_action(source, nreal, num_params, num_modes, options):
+        action = "python3 {} {} {} {}".format(source, nreal, num_params, num_modes)
         for k, v in options.items():
             action += f" {k}"
             if v:
                 action += f" {v}"
         return [action]
 
+    source = SRC / "validate_rom.py"
     num_params = 200
     number_of_modes = [20, 40, 60, 80, 100, 120, 140, 160]
-    # with_ei = {"no_ei": False, "ei": True}
-    with_ei = {"ei": True}
+    with_ei = {"no_ei": False, "ei": True}
+    # with_ei = {"ei": True}
     num_cells = example.nx * example.ny
 
     for nreal in range(example.num_real):
         for num_modes in number_of_modes:
-            deps = [SRC / "validate_rom.py"]
-            deps.append(example.coarse_grid("global"))
-            deps.append(example.parent_domain("global"))
-            deps.append(example.parent_unit_cell)
-            for cell in range(num_cells):
-                deps.append(example.local_basis_npy(nreal, cell))
-                deps.append(example.local_basis_dofs_per_vert(nreal, cell))
+            for method in example.methods:
+                deps = [source]
+                deps.append(example.coarse_grid("global"))
+                deps.append(example.parent_domain("global"))
+                deps.append(example.parent_unit_cell)
+                for cell in range(num_cells):
+                    deps.append(example.local_basis_npy(nreal, cell, method=method))
+                    deps.append(example.local_basis_dofs_per_vert(nreal, cell, method=method))
 
-            options = {}
-            for k, v in with_ei.items():
-                targets = []
-                targets.append(example.rom_error_u(nreal, num_modes, ei=v))
-                targets.append(example.rom_error_s(nreal, num_modes, ei=v))
-                if v:
-                    options["--ei"] = ""
-                yield {
-                        "name": ":".join([str(nreal), str(num_modes), k]),
-                        "file_dep": deps,
-                        "actions": create_action(nreal, num_params, num_modes, options),
-                        "targets": targets,
-                        "clean": True,
-                        }
+                options = {}
+                for key, value in with_ei.items():
+                    targets = []
+                    targets.append(example.rom_error_u(nreal, num_modes, ei=value))
+                    targets.append(example.rom_error_s(nreal, num_modes, ei=value))
+                    if value:
+                        options["--ei"] = ""
+                    yield {
+                            "name": ":".join([str(nreal), str(num_modes), method, key]),
+                            "file_dep": deps,
+                            "actions": create_action(source, nreal, num_params, num_modes, options),
+                            "targets": targets,
+                            "clean": True,
+                            }
 
 
 # def task_fig_locrom_error():
