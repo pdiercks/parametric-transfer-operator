@@ -18,3 +18,37 @@ sort = "definition"
 
 [tool.ruff]
 line-length = 120
+
+[tool.pixi.project]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.environments]
+default = { solve-group = "default" }
+
+[tool.pixi.pypi-dependencies]
+pymor = { path = "./.pymorsrc", editable = true }
+multi = { path = "./.multisrc", editable = true }
+parageom = { path = ".", editable = true}
+
+[tool.pixi.dependencies]
+doit = "0.36.0.*"
+fenics-dolfinx = "0.8.0.*"
+pip = ">=24.2,<25"
+conda-ecosystem-user-package-isolation = ">=1.0,<2"
+meshio = "5.3.4.*"
+gmsh = "4.11.1.*"
+python-gmsh = "4.11.1.*"
+pyvista = "0.42.3.*"
+scipy = "1.11.3.*"
+sympy = "1.12.*"
+numpy = "1.26.0.*"
+pyyaml = "6.0.1.*"
+matplotlib = "3.8.2.*"
+pydoe3 = ">=1.0.3,<2"
+diskcache = ">=5.6.3,<6"
+packaging = ">=24.1,<25"
+pillow = ">=10.4.0,<11"
+pygments = ">=2.18.0,<3"
+qtpy = ">2.0"
+typer = ">=0.12.3,<0.13"
