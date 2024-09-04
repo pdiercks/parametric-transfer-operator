@@ -309,8 +309,8 @@ def task_validate_rom():
                 options = {}
                 for key, value in with_ei.items():
                     targets = []
-                    targets.append(example.rom_error_u(nreal, num_modes, ei=value))
-                    targets.append(example.rom_error_s(nreal, num_modes, ei=value))
+                    targets.append(example.rom_error_u(nreal, num_modes, method=method, ei=value))
+                    targets.append(example.rom_error_s(nreal, num_modes, method=method, ei=value))
                     if value:
                         options["--ei"] = ""
                     yield {
