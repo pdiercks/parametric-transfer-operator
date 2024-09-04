@@ -121,7 +121,6 @@ def task_hapod():
     for nreal in range(example.num_real):
         for k in range(11):
             deps = [SRC / "hapod.py"]
-            deps.append(example.coarse_grid("global"))
             deps.append(example.path_omega_coarse(k))
             deps.extend(with_h5(example.path_omega(k)))
             deps.extend(with_h5(example.path_omega_in(k)))
@@ -142,51 +141,59 @@ def task_hapod():
             }
 
 
-# def task_projerr():
-#     """ParaGeom: Compute projection error"""
-#     module = "src.parageom.projerr"
-#     distr = example.distributions[0]
-#     for nreal in range(example.num_real):
-#         for method in example.methods:
-#             for config in CONFIGS:
-#                 deps = [SRC / "projerr.py"]
-#                 deps.append(example.coarse_grid("global"))
-#                 deps.append(example.parent_domain("global"))
-#                 deps.append(example.coarse_grid("target"))
-#                 deps.append(example.parent_domain("target"))
-#                 deps.append(example.coarse_grid(config))
-#                 deps.append(example.parent_domain(config))
-#                 deps.append(example.parent_unit_cell)
-#                 targets = []
-#                 targets.append(example.projerr(nreal, method, distr, config))
-#                 targets.append(example.log_projerr(nreal, method, distr, config))
-#                 yield {
-#                         "name": method + ":" + config + ":" + str(nreal),
-#                         "file_dep": deps,
-#                         "actions": ["python3 -m {} {} {} {} {} --output {}".format(module, nreal, method, distr, config, targets[0])],
-#                         "targets": targets,
-#                         "clean": True
-#                         }
+def task_projerr():
+    """ParaGeom: Compute projection error"""
+    source = SRC / "projerr.py"
+    k = 5 # use this oversampling problem
+    # check sensitivity wrt mu rather than uncertainty in g
+    num_samples = 400
+    num_testvecs = 1
+
+    def create_action_projerr(nreal, method, output, debug=False):
+        action = f"python3 {source} {nreal} {method} {k}"
+        action += f" {num_samples} {num_testvecs}"
+        action += f" --output {output}"
+        if debug:
+            action += " --debug"
+        return action
+
+    for nreal in range(example.num_real):
+        for method in example.methods:
+                deps = [source]
+                deps.append(example.path_omega_coarse(k))
+                deps.extend(with_h5(example.path_omega(k)))
+                deps.extend(with_h5(example.path_omega_in(k)))
+                targets = []
+                targets.append(example.projerr(nreal, method, k))
+                targets.append(example.log_projerr(nreal, method, k))
+                yield {
+                        "name": ":".join([str(nreal), method, str(k)]),
+                        "file_dep": deps,
+                        "actions": [create_action_projerr(nreal, method, targets[0])],
+                        "targets": targets,
+                        "clean": True
+                        }
 
 
-# def task_fig_projerr():
-#     """ParaGeom: Plot projection error"""
-#     module = "src.parageom.plot_projerr"
-#     distr = example.distributions[0]
-#     for nreal in range(example.num_real):
-#         for config in CONFIGS:
-#             deps = [SRC / "plot_projerr.py"]
-#             for method in example.methods:
-#                 deps.append(example.projerr(nreal, method, distr, config))
-#             targets = []
-#             targets.append(example.fig_projerr(config))
-#             yield {
-#                     "name": config + ":" + str(nreal),
-#                     "file_dep": deps,
-#                     "actions": ["python3 -m {} {} {} %(targets)s".format(module, nreal, config)],
-#                     "targets": targets,
-#                     "clean": True,
-#                     }
+def task_fig_projerr():
+    """ParaGeom: Plot projection error"""
+    source = SRC / "plot_projerr.py"
+    k = 5
+    for nreal in range(example.num_real):
+        deps = [source]
+        # TODO re-add heuristic
+        # for method in example.methods:
+        for method in ["hapod",]:
+            deps.append(example.projerr(nreal, method, k))
+        targets = []
+        targets.append(example.fig_projerr(k))
+        yield {
+                "name": ":".join([str(nreal), str(k)]),
+                "file_dep": deps,
+                "actions": ["python3 {} {} {} %(targets)s".format(source, nreal, k)],
+                "targets": targets,
+                "clean": True,
+                }
 
 
 def task_gfem():

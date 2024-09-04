@@ -299,8 +299,8 @@ class BeamData:
     # @property
     # def fig_rom_opt(self) -> Path:
     #     return self.figures_path / "fig_rom_opt.pdf"
-    def fig_projerr(self, config: str) -> Path:
-        return self.figures_path / f"fig_projerr_{config}.pdf"
+    def fig_projerr(self, k: int) -> Path:
+        return self.figures_path / f"fig_projerr_{k:02}.pdf"
 
     @property
     def fig_locrom_error(self) -> Path:
@@ -324,8 +324,8 @@ class BeamData:
     ) -> Path:
         return self.logs_path(nr, method) / f"basis_construction_{k:02}.log"
 
-    def log_projerr(self, nr: int, method: str, distr: str, config: str) -> Path:
-        return self.logs_path(nr, method) / f"projerr_{distr}_{config}.log"
+    def log_projerr(self, nr: int, method: str, k: int) -> Path:
+        return self.logs_path(nr, method) / f"projerr_{k}.log"
 
     def log_gfem(self, nr: int, cell: int, method="hapod") -> Path:
         return self.logs_path(nr, method) / f"gfem_{cell:02}.log"
@@ -380,9 +380,9 @@ class BeamData:
         dir = self.method_folder(nr, "heuristic") / "modes"
         return dir / f"modes_{distr}_{config}.npy"
 
-    def projerr(self, nr: int, method: str, distr: str, config: str) -> Path:
+    def projerr(self, nr: int, method: str, k: int) -> Path:
         dir = self.method_folder(nr, method)
-        return dir / f"projerr_{distr}_{config}.npz"
+        return dir / f"projerr_{k}.npz"
 
     def path_omega(self, k: int) -> Path:
         return self.grids_path / f"omega_{k:02}.xdmf"
