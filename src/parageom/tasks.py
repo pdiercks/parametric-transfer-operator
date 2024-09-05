@@ -280,8 +280,8 @@ def task_gfem():
 def task_validate_rom():
     """ParaGeom: Validate ROM"""
 
-    def create_action(source, nreal, num_params, num_modes, options):
-        action = "python3 {} {} {} {}".format(source, nreal, num_params, num_modes)
+    def create_action(source, nreal, method, num_params, num_modes, options):
+        action = "python3 {} {} {} {} {}".format(source, nreal, method, num_params, num_modes)
         for k, v in options.items():
             action += f" {k}"
             if v:
@@ -314,9 +314,9 @@ def task_validate_rom():
                     if value:
                         options["--ei"] = ""
                     yield {
-                            "name": ":".join([str(nreal), str(num_modes), method, key]),
+                            "name": ":".join([str(nreal), method, str(num_modes), key]),
                             "file_dep": deps,
-                            "actions": create_action(source, nreal, num_params, num_modes, options),
+                            "actions": create_action(source, nreal, method, num_params, num_modes, options),
                             "targets": targets,
                             "clean": True,
                             }
