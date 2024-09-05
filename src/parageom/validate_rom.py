@@ -7,7 +7,7 @@ import basix
 import dolfinx as df
 import numpy as np
 from multi.io import read_mesh
-from multi.domain import StructuredQuadGrid
+from multi.domain import StructuredQuadGrid, RectangularDomain
 
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
@@ -214,15 +214,17 @@ def build_fom(example, ω=0.5):
     from parageom.fom import discretize_fom
     from parageom.auxiliary_problem import discretize_auxiliary_problem
 
-    coarse_grid_path = example.coarse_grid("global").as_posix()
-    parent_domain_path = example.parent_domain("global").as_posix()
+    coarse_grid_path = example.coarse_grid("global")
+    coarse_grid = StructuredQuadGrid(*read_mesh(coarse_grid_path, MPI.COMM_WORLD, kwargs={"gdim": example.gdim}))
+    parent_domain_path = example.parent_domain("global")
+    omega_gl = RectangularDomain(*read_mesh(parent_domain_path, MPI.COMM_WORLD, kwargs={"gdim": example.gdim}))
     interface_tags = [i for i in range(15, 25)]
     auxiliary_problem = discretize_auxiliary_problem(
         example,
-        parent_domain_path,
+        omega_gl,
         interface_tags,
         example.parameters["global"],
-        coarse_grid=coarse_grid_path,
+        coarse_grid=coarse_grid,
     )
     trafo_disp = df.fem.Function(auxiliary_problem.problem.V, name="d_μ_fom")
     fom, parageom = discretize_fom(example, auxiliary_problem, trafo_disp, ω=ω)

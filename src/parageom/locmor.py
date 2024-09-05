@@ -568,14 +568,16 @@ class DirichletLift(object):
         self._g.x.scatter_forward()  # type: ignore
 
     def assemble(self, values):
-        self._update_dirichlet_data(values)
-        bcs = self._bcs
-        self._x.zeroEntries()
-        dolfinx.fem.petsc.apply_lifting(self._x, [self._a], bcs=[bcs])  # type: ignore
-        self._x.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
-        dolfinx.fem.petsc.set_bc(self._x, bcs)
+        r = []
+        for dofs in values:
+            self._update_dirichlet_data(dofs)
+            self._x.zeroEntries()
+            dolfinx.fem.petsc.apply_lifting(self._x, [self._a], bcs=[self._bcs])  # type: ignore
+            self._x.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
+            dolfinx.fem.petsc.set_bc(self._x, self._bcs)
+            r.append(self._x.copy())
 
-        return self.range.make_array([self._x])  # type: ignore
+        return self.range.make_array(r)
 
 
 class ParametricTransferProblem(LogMixin):
@@ -635,12 +637,11 @@ class ParametricTransferProblem(LogMixin):
         U_in = self.range.zeros(0, reserve=len(boundary_values))
 
         # construct rhs from boundary data
-        for array in boundary_values:
-            Ag = self.rhs.assemble(array)
-            U = self.op.apply_inverse(Ag)
+        Ag = self.rhs.assemble(boundary_values)
+        U = self.op.apply_inverse(Ag)
 
-            # ### restrict full solution to target subdomain
-            U_in.append(self.range.from_numpy(U.dofs(self._restriction))) # type: ignore
+        # ### restrict full solution to target subdomain
+        U_in.append(self.range.from_numpy(U.dofs(self._restriction))) # type: ignore
 
         if self.kernel is not None:
             assert len(self.kernel) > 0 # type: ignore
@@ -762,7 +763,7 @@ def discretize_transfer_problem(example: BeamData, coarse_omega: StructuredQuadG
     from parageom.auxiliary_problem import GlobalAuxiliaryProblem
     from parageom.fom import ParaGeomLinEla
     from parageom.matrix_based_operator import _create_dirichlet_bcs, BCTopo, BCGeom
-    from parageom.locmor import ParametricTransferProblem, DirichletLift
+    # from parageom.locmor import ParametricTransferProblem, DirichletLift
 
     cells_omega = osp_config.cells_omega
 

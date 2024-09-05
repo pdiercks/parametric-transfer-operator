@@ -1,21 +1,15 @@
-from pathlib import Path
-from typing import Union, Optional, Callable
-import numpy as np
+from typing import Callable, Optional, Union
 
-from mpi4py import MPI
-import dolfinx as df
-from dolfinx.io import gmshio
 from basix.ufl import element
-
-from multi.io import read_mesh
+import dolfinx as df
+from mpi4py import MPI
 from multi.boundary import plane_at
-from multi.domain import RectangularDomain, StructuredQuadGrid
+from multi.domain import Domain, StructuredQuadGrid
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinearElasticityProblem
-
-from pymor.parameters.base import Mu, Parameters
-
+import numpy as np
 from parageom.definitions import BeamData
+from pymor.parameters.base import Mu, Parameters
 
 
 class GlobalAuxiliaryProblem:
@@ -251,49 +245,44 @@ class AuxiliaryProblem:
         solver.solve(p.b, u.vector)
 
 
-def discretize_auxiliary_problem(example: BeamData, fine_grid: str, facet_tags: Union[dict[str, int], list[int]], param: dict[str, int], coarse_grid: Optional[str] = None):
+def discretize_auxiliary_problem(example: BeamData, omega: Domain, facet_tags: Union[dict[str, int], list[int]], param: dict[str, int], coarse_grid: Optional[StructuredQuadGrid] = None):
     """Discretizes the auxiliary problem to compute transformation displacement.
 
     Args:
         example: The example data class.
-        fine_grid: The parent domain.
+        omega: The parent domain.
         facet_tags: Tags for all boundaries (AuxiliaryProblem) or several interfaces (GlobalAuxiliaryProblem).
         param: Dictionary mapping parameter names to parameter dimensions.
-        coarse_grid: Optional provide coarse grid.
+        coarse_grid: Optional provide coarse grid for `GlobalAuxiliaryProblem`.
 
     """
     degree = example.geom_deg
     gdim = example.gdim
 
-    comm = MPI.COMM_SELF
-    domain, ct, ft = gmshio.read_from_msh(fine_grid, comm, gdim=gdim)
-    omega = RectangularDomain(domain, cell_tags=ct, facet_tags=ft)
-
     # linear elasticity problem
     emod = df.fem.Constant(omega.grid, df.default_scalar_type(1.0))
     nu = df.fem.Constant(omega.grid, df.default_scalar_type(0.25))
     mat = LinearElasticMaterial(gdim, E=emod, NU=nu, plane_stress=example.plane_stress)
-    ve = element("P", domain.basix_cell(), degree, shape=(gdim,))
-    V = df.fem.functionspace(domain, ve)
+    ve = element("P", omega.grid.basix_cell(), degree, shape=(gdim,))
+    V = df.fem.functionspace(omega.grid, ve)
     problem = LinearElasticityProblem(omega, V, phases=mat)
 
     if isinstance(facet_tags, dict):
         aux = AuxiliaryProblem(problem, facet_tags, param)
     elif isinstance(facet_tags, list):
         assert coarse_grid is not None
-        grid, _, _ = read_mesh(Path(coarse_grid), MPI.COMM_SELF, kwargs={"gdim":gdim})
-        sgrid = StructuredQuadGrid(grid)
         interface_locators = []
         for x_coord in range(1, 10):
             x_coord = float(x_coord)
             interface_locators.append(plane_at(x_coord, "x"))
-        aux = GlobalAuxiliaryProblem(problem, facet_tags, param, sgrid, interface_locators=interface_locators)
+        aux = GlobalAuxiliaryProblem(problem, facet_tags, param, coarse_grid, interface_locators=interface_locators)
     return aux
 
 
 def main():
     from parageom.tasks import example
     from dolfinx.io.utils import XDMFFile
+    from multi.io import read_mesh
 
     # transformation displacement is used to construct
     # phyiscal domains/meshes
@@ -302,10 +291,14 @@ def main():
     assert example.fe_deg == example.geom_deg
 
     # discretize auxiliary problem for parent unit cell
-    mshfile = example.parent_unit_cell.as_posix()
+    mshfile = example.parent_unit_cell
+    comm = MPI.COMM_SELF
+    domain, ct, ft = read_mesh(mshfile, comm, kwargs={"gdim": example.gdim})
+    omega = Domain(domain, cell_tags=ct, facet_tags=ft)
+
     ftags = {"bottom": 11, "left": 12, "right": 13, "top": 14, "interface": 15}
     param = {"R": 1}
-    auxp = discretize_auxiliary_problem(example, mshfile, ftags, param)
+    auxp = discretize_auxiliary_problem(example, omega, ftags, param)
 
     # output function
     d = df.fem.Function(auxp.problem.V)
@@ -322,11 +315,13 @@ def main():
         xdmf.write_function(d.copy(), t=float(time))
     xdmf.close()
 
-    global_domain_msh = example.global_parent_domain.as_posix()
-    global_coarse_domain = example.coarse_grid("global").as_posix()
+    global_domain_msh = example.parent_domain("global")
+    omega_gl = Domain(*read_mesh(global_domain_msh, comm, kwargs={"gdim": example.gdim}))
+    global_coarse_domain_msh = example.coarse_grid("global")
+    coarse_grid = StructuredQuadGrid(read_mesh(global_coarse_domain_msh, comm, kwargs={"gdim": example.gdim})[0])
     param = {"R": 10}
     int_tags = [i for i in range(15, 25)]
-    auxp = discretize_auxiliary_problem(example, global_domain_msh, int_tags, param, coarse_grid=global_coarse_domain)
+    auxp = discretize_auxiliary_problem(example, omega_gl, int_tags, param, coarse_grid=coarse_grid)
 
     d = df.fem.Function(auxp.problem.V)
     xdmf = XDMFFile(d.function_space.mesh.comm, "./transformation_global_domain.xdmf", "w")
