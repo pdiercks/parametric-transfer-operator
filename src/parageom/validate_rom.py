@@ -24,7 +24,7 @@ def main(args):
     from parageom.locmor import reconstruct, assemble_gfem_system
 
     stem = pathlib.Path(__file__).stem
-    logfilename = example.log_validate_rom(args.nreal, args.num_modes, ei=args.ei).as_posix()
+    logfilename = example.log_validate_rom(args.nreal, args.num_modes, method=args.method, ei=args.ei).as_posix()
     set_defaults({"pymor.core.logger.getLogger.filename": logfilename})
     if args.debug:
         loglevel = 10 # debug
@@ -203,10 +203,10 @@ def main(args):
     """)
 
     # ### Write targets
-    output_u = example.rom_error_u(args.nreal, num_modes, ei=args.ei).as_posix()
+    output_u = example.rom_error_u(args.nreal, num_modes, method=args.method, ei=args.ei).as_posix()
     np.savez(output_u, relerr=errn, nodal_err=nodal_uerr)
 
-    output_s = example.rom_error_s(args.nreal, num_modes, ei=args.ei).as_posix()
+    output_s = example.rom_error_s(args.nreal, num_modes, method=args.method, ei=args.ei).as_posix()
     np.savez(output_s, relerr=max_rel_err_stress)
 
 
@@ -335,6 +335,8 @@ if __name__ == "__main__":
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("nreal", type=int, help="The nreal-th realization of the local bases.")
+    parser.add_argument("method", type=str, help="The method used to construct local bases.",
+                        choices=("hapod", "heuristic"))
     parser.add_argument("num_params", type=int, help="Size of the validation set.")
     parser.add_argument("num_modes", type=int, help="Number of modes per vertex of ROM.")
     parser.add_argument("--ei", action="store_true", help="Use EI.")
