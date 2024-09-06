@@ -15,6 +15,46 @@ from pymor.bindings.fenicsx import FenicsxVectorSpace, FenicsxVisualizer
 from scipy.sparse import csr_array
 from petsc4py import PETSc
 
+class ExtensionLift(object):
+    def __init__(
+        self,
+        space: FenicsxVectorSpace,
+        a_cpp: Union[df.fem.Form, list[Any], Any],
+        facets: npt.NDArray[np.int32],
+        boundary: npt.NDArray[np.int32],
+    ):
+        self.range = space
+        self._a = a_cpp
+        self._x = df.la.create_petsc_vector(space.V.dofmap.index_map, space.V.dofmap.bs)  # type: ignore
+        tdim = space.V.mesh.topology.dim  # type: ignore
+        fdim = tdim - 1
+        self._dofs_gamma = df.fem.locate_dofs_topological(space.V, fdim, facets)  # type: ignore
+        self._g = df.fem.Function(space.V)  # type: ignore
+        self._bcs_gamma = [df.fem.dirichletbc(self._g, self._dofs_gamma)]  # type: ignore
+        self.dofs = self._bcs_gamma[0]._cpp_object.dof_indices()[0]
+
+        # full boundary
+        self._dofs = df.fem.locate_dofs_topological(space.V, fdim, boundary)
+        self._bcs = [df.fem.dirichletbc(self._g, self._dofs)]
+
+    def _update_dirichlet_data(self, values):
+        self._g.x.petsc_vec.zeroEntries()  # type: ignore
+        self._g.x.array[self.dofs] = values  # type: ignore
+        self._g.x.scatter_forward()  # type: ignore
+
+    def assemble(self, values):
+        r = []
+        for dofs in values:
+            self._update_dirichlet_data(dofs)
+            self._x.zeroEntries()
+            dolfinx.fem.petsc.apply_lifting(self._x, [self._a], bcs=[self._bcs])  # type: ignore
+            self._x.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
+            dolfinx.fem.petsc.set_bc(self._x, self._bcs)
+            r.append(self._x.copy())
+
+        return self.range.make_array(r)
+
+
 class DirichletLift(object):
     def __init__(
         self,
@@ -112,21 +152,11 @@ extop = FenicsxMatrixBasedOperator(
 )
 
 # define rhs operator (DirichletLift) for each edge
-facets_left = omega_in.facet_tags.find(ftags["left"])
-rhs_left = DirichletLift(extop.range, extop.compiled_form, facets_left)
+# facets_left = omega_in.facet_tags.find(ftags["left"])
+# rhs_left = DirichletLift(extop.range, extop.compiled_form, facets_left)
 
 all_facets = np.hstack([facets_left, facets_right, facets_bottom, facets_top])
-other_rhs = DirichletLift(extop.range, extop.compiled_form, all_facets)
-
-# TODO
-# understand why `all_facets` need to be passed when the whole boundary is constrained
-# 
-# if e.g. left=g, right=0 (bottom & top no bc), then it suffices to pass `facets_left`
-# to DirichletLift
-
-data = np.zeros((1, 200-8))
-data[:, :50] = 1.
-other_R = other_rhs.assemble(data)
+rhs_left = ExtensionLift(extop.range, extop.compiled_form, facets_left, all_facets)
 
 mu_ref = auxiliary.parameters.parse([0.1])
 lhs = extop.assemble(mu_ref)
@@ -139,8 +169,6 @@ A_ref = csr_array(parageom.A.getValuesCSR()[::-1])
 A = csr_array(lhs.matrix.getValuesCSR()[::-1])
 lhs_equal = np.allclose(A_ref.todense(), A.todense())
 rhs_equal = np.allclose(rhs_array_ref, R.to_numpy().flatten())
-other_rhs_equal = np.allclose(rhs_array_ref, other_R.to_numpy().flatten())
-breakpoint()
 if lhs_equal:
     print("lhs equal")
 if rhs_equal:

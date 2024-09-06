@@ -6,6 +6,7 @@ import dolfinx as df
 import dolfinx.fem.petsc
 from dolfinx.io import XDMFFile
 from mpi4py import MPI
+from petsc4py import PETSc
 from multi.boundary import plane_at, within_range
 from multi.dofmap import QuadrilateralDofLayout
 from multi.domain import RectangularDomain, RectangularSubdomain, StructuredQuadGrid
@@ -16,6 +17,8 @@ from multi.product import InnerProduct
 from multi.shapes import NumpyLine
 from multi.solver import build_nullspace
 import numpy as np
+import numpy.typing as npt
+from pymor.algorithms.pod import pod
 from pymor.algorithms.gram_schmidt import gram_schmidt
 from pymor.core.logger import getLogger
 from pymor.bindings.fenicsx import FenicsxMatrixOperator, FenicsxVectorSpace, FenicsxVisualizer
@@ -28,6 +31,44 @@ from scipy.sparse.linalg import LinearOperator, eigsh
 from scipy.special import erfinv
 import ufl
 from parageom.fom import ParaGeomLinEla
+
+
+class ExtensionLift(object):
+    def __init__(
+        self,
+        space: FenicsxVectorSpace,
+        a_cpp: typing.Union[df.fem.Form, list[typing.Any], typing.Any],
+        dofs: npt.NDArray[np.int32],
+        boundary: npt.NDArray[np.int32],
+    ):
+        self.range = space
+        self._a = a_cpp
+        self._x = df.la.create_petsc_vector(space.V.dofmap.index_map, space.V.dofmap.bs)  # type: ignore
+        tdim = space.V.mesh.topology.dim  # type: ignore
+        fdim = tdim - 1
+        self._g = df.fem.Function(space.V)  # type: ignore
+        self.dofs = dofs
+
+        # full boundary
+        self._dofs = df.fem.locate_dofs_topological(space.V, fdim, boundary)
+        self._bcs = [df.fem.dirichletbc(self._g, self._dofs)]
+
+    def _update_dirichlet_data(self, values):
+        self._g.x.petsc_vec.zeroEntries()  # type: ignore
+        self._g.x.array[self.dofs] = values  # type: ignore
+        self._g.x.scatter_forward()  # type: ignore
+
+    def assemble(self, values):
+        r = []
+        for dofs in values:
+            self._update_dirichlet_data(dofs)
+            self._x.zeroEntries()
+            dolfinx.fem.petsc.apply_lifting(self._x, [self._a], bcs=[self._bcs])  # type: ignore
+            self._x.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
+            dolfinx.fem.petsc.set_bc(self._x, self._bcs)
+            r.append(self._x.copy())
+
+        return self.range.make_array(r)
 
 
 def get_oversampling_config():
@@ -364,7 +405,6 @@ def main(args):
     from parageom.tasks import example
     from parageom.auxiliary_problem import discretize_auxiliary_problem
     from parageom.matrix_based_operator import FenicsxMatrixBasedOperator, BCTopo
-    from parageom.locmor import DirichletLift
 
     logger = getLogger("parametric_oversampling", level=10)
 
@@ -413,7 +453,6 @@ def main(args):
     active_edges = set(["bottom", "left", "right", "top"])
     pod_bases, range_products, num_solves = adaptive_edge_rrf_normal(
             logger, transfer, active_edges, target_subdomain, source_product=transfer.source_product, range_product="h1", error_tol=1e-4, failure_tolerance=1e-14, num_testvecs=20, lambda_min=None)
-    breakpoint()
 
     # TODO
     # - [ ] parametric extension of coarse scale basis and fine scale edge basis
@@ -454,7 +493,7 @@ def main(args):
     def boundary_omega_in(x):
         return np.full(x[0].shape, True, dtype=bool)
 
-    # operator for left hand side on full oversampling domain
+    # operator for left hand side on target subdomain Ω_in
     bcs_op = [] # BCs for lhs operator of extension problem
     zero = df.default_scalar_type(0.0)
     fix_u = df.fem.Constant(W.mesh, (zero,) * example.gdim)
@@ -467,25 +506,70 @@ def main(args):
         parageom.form_lhs, paramdim, param_setter=param_setter, bcs=tuple(bcs_op)
     )
 
-    # define rhs operator (DirichletLift) for each edge
     facets_left = omega_in.facet_tags.find(ftags["left"])
-    rhs_left = DirichletLift(extop.range, extop.compiled_form, facets_left)
+    facets_right = omega_in.facet_tags.find(ftags["right"])
+    facets_bottom = omega_in.facet_tags.find(ftags["bottom"])
+    facets_top = omega_in.facet_tags.find(ftags["top"])
+    all_facets = np.hstack([facets_left, facets_right, facets_bottom, facets_top])
 
-    modes_left = pod_bases["left"].to_numpy()[:1, :] # revert V_to_L?
+    # definition of the training set
+    # use uniform sampling since parameter space is small P=[R_min, R_max]
+    ntrain = 20
+    ps = extop.parameters.space(example.mu_range)
+    training_set = ps.sample_uniformly(20)
 
-    breakpoint()
-    # assemble operator, this also sets d_trafo
-    mu = extop.parameters.parse([0.2])
-    lhs = extop.assemble(mu)
+    # rhs operator (ExtensionLift) for each edge
+    rhs_op = {}
+    snapshots = {}
+    num_modes = {}
+    for key, dofs in target_subdomain.V_to_L.items():
+        rhs_op[key] = ExtensionLift(extop.range, extop.compiled_form, dofs, all_facets)
+        num_modes[key] = len(pod_bases[key])
+        snapshots[key] = extop.source.empty(reserve=ntrain * num_modes[key])
 
-    # then assemble rhs and solve
-    R = rhs_left.assemble(modes_left)
-    U = lhs.apply_inverse(R)
+    # we need for each mode, the extension for every mu in the training set
+    # however, computing all extensions after assemble(mu) once is faster
 
-    viz = FenicsxVisualizer(extop.range)
-    viz.visualize(U, filename="extensions_left.xdmf")
-    viz.visualize(R, filename="R.xdmf")
-    breakpoint()
+    # how are the snapshots collected best?
+    # - I will have ntrain snapshots for each mode for each edge
+    # - e.g. ntrain * num_modes = 20 * 13 = 260 for the left edge
+
+    # for edge in ["bottom", "left", "right", "top"]:
+    edges = ["bottom", "left", "right", "top"]
+    for edge in edges:
+        for mu in training_set:
+            lhs = extop.assemble(mu)
+            modes = pod_bases[edge].to_numpy() # all modes for `edge`
+            R = rhs_op[edge].assemble(modes)
+            U = lhs.apply_inverse(R) # all extensions for `edge`
+            snapshots[edge].append(U)
+
+    # snapshots correpsonding to mode 0 have indices
+    # 0, 13, 26, ..., 247
+    # num_modes = num_modes["left"]
+    # view_mode_0 = np.arange(0, num_modes * (ntrain-1) + 1, num_modes, dtype=np.int32)
+    # view_mode_1 = view_mode_0 + 1 # etc.
+
+    # test first single pod
+    # TODO range product for target subdomain space W
+    pod_modes = {}
+    for edge in edges:
+        pod_modes[edge] = extop.source.empty()
+        for i in range(num_modes[edge]):
+            # print(f"{i+1}-th mode")
+            view = np.arange(i, num_modes[edge] * (ntrain-1) + 1 + i, num_modes[edge], dtype=np.int32)
+            # print(view)
+            rb, sv = pod(snapshots[edge][view], product=None, rtol=1e-6)
+            # print(f"Adding {len(rb_left)} POD modes")
+            pod_modes[edge].append(rb)
+
+        viz = FenicsxVisualizer(pod_modes[edge].space)
+        viz.visualize(pod_modes[edge], filename=f"output/extended_pod_modes_{edge}.xdmf")
+        print(f"Computed {len(pod_modes[edge])} for {edge=}.")
+
+    # TODO parametric extension of coarse scale basis functions
+    # TODO generate proper test data to evaluate quality of the basis
+
 
 
 
