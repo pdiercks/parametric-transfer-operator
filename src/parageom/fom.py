@@ -159,21 +159,6 @@ def discretize_subdomain_operators(example):
         'NU': example.poisson_ratio,
         'plane_stress': example.plane_stress,
     }
-    domain, ct, ft = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, kwargs={'gdim': example.gdim})
-    omega = RectangularDomain(domain, ct, ft)
-    # facet tags are defined in preprocessing.discretize_unit_cell
-    ftags = {'bottom': 11, 'left': 12, 'right': 13, 'top': 14, 'interface': 15}
-    params = example.parameters['subdomain']
-    aux = discretize_auxiliary_problem(example, omega, ftags, params)
-    d = df.fem.Function(aux.problem.V, name='d_trafo_unit_cell')
-
-    # create problem to define (stiffness matrix) operator
-    matparam = {
-        'gdim': omega.gdim,
-        'E': example.youngs_modulus,
-        'NU': example.poisson_ratio,
-        'plane_stress': example.plane_stress,
-    }
     problem = ParaGeomLinEla(omega, aux.problem.V, d, matparam)
 
     # ### wrap stiffness matrix as pymor operator
