@@ -104,14 +104,14 @@ def main(args):
     if args.ei:
         logger.info("Building ROM with EI ...")
         tic = perf_counter()
-        rom, modes = build_rom(example, dofmap, params, num_modes, ω=args.omega, use_ei=args.ei)
+        rom, modes = build_rom(example, dofmap, params, num_modes, ω=args.omega, nreal=args.nreal, method=args.method, distribution="normal", use_ei=args.ei)
         logger.info(f"Took {perf_counter()-tic} to build ROM.")
         rom_data = {}
     else:
         logger.info("Building ROM without EI ...")
         # here time is not interesting as the assembly has to be carried out
         # every time model is evaluated for new `mu`
-        rom_data = build_rom(example, dofmap, params, num_modes, use_ei=args.ei)
+        rom_data = build_rom(example, dofmap, params, num_modes, ω=args.omega, nreal=args.nreal, method=args.method, distribution="normal", use_ei=args.ei)
 
     P = params.space(example.mu_range)
     with new_rng(example.validation_set_seed):
