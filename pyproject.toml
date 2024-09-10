@@ -17,7 +17,49 @@ backend = "dbm"
 sort = "definition"
 
 [tool.ruff]
+src = ["src"]
 line-length = 120
+
+[tool.ruff.lint]
+select = [
+  "F", # Pyflakes
+  "W", # pycodestyle warning
+  "E", # pycodestyle error
+  "I", # isort
+  "N", # pep8-naming
+  "D", # pydocstyle
+  "ICN", # flake8-import-conventions
+  "Q", # flake8-quotes
+]
+ignore = [
+  "D100", # missing docstring in public module
+  "D101", # missing docstring in public class
+  "D102", # missing docstring in public method
+  "D103", # missing docstring in public function
+  "D104", # missing docstring in public package
+  "D105", # missing docstring in magic method
+  "D106", # missing docstring in public nested class
+  "D401", # first line of docstring should be in imperative mood
+  "D404", # first word of the docstring should not be "This"
+  "D405", # the linter thinks the argument name 'parameters' is a docstring section
+  "D407", # same as above
+  "D410", # same as above
+  "D411", # same as above
+  "D414", # same as above
+  "E402", # module level import not at top of file (due to config.require("PKG") syntax)
+  "E731", # do not assign a lambda expression, use a def
+  "E741", # do not use variables named 'l', 'O', or 'I'
+  "N802", # function name should be lowercase
+  "N803", # argument name should be lowercase (we use single capital letters everywhere for vectorarrays)
+  "N806", # same for variables in function
+]
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = "single"
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
 
 [tool.pixi.project]
 channels = ["conda-forge"]

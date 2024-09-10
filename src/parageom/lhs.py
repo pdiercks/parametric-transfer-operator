@@ -1,4 +1,4 @@
-"""latin hypercube sampling"""
+"""latin hypercube sampling."""
 
 import numpy as np
 from pyDOE3 import lhs
@@ -37,17 +37,17 @@ def sample_lhs(parameter_space: ParameterSpace, name: str, **kwargs) -> list[Mu]
     return mus
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     E_range = [1.0, 2.0]
     xr = np.array([E_range], dtype=np.float64)
     ndim = 2
     x = np.repeat(xr, ndim, axis=0)
     num_samples = 50
-    criterion = "center"
+    criterion = 'center'
     samples = lhs(ndim, samples=num_samples, criterion=criterion)
     scale_range(samples, x)
 
     import matplotlib.pyplot as plt
 
-    plt.plot(samples[:, 0], samples[:, 1], "o")
+    plt.plot(samples[:, 0], samples[:, 1], 'o')
     plt.show()
