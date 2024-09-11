@@ -1,17 +1,16 @@
 """ParaGeom example definitions."""
 
-from dataclasses import dataclass
-from dataclasses import field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
 import dolfinx as df
-from multi.boundary import within_range, plane_at, point_at
 import numpy as np
+from multi.boundary import plane_at, point_at, within_range
 from pymor.parameters.base import Parameters
 
 ROOT = Path(__file__).parents[2]
-WORK = ROOT / "work"
+WORK = ROOT / 'work'
 SRC = Path(__file__).parent
 
 
@@ -47,7 +46,7 @@ class BeamData:
 
     """
 
-    name: str = "parageom"
+    name: str = 'parageom'
     gdim: int = 2
     l_char: float = 1.0  # [mm], characteristic length = unit length
     unit_length: float = 1.0  # dimensionless unit length
@@ -58,45 +57,41 @@ class BeamData:
     poisson_ratio: float = 0.2
     youngs_modulus: float = 30e3  # [MPa]
     plane_stress: bool = True
-    traction_y: float = 0.0375 # [MPa]
+    traction_y: float = 0.0375  # [MPa]
     parameters: dict = field(
         default_factory=lambda: {
-            "subdomain": Parameters({"R": 1}),
-            "global": Parameters({"R": 10}),
-            "left": Parameters({"R": 3}),
-            "right": Parameters({"R": 3}),
-            "inner": Parameters({"R": 4}),
+            'subdomain': Parameters({'R': 1}),
+            'global': Parameters({'R': 10}),
+            'left': Parameters({'R': 3}),
+            'right': Parameters({'R': 3}),
+            'inner': Parameters({'R': 4}),
         }
     )
     training_set_seed: int = 767667058
     testing_set_seed: int = 545445836
     validation_set_seed: int = 241690
     projerr_seed: int = 923719053
-    distributions: tuple[str, ...] = ("normal",)
-    methods: tuple[str, ...] = ("hapod", "heuristic")
+    distributions: tuple[str, ...] = ('normal',)
+    methods: tuple[str, ...] = ('hapod', 'heuristic')
     epsilon_star: dict = field(
-            default_factory=lambda: {
-                "heuristic": 0.001,
-                "hapod": 0.001,
-                })
+        default_factory=lambda: {
+            'heuristic': 0.001,
+            'hapod': 0.001,
+        }
+    )
     epsilon_star_projerr: float = 0.001
-    omega: float = 0.5 # ω related to HAPOD (not output functional)
+    omega: float = 0.5  # ω related to HAPOD (not output functional)
     rrf_ttol: float = 10e-2
     rrf_ftol: float = 1e-10
     rrf_num_testvecs: int = 20
-    neumann_rtol: float = 1e-5 # hrrf pod extension
+    neumann_rtol: float = 1e-5  # hrrf pod extension
     neumann_tag: int = 194
     mdeim_rtol: float = 1e-5
     debug: bool = False
-    validate_rom: dict = field(
-            default_factory=lambda: {
-                "num_params": 200,
-                "num_modes": list(range(20, 161, 20))
-                })
+    validate_rom: dict = field(default_factory=lambda: {'num_params': 200, 'num_modes': list(range(20, 161, 20))})
 
     def __post_init__(self):
-        """Creates directory structure and dependent attributes"""
-
+        """Creates directory structure and dependent attributes."""
         self.length: float = self.unit_length * self.nx
         self.height: float = self.unit_length * self.ny
         a = self.unit_length
@@ -111,7 +106,7 @@ class BeamData:
         # naming convention: oversampling_{index}.msh
         # store the training set, such that via {index} the
         # parameter value can be determined
-        for config in ["global"]:
+        for config in ['global']:
             p = self.grids_path / config
             p.mkdir(exist_ok=True, parents=True)
 
@@ -134,78 +129,76 @@ class BeamData:
                 # self.method_folder(nr, name).mkdir(exist_ok=True, parents=True)
                 self.logs_path(nr, name).mkdir(exist_ok=True, parents=True)
                 self.bases_path(nr, name).mkdir(exist_ok=True, parents=True)
-            (self.method_folder(nr, "hapod") / "pod_modes").mkdir(
-                exist_ok=True, parents=True
-            )
-            (self.method_folder(nr, "heuristic") / "modes").mkdir(
-                exist_ok=True, parents=True
-            )
+            (self.method_folder(nr, 'hapod') / 'pod_modes').mkdir(exist_ok=True, parents=True)
+            (self.method_folder(nr, 'heuristic') / 'modes').mkdir(exist_ok=True, parents=True)
 
     @property
     def plotting_style(self) -> Path:
-        """eccomas proceedings mplstyle"""
-        return ROOT / "src/proceedings.mplstyle"
+        """Eccomas proceedings mplstyle."""
+        return ROOT / 'src/proceedings.mplstyle'
 
     @property
     def figures_path(self) -> Path:
-        return ROOT / "figures" / f"{self.name}"
+        return ROOT / 'figures' / f'{self.name}'
 
     @property
     def rf(self) -> Path:
-        """run folder"""
-        return WORK / f"{self.name}"
+        """Run folder."""
+        return WORK / f'{self.name}'
 
     @property
     def grids_path(self) -> Path:
-        return self.rf / "grids"
+        return self.rf / 'grids'
 
     def real_folder(self, nr: int) -> Path:
-        """realization folder"""
-        return self.rf / f"realization_{nr:02}"
+        """Realization folder."""
+        return self.rf / f'realization_{nr:02}'
 
     def method_folder(self, nr: int, name: str) -> Path:
-        """training strategy / method folder"""
+        """Training strategy / method folder."""
         return self.real_folder(nr) / name
 
     def logs_path(self, nr: int, name: str) -> Path:
-        return self.method_folder(nr, name) / "logs"
+        return self.method_folder(nr, name) / 'logs'
 
-    def bases_path(self, nr: int, name: str, distr: str = "normal") -> Path:
-        """
+    def bases_path(self, nr: int, name: str, distr: str = 'normal') -> Path:
+        """Return Path to bases folder.
+
         Args:
             nr: realization index.
             name: name of the training strategy / method.
             distr: distribution.
+
         """
-        return self.method_folder(nr, name) / f"bases/{distr}"
+        return self.method_folder(nr, name) / f'bases/{distr}'
 
     def training_set(self, config: str) -> Path:
-        """Write training set as numpy array"""
-        return self.grids_path / config / "training_set.out"
+        """Write training set as numpy array."""
+        return self.grids_path / config / 'training_set.out'
 
     def coarse_grid(self, config: str) -> Path:
-        """Global coarse grid"""
-        assert config in ["global"]
-        return self.grids_path / config / "coarse_grid.msh"
+        """Global coarse grid."""
+        assert config in ['global']
+        return self.grids_path / config / 'coarse_grid.msh'
 
     def parent_domain(self, config: str) -> Path:
-        assert config in ["global"]
-        return self.grids_path / config / "parent_domain.msh"
+        assert config in ['global']
+        return self.grids_path / config / 'parent_domain.msh'
 
     @property
     def parent_unit_cell(self) -> Path:
-        return self.grids_path / "parent_unit_cell.msh"
+        return self.grids_path / 'parent_unit_cell.msh'
 
     @property
     def cell_type(self) -> str:
         """The cell type of the parent unit cell mesh."""
         match self.geom_deg:
             case 1:
-                return "quad"
+                return 'quad'
             case 2:
-                return "quad9"
+                return 'quad9'
             case _:
-                return "quad"
+                return 'quad'
 
     def archetype_to_cell(self, atype: int) -> int:
         atc = {0: 0, 1: 1, 2: 4, 3: 8, 4: 9}
@@ -213,16 +206,16 @@ class BeamData:
 
     def config_to_cell(self, config: str) -> int:
         """Maps config to global cell index."""
-        map = {"inner": 4, "left": 0, "right": 9}
+        map = {'inner': 4, 'left': 0, 'right': 9}
         return map[config]
 
     def config_to_target_cell(self, config: str) -> int:
         """Maps config to cell index of target subdomain."""
-        map = {"inner": 1, "left": 0, "right": 1}
+        map = {'inner': 1, 'left': 0, 'right': 1}
         return map[config]
 
     def ntrain(self, k: int) -> int:
-        """Define size of training set for k-th transfer problem"""
+        """Define size of training set for k-th transfer problem."""
         if k in (0, 10):
             return 50
         elif k in (1, 9):
@@ -233,51 +226,48 @@ class BeamData:
     def cell_to_config(self, cell: int) -> str:
         """Maps global cell index to config."""
         assert cell in list(range(self.nx * self.ny))
-        map = {0: "left", 9: "right"}
-        config = map.get(cell, "inner")
+        map = {0: 'left', 9: 'right'}
+        config = map.get(cell, 'inner')
         return config
 
-    def local_basis_npy(self, nr: int, cell: int, method="hapod", distr="normal") -> Path:
-        """final basis for loc rom assembly"""
+    def local_basis_npy(self, nr: int, cell: int, method='hapod', distr='normal') -> Path:
+        """Final basis for loc rom assembly."""
         dir = self.bases_path(nr, method, distr)
-        return dir / f"basis_{cell:02}.npy"
+        return dir / f'basis_{cell:02}.npy'
 
-    def local_basis_dofs_per_vert(self, nr: int, cell: int, method="hapod", distr="normal") -> Path:
-        """Dofs per vertex for each cell"""
+    def local_basis_dofs_per_vert(self, nr: int, cell: int, method='hapod', distr='normal') -> Path:
+        """Dofs per vertex for each cell."""
         dir = self.bases_path(nr, method, distr)
-        return dir / f"dofs_per_vert_{cell:02}.npy"
+        return dir / f'dofs_per_vert_{cell:02}.npy'
 
-    def rom_error_u(self, nreal: int, num_modes: int, method="hapod", ei=False) -> Path:
+    def rom_error_u(self, nreal: int, num_modes: int, method='hapod', ei=False) -> Path:
         dir = self.method_folder(nreal, method)
         if ei:
-            return dir / f"rom_error_u_ei_{num_modes}.npz"
+            return dir / f'rom_error_u_ei_{num_modes}.npz'
         else:
-            return dir / f"rom_error_u_{num_modes}.npz"
+            return dir / f'rom_error_u_{num_modes}.npz'
 
-    def rom_error_s(self, nreal: int, num_modes: int, method="hapod", ei=False) -> Path:
+    def rom_error_s(self, nreal: int, num_modes: int, method='hapod', ei=False) -> Path:
         dir = self.method_folder(nreal, method)
         if ei:
-            return dir / f"rom_error_s_ei_{num_modes}.npz"
+            return dir / f'rom_error_s_ei_{num_modes}.npz'
         else:
-            return dir / f"rom_error_s_{num_modes}.npz"
+            return dir / f'rom_error_s_{num_modes}.npz'
+
     @property
     def fom_minimization_data(self) -> Path:
-        """FOM minimization data"""
-        return self.rf / "fom_minimization_data.out"
+        """FOM minimization data."""
+        return self.rf / 'fom_minimization_data.out'
 
     @property
     def rom_minimization_data(self) -> Path:
-        """ROM minimization data"""
-        return self.rf / "rom_minimization_data.out"
+        """ROM minimization data."""
+        return self.rf / 'rom_minimization_data.out'
 
     def pp_stress(self, method: str) -> dict[str, Path]:
-        """Postprocessing of stress at optimal design"""
+        """Postprocessing of stress at optimal design."""
         folder = self.method_folder(0, method)
-        return {
-                "fom": folder / "stress_fom.xdmf",
-                "rom": folder / "stress_rom.xdmf",
-                "err": folder / "stress_err.xdmf"
-                }
+        return {'fom': folder / 'stress_fom.xdmf', 'rom': folder / 'stress_rom.xdmf', 'err': folder / 'stress_err.xdmf'}
 
     # @property
     # def minimization_data_table(self) -> Path:
@@ -295,18 +285,18 @@ class BeamData:
     # def fig_rom_opt(self) -> Path:
     #     return self.figures_path / "fig_rom_opt.pdf"
     def fig_projerr(self, k: int) -> Path:
-        return self.figures_path / f"fig_projerr_{k:02}.pdf"
+        return self.figures_path / f'fig_projerr_{k:02}.pdf'
 
     def fig_rom_error(self, method: str, ei: bool) -> Path:
         if ei:
-            return self.figures_path / f"rom_error_{method}_ei.pdf"
+            return self.figures_path / f'rom_error_{method}_ei.pdf'
         else:
-            return self.figures_path / f"rom_error_{method}.pdf"
+            return self.figures_path / f'rom_error_{method}.pdf'
 
     @property
     def realizations(self) -> Path:
-        """Returns realizations that can be used to create ``np.random.SeedSequence``"""
-        file = SRC / "realizations.npy"
+        """Returns realizations that can be used to create ``np.random.SeedSequence``."""
+        file = SRC / 'realizations.npy'
         if not file.exists():
             self._generate_realizations(file)
         return file
@@ -316,89 +306,87 @@ class BeamData:
         realizations = seed.generate_state(self.num_real)
         np.save(outpath, realizations)
 
-    def log_basis_construction(
-            self, nr: int, method: str, k: int
-    ) -> Path:
-        return self.logs_path(nr, method) / f"basis_construction_{k:02}.log"
+    def log_basis_construction(self, nr: int, method: str, k: int) -> Path:
+        return self.logs_path(nr, method) / f'basis_construction_{k:02}.log'
 
     def log_projerr(self, nr: int, method: str, k: int) -> Path:
-        return self.logs_path(nr, method) / f"projerr_{k}.log"
+        return self.logs_path(nr, method) / f'projerr_{k}.log'
 
-    def log_gfem(self, nr: int, cell: int, method="hapod") -> Path:
-        return self.logs_path(nr, method) / f"gfem_{cell:02}.log"
+    def log_gfem(self, nr: int, cell: int, method='hapod') -> Path:
+        return self.logs_path(nr, method) / f'gfem_{cell:02}.log'
 
-    def log_run_locrom(self, nr: int, method: str, distr: str, ei: bool=False) -> Path:
+    def log_run_locrom(self, nr: int, method: str, distr: str, ei: bool = False) -> Path:
         dir = self.logs_path(nr, method)
         if ei:
-            return dir / f"run_locrom_ei_{distr}.log"
+            return dir / f'run_locrom_ei_{distr}.log'
         else:
-            return dir / f"run_locrom_{distr}.log"
+            return dir / f'run_locrom_{distr}.log'
 
-    def log_validate_rom(self, nr: int, modes: int, method="hapod", distr="normal", ei=True) -> Path:
+    def log_validate_rom(self, nr: int, modes: int, method='hapod', distr='normal', ei=True) -> Path:
         dir = self.logs_path(nr, method)
         if ei:
-            return dir / f"validate_rom_{modes}_{distr}_with_ei.log"
+            return dir / f'validate_rom_{modes}_{distr}_with_ei.log'
         else:
-            return dir / f"validate_rom_{modes}_{distr}.log"
+            return dir / f'validate_rom_{modes}_{distr}.log'
 
     @property
     def log_optimization(self) -> Path:
-        return self.logs_path(0, "hapod") / "optimization.log"
+        return self.logs_path(0, 'hapod') / 'optimization.log'
 
     def hapod_singular_values(self, nr: int, k: int) -> Path:
-        """singular values of final POD for k-th transfer problem"""
-        return self.method_folder(nr, "hapod") / f"singular_values_{k:02}.npy"
+        """Singular values of final POD for k-th transfer problem."""
+        return self.method_folder(nr, 'hapod') / f'singular_values_{k:02}.npy'
 
     def hapod_neumann_svals(self, nr: int, k: int) -> Path:
-        """singular values of POD of neumann data for k-th transfer problem"""
-        return self.method_folder(nr, "hapod") / f"neumann_singular_values_{k:02}.npy"
+        """Singular values of POD of neumann data for k-th transfer problem."""
+        return self.method_folder(nr, 'hapod') / f'neumann_singular_values_{k:02}.npy'
 
     def hapod_info(self, nr: int, k: int) -> Path:
-        """Info on HAPOD, final POD"""
-        return self.method_folder(nr, "hapod") / f"info_{k:02}.out"
+        """Info on HAPOD, final POD."""
+        return self.method_folder(nr, 'hapod') / f'info_{k:02}.out'
 
     def hapod_modes_xdmf(self, nr: int, k: int) -> Path:
-        """modes of the final POD for k-th transfer problem"""
-        dir = self.method_folder(nr, "hapod") / "pod_modes"
-        return dir / f"modes_{k:02}.xdmf"
+        """Modes of the final POD for k-th transfer problem."""
+        dir = self.method_folder(nr, 'hapod') / 'pod_modes'
+        return dir / f'modes_{k:02}.xdmf'
 
     def heuristic_modes_xdmf(self, nr: int, k: int) -> Path:
-        """modes computed by heuristic range finder"""
-        dir = self.method_folder(nr, "heuristic") / "modes"
-        return dir / f"modes_{k:02}.xdmf"
+        """Modes computed by heuristic range finder."""
+        dir = self.method_folder(nr, 'heuristic') / 'modes'
+        return dir / f'modes_{k:02}.xdmf'
 
     def hapod_modes_npy(self, nr: int, k: int) -> Path:
-        """modes of the final POD for k-th transfer problem"""
-        dir = self.method_folder(nr, "hapod") / "pod_modes"
-        return dir / f"modes_{k:02}.npy"
+        """Modes of the final POD for k-th transfer problem."""
+        dir = self.method_folder(nr, 'hapod') / 'pod_modes'
+        return dir / f'modes_{k:02}.npy'
 
     def heuristic_modes_npy(self, nr: int, k: int) -> Path:
-        """modes for k-th transfer problem"""
-        dir = self.method_folder(nr, "heuristic") / "modes"
-        return dir / f"modes_{k:02}.npy"
+        """Modes for k-th transfer problem."""
+        dir = self.method_folder(nr, 'heuristic') / 'modes'
+        return dir / f'modes_{k:02}.npy'
 
     def heuristic_neumann_svals(self, nr: int, k: int) -> Path:
-        """Singular values of POD of neumann snapshots"""
-        dir = self.method_folder(nr, "heuristic")
-        return dir / f"neumann_svals_{k:02}.npy"
+        """Singular values of POD of neumann snapshots."""
+        dir = self.method_folder(nr, 'heuristic')
+        return dir / f'neumann_svals_{k:02}.npy'
 
     def projerr(self, nr: int, method: str, k: int) -> Path:
         dir = self.method_folder(nr, method)
-        return dir / f"projerr_{k}.npz"
+        return dir / f'projerr_{k}.npz'
 
     def path_omega(self, k: int) -> Path:
-        return self.grids_path / f"omega_{k:02}.xdmf"
+        return self.grids_path / f'omega_{k:02}.xdmf'
 
     def path_omega_coarse(self, k: int) -> Path:
-        return self.grids_path / f"omega_coarse_{k:02}.msh"
+        return self.grids_path / f'omega_coarse_{k:02}.msh'
 
     def path_omega_in(self, k: int) -> Path:
-        return self.grids_path / f"omega_in_{k:02}.xdmf"
+        return self.grids_path / f'omega_in_{k:02}.xdmf'
 
     def config_to_omega_in(self, config: str, local=True) -> list[int]:
         """Maps config to cell local index/indices of oversampling domain that correspond to omega in."""
-        global_indices = {"left": [0, 1], "right": [8, 9], "inner": [4, 5]}
-        local_indices = {"left": [0, 1], "right": [1, 2], "inner": [1, 2]}
+        global_indices = {'left': [0, 1], 'right': [8, 9], 'inner': [4, 5]}
+        local_indices = {'left': [0, 1], 'right': [1, 2], 'inner': [1, 2]}
         if local:
             return local_indices[config]
         else:
@@ -407,26 +395,26 @@ class BeamData:
     # FIXME: not needed for GFEM, but I may use edge functions as well.
     @property
     def cell_sets(self):
-        """Returns cell sets for definition of edge basis configuration"""
+        """Returns cell sets for definition of edge basis configuration."""
         # the order is important
         # this way e.g. cell 1 will load modes for the left edge
         # from basis generated for cell 1 (config inner)
         cell_sets = {
-            "inner": set([1, 2, 3, 4, 5, 6, 7, 8]),
-            "left": set([0]),
-            "right": set([9]),
+            'inner': set([1, 2, 3, 4, 5, 6, 7, 8]),
+            'left': set([0]),
+            'right': set([9]),
         }
         return cell_sets
 
     @property
     # FIXME: is this used anywhere?
     def cell_sets_oversampling(self):
-        """Returns cell sets that define oversampling domains"""
+        """Returns cell sets that define oversampling domains."""
         # see preprocessing.py
         cells = {
-            "inner": set([3, 4, 5, 6]),
-            "left": set([0, 1]),
-            "right": set([8, 9]),
+            'inner': set([3, 4, 5, 6]),
+            'left': set([0, 1]),
+            'right': set([8, 9]),
         }
         return cells
 
@@ -440,57 +428,51 @@ class BeamData:
             This only defines markers and should be used with `df.mesh.locate_entities_boundary`.
 
         """
-
         x = domain.geometry.x
         a = self.unit_length
         xmin = np.amin(x, axis=0)
         xmax = np.amax(x, axis=0)
 
         return {
-            "support_left": (
+            'support_left': (
                 int(101),
-                plane_at(xmin[0], "x"),
+                plane_at(xmin[0], 'x'),
             ),
-            "support_right": (
-                int(102),
-                point_at([xmax[0], xmin[1], xmin[2]])
-            ),
-            "support_top": (
+            'support_right': (int(102), point_at([xmax[0], xmin[1], xmin[2]])),
+            'support_top': (
                 int(194),
                 within_range([xmin[0], xmax[1], xmin[2]], [a, xmax[1], xmin[2]]),
-                ),
+            ),
         }
 
-    def get_dirichlet(
-            self, domain: df.mesh.Mesh, config: str
-    ) -> Optional[list[dict]]:
+    def get_dirichlet(self, domain: df.mesh.Mesh, config: str) -> Optional[list[dict]]:
         # NOTE
         # this only defines markers using `within_range`
         # code needs to use df.mesh.locate_entities_boundary
         boundaries = self.boundaries(domain)
-        _, left = boundaries["support_left"]
-        _, right = boundaries["support_right"]
+        _, left = boundaries['support_left']
+        _, right = boundaries['support_right']
 
         bcs = []
         zero = df.default_scalar_type(0.0)
 
-        if config == "left":
+        if config == 'left':
             fix_ux = {
-                "value": zero,
-                "boundary": left,
-                "entity_dim": 1,
-                "sub": 0,
+                'value': zero,
+                'boundary': left,
+                'entity_dim': 1,
+                'sub': 0,
             }
             bcs.append(fix_ux)
             return bcs
-        elif config == "inner":
+        elif config == 'inner':
             return None
-        elif config == "right":
+        elif config == 'right':
             fix_uy = {
-                "value": zero,
-                "boundary": right,
-                "entity_dim": 0,
-                "sub": 1,
+                'value': zero,
+                'boundary': right,
+                'entity_dim': 0,
+                'sub': 1,
             }
             bcs.append(fix_uy)
             return bcs
@@ -499,13 +481,13 @@ class BeamData:
 
     def get_neumann(self, domain: df.mesh.Mesh, config: str) -> Optional[tuple[int, Callable]]:
         boundaries = self.boundaries(domain)
-        tag, marker = boundaries["support_top"]
+        tag, marker = boundaries['support_top']
 
-        if config == "left":
+        if config == 'left':
             return (tag, marker)
-        elif config == "inner":
+        elif config == 'inner':
             return None
-        elif config == "right":
+        elif config == 'right':
             return None
         else:
             raise NotImplementedError
