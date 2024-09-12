@@ -290,7 +290,6 @@ def task_validate_rom():
     num_params = example.validate_rom['num_params']
     number_of_modes = example.validate_rom['num_modes']
     with_ei = {'no_ei': False, 'ei': True}
-    # with_ei = {"ei": True}
     num_cells = example.nx * example.ny
 
     for nreal in range(example.num_real):

@@ -153,7 +153,9 @@ def main(args):
     max_rel_err_stress = []
     energy_product = fom.products['energy']
 
-    for mu in validation_set:
+    kappa = np.empty(len(validation_set), dtype=np.float64) if args.condition else None
+
+    for i_mu, mu in enumerate(validation_set):
         U_fom = fom.solve(mu)
         fom_sols.append(U_fom)
         d_fom.x.array[:] = U_fom.to_numpy().flatten()  # type: ignore
@@ -176,6 +178,13 @@ def main(args):
         reconstruct(urb.to_numpy(), dofmap, modes, d_local, d_rom)  # type: ignore
         U_rom = fom.solution_space.make_array([d_rom.x.petsc_vec.copy()])  # type: ignore
         rom_sols.append(U_rom)
+
+        if args.condition:
+            A = rom.operator.assemble(mu)
+            if A.sparse:
+                kappa[i_mu] = np.linalg.cond(A.matrix.todense())
+            else:
+                kappa[i_mu] = np.linalg.cond(A.matrix)
 
         stress_expr_rom.eval(V.mesh, entities=cells, values=stress_rom.x.array.reshape(cells.size, -1))
         s_rom = compute_principal_components(stress_rom.x.array.reshape(cells.size, -1))
@@ -226,6 +235,10 @@ def main(args):
 
     output_s = example.rom_error_s(args.nreal, num_modes, method=args.method, ei=args.ei).as_posix()
     np.savez(output_s, relerr=max_rel_err_stress)
+
+    if args.condition:
+        output_k = example.rom_condition(args.nreal, args.num_modes, method=args.method, ei=args.ei)
+        np.save(output_k, kappa)
 
 
 def build_fom(example, ω=0.5):
@@ -373,6 +386,7 @@ if __name__ == '__main__':
     parser.add_argument('--ei', action='store_true', help='Use EI.')
     parser.add_argument('--omega', type=float, help='Weighting for output functional.', default=0.5)
     parser.add_argument('--debug', action='store_true', help='Run in debug mode.')
+    parser.add_argument('--condition', action='store_true', help='Compute condition numbers of ROM operator.')
     # TODO add arg --write-stress-output
     args = parser.parse_args(sys.argv[1:])
     main(args)
