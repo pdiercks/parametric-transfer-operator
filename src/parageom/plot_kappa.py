@@ -21,9 +21,13 @@ def main():
     kappa = np.hstack(kappa)
 
     cm = 1 / 2.54
-    plt.subplots(figsize=(6 * cm, 2 * cm))
-    plt.title(f'Condition number, min={kappa.min():1.2e}, max={kappa.max():1.2e}.')
-    plt.semilogy(num_modes, kappa, 'k-s')
+    fig, ax = plt.subplots(figsize=(16 * cm, 9 * cm))
+    ax.set_title(f'Condition number, min={kappa.min():1.2e}, max={kappa.max():1.2e}.', fontsize=11)
+    ax.semilogy(num_modes, kappa, 'k-s')
+    ax.set_ylabel('Condition number', fontsize=10)
+    ax.set_xlabel('Local basis size', fontsize=10)
+    ax.tick_params(axis='both', which='major', labelsize=10)
+
     plt.show()
 
 
