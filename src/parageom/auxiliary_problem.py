@@ -1,14 +1,21 @@
-from typing import Callable, Optional, Union
+import typing
 
 import dolfinx as df
+import dolfinx.fem.petsc
 import numpy as np
+import numpy.typing as npt
 from basix.ufl import element
 from mpi4py import MPI
 from multi.boundary import plane_at
 from multi.domain import Domain, StructuredQuadGrid
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinearElasticityProblem
+from petsc4py import PETSc
+from pymor.bindings.fenicsx import FenicsxVectorSpace
+from pymor.core.base import abstractmethod
+from pymor.operators.interface import Operator
 from pymor.parameters.base import Mu, Parameters
+from pymor.vectorarrays.numpy import NumpyVectorSpace
 
 from parageom.definitions import BeamData
 
@@ -22,7 +29,7 @@ class GlobalAuxiliaryProblem:
         interface_tags: list[int],
         parameters: dict[str, int],
         coarse_grid: StructuredQuadGrid,
-        interface_locators: list[Callable],
+        interface_locators: list[typing.Callable],
     ):
         """Initializes the auxiliary problem.
 
@@ -52,7 +59,7 @@ class GlobalAuxiliaryProblem:
         bc_zero = df.fem.dirichletbc(u_zero, self._boundary_dofs, p.V)
         p.assemble_matrix(bcs=[bc_zero])
 
-    def _init_boundary_dofs(self, interface_tags: list[int], interface_locators: list[Callable]):
+    def _init_boundary_dofs(self, interface_tags: list[int], interface_locators: list[typing.Callable]):
         """Initializes dofs on ∂Ω and ∂Ω_int."""
         omega = self.problem.domain
         tdim = omega.tdim
@@ -250,9 +257,9 @@ class AuxiliaryProblem:
 def discretize_auxiliary_problem(
     example: BeamData,
     omega: Domain,
-    facet_tags: Union[dict[str, int], list[int]],
+    facet_tags: typing.Union[dict[str, int], list[int]],
     param: dict[str, int],
-    coarse_grid: Optional[StructuredQuadGrid] = None,
+    coarse_grid: typing.Optional[StructuredQuadGrid] = None,
 ):
     """Discretizes the auxiliary problem to compute transformation displacement.
 
@@ -287,6 +294,191 @@ def discretize_auxiliary_problem(
     return aux
 
 
+class ParametricDirichletLift(Operator):
+    """Represents parameter-dependent Dirichlet lift."""
+
+    linear = True
+    adjoint = False
+    source = NumpyVectorSpace(1)
+
+    def __init__(
+        self,
+        range: FenicsxVectorSpace,
+        compiled_form: typing.Union[df.fem.Form, list[typing.Any], typing.Any],
+        inhom: npt.NDArray[np.int32],
+        boundary: npt.NDArray[np.int32],
+        parameters: Parameters,
+    ):
+        """Initializes Dirichlet lift.
+
+        Args:
+            range: The range space of the LHS operator.
+            compiled_form: The form of the LHS operator.
+            inhom: Facet indices of boundary for which non-zero values are computed via `self.compute_dirichlet_values`.
+            boundary: All facets comprising the Dirichlet boundary.
+            parameters: The Parameters the operator depends on.
+
+        """
+        self.range = range
+        self.compiled_form = compiled_form
+        self.inhom = inhom
+        self.boundary = boundary
+        self.parameters = Parameters(parameters)
+
+        # private members used to define BC objects and update/set values
+        # via `apply_lifting` and `set_bc`
+        tdim = range.V.mesh.topology.dim
+        fdim = tdim - 1
+        self._bc_dofs = df.fem.locate_dofs_topological(range.V, fdim, boundary)
+        self._g = df.fem.Function(range.V)
+        self._bcs = [df.fem.dirichletbc(self._g, self._bc_dofs)]
+        self._x = df.la.create_petsc_vector(range.V.dofmap.index_map, range.V.dofmap.bs)
+
+        # TODO: rather loop over gdim
+        self._dofs_values = np.hstack(
+            [
+                df.fem.locate_dofs_topological(range.V.sub(0), fdim, inhom),
+                df.fem.locate_dofs_topological(range.V.sub(1), fdim, inhom),
+            ]
+        )
+        self._dofs = df.fem.locate_dofs_topological(range.V, fdim, inhom)
+
+    @abstractmethod
+    def compute_dirichlet_values(self, mu=None):
+        """Compute the (non-zero) Dirichlet function values."""
+        pass
+
+    def _update_dirichlet_function(self, mu=None):
+        values = self.compute_dirichlet_values(mu)
+        self._g.x.petsc_vec.zeroEntries()
+        self._g.x.array[self._dofs_values] = values
+        self._g.x.scatter_forward()
+
+    def apply(self, U, mu=None):
+        assert U in self.source
+        return self.assemble(mu).lincomb(U.to_numpy())
+
+    def as_range_array(self, mu=None):
+        return self.assemble(mu).as_range_array()
+
+    def assemble(self, mu=None):
+        assert self.parameters.assert_compatible(mu)
+        self._update_dirichlet_function(mu)
+        self._x.zeroEntries()
+        dolfinx.fem.petsc.apply_lifting(self._x, [self.compiled_form], bcs=[self._bcs])
+        self._x.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)
+        dolfinx.fem.petsc.set_bc(self._x, self._bcs)
+        return self.range.make_array([self._x])
+
+
+class ParaCircle(ParametricDirichletLift):
+    def __init__(
+        self,
+        range: FenicsxVectorSpace,
+        compiled_form: typing.Union[df.fem.Form, list[typing.Any], typing.Any],
+        inhom: npt.NDArray[np.int32],
+        boundary: npt.NDArray[np.int32],
+        parameters: Parameters,
+    ):
+        """Initializes ParaCircle.
+
+        Args:
+            range: The range space of the LHS operator.
+            compiled_form: The form of the LHS operator.
+            inhom: Facet indices of boundary for which non-zero values are computed via `self.compute_dirichlet_values`.
+            boundary: All facets comprising the Dirichlet boundary.
+            parameters: The Parameters the operator depends on.
+
+        """
+        super().__init__(range, compiled_form, inhom, boundary, parameters)
+        omega = self.range.V.mesh
+        xmin = np.amin(omega.geometry.x, axis=0)
+        xmax = np.amax(omega.geometry.x, axis=0)
+        self.x_center = xmin + (xmax - xmin) / 2
+
+        xdofs = self.range.V.tabulate_dof_coordinates()
+        self.x_p = xdofs[self._dofs]
+        x_circle = self.x_p - self.x_center
+        self.theta = np.arctan2(x_circle[:, 1], x_circle[:, 0])
+
+    def compute_dirichlet_values(self, mu=None):
+        """Compute the (non-zero) Dirichlet function values for the circle in the middle."""
+        radius = mu.to_numpy().item()
+        theta = self.theta
+        x_p = self.x_p
+
+        x_new = np.zeros_like(x_p)
+        x_new[:, 0] = radius * np.cos(theta)
+        x_new[:, 1] = radius * np.sin(theta)
+        x_new += self.x_center
+        d_values = x_new - x_p
+        return d_values[:, :2].flatten()
+
+
+def discretize_auxiliary_model(example: BeamData, omega: Domain):
+    """Build FOM of the auxiliary problem on the unit cell."""
+    from pymor.bindings.fenicsx import FenicsxMatrixOperator
+
+    # define linear elastic problem
+    degree = example.geom_deg
+    gdim = example.gdim
+    emod = df.fem.Constant(omega.grid, df.default_scalar_type(1.0))
+    nu = df.fem.Constant(omega.grid, df.default_scalar_type(0.25))
+    material = LinearElasticMaterial(gdim, E=emod, NU=nu, plane_stress=example.plane_stress)
+    V = df.fem.functionspace(omega.grid, ('P', degree, (gdim,)))
+    problem = LinearElasticityProblem(omega, V, phases=material)
+    problem.setup_solver()  # defaults to mumps
+
+    # LHS: non-parametric FenicsxMatrixOperator
+    # RHS: parametric VectorOperator?
+    # - but I don't have the columns of A available as vectors
+    # - [ ] implement DirichletLift that inherits from Operator?
+
+    # determine DOFs on facets
+    # see parageom/preprocessing.py:discretize_parent_unit_cell for
+    # definition of facet tags
+
+    # boundary dofs --> definiton of bc for lhs operator
+    # interface dofs --> definitin of bc for rhs operator
+    tdim = omega.tdim
+    fdim = tdim - 1
+    facet_tag_defs = {'bottom': 11, 'left': 12, 'right': 13, 'top': 14, 'interface': 15}
+    dof_indices = {}
+    boundary_facets = []
+    for boundary, tag in facet_tag_defs.items():
+        dofs = df.fem.locate_dofs_topological(V, fdim, omega.facet_tags.find(tag))
+        dof_indices[boundary] = dofs
+        boundary_facets.append(omega.facet_tags.find(tag))
+    boundary_dofs = np.unique(np.hstack(list(dof_indices.values())))
+    boundary_facets = np.unique(np.hstack(boundary_facets))
+
+    zero = df.fem.Constant(omega.grid, (df.default_scalar_type(0.0),) * gdim)
+    bc_zero = df.fem.dirichletbc(zero, boundary_dofs, V)
+    problem.assemble_matrix(bcs=[bc_zero])
+    # left hand side operator
+    operator = FenicsxMatrixOperator(problem.A, V, V)
+    params = Parameters({'R': 1})
+    rhs = ParaCircle(
+        operator.range, problem.a, omega.facet_tags.find(facet_tag_defs['interface']), boundary_facets, params
+    )
+    breakpoint()
+
+
+def reduce_auxiliary_model(aux: AuxiliaryProblem):
+    """Build ROM of Auxiliary problem for unit cell."""
+
+    # - make auxiliary problem a StationaryModel
+    # - refactor AuxiliaryProblem?
+    # - still use global function for transformation displacement that is updated after each call to fom.solve(mu); implement update without `to_numpy()` ? # noqa
+    # - reduction process using ProjectionBasedReductor
+
+    # Refactor Auxiliary Problem as StationaryModel
+    # - init boundary dofs (facet tags, interface tags)
+    # - discretize lhs operator
+    # - for each mu: assemble rhs (compute interface coord)
+    # - rhs as DirichletLift (using petsc vecs & interface coord & apply lifting)
+
+
 def main():
     from dolfinx.io.utils import XDMFFile
     from multi.io import read_mesh
@@ -305,46 +497,48 @@ def main():
     domain, ct, ft = read_mesh(mshfile, comm, kwargs={'gdim': example.gdim})
     omega = Domain(domain, cell_tags=ct, facet_tags=ft)
 
-    ftags = {'bottom': 11, 'left': 12, 'right': 13, 'top': 14, 'interface': 15}
-    param = {'R': 1}
-    auxp = discretize_auxiliary_problem(example, omega, ftags, param)
+    discretize_auxiliary_model(example, omega)
+
+    # ftags = {'bottom': 11, 'left': 12, 'right': 13, 'top': 14, 'interface': 15}
+    # param = {'R': 1}
+    # auxp = discretize_auxiliary_problem(example, omega, ftags, param)
 
     # output function
-    d = df.fem.Function(auxp.problem.V)
-    xdmf = XDMFFile(d.function_space.mesh.comm, './transformation_unit_cell.xdmf', 'w')
-    xdmf.write_mesh(d.function_space.mesh)
+    # d = df.fem.Function(auxp.problem.V)
+    # xdmf = XDMFFile(d.function_space.mesh.comm, './transformation_unit_cell.xdmf', 'w')
+    # xdmf.write_mesh(d.function_space.mesh)
 
-    mu_values = []
-    a = example.unit_length
-    mu_values.append(auxp.parameters.parse([0.1 * a]))
-    mu_values.append(auxp.parameters.parse([0.3 * a]))
+    # mu_values = []
+    # a = example.unit_length
+    # mu_values.append(auxp.parameters.parse([0.1 * a]))
+    # mu_values.append(auxp.parameters.parse([0.3 * a]))
 
-    for time, mu in enumerate(mu_values):
-        auxp.solve(d, mu)
-        xdmf.write_function(d.copy(), t=float(time))
-    xdmf.close()
+    # for time, mu in enumerate(mu_values):
+    #     auxp.solve(d, mu)
+    #     xdmf.write_function(d.copy(), t=float(time))
+    # xdmf.close()
 
-    global_domain_msh = example.parent_domain('global')
-    omega_gl = Domain(*read_mesh(global_domain_msh, comm, kwargs={'gdim': example.gdim}))
-    global_coarse_domain_msh = example.coarse_grid('global')
-    coarse_grid = StructuredQuadGrid(read_mesh(global_coarse_domain_msh, comm, kwargs={'gdim': example.gdim})[0])
-    param = {'R': 10}
-    int_tags = [i for i in range(15, 25)]
-    auxp = discretize_auxiliary_problem(example, omega_gl, int_tags, param, coarse_grid=coarse_grid)
+    # global_domain_msh = example.parent_domain('global')
+    # omega_gl = Domain(*read_mesh(global_domain_msh, comm, kwargs={'gdim': example.gdim}))
+    # global_coarse_domain_msh = example.coarse_grid('global')
+    # coarse_grid = StructuredQuadGrid(read_mesh(global_coarse_domain_msh, comm, kwargs={'gdim': example.gdim})[0])
+    # param = {'R': 10}
+    # int_tags = [i for i in range(15, 25)]
+    # auxp = discretize_auxiliary_problem(example, omega_gl, int_tags, param, coarse_grid=coarse_grid)
 
-    d = df.fem.Function(auxp.problem.V)
-    xdmf = XDMFFile(d.function_space.mesh.comm, './transformation_global_domain.xdmf', 'w')
-    xdmf.write_mesh(d.function_space.mesh)
+    # d = df.fem.Function(auxp.problem.V)
+    # xdmf = XDMFFile(d.function_space.mesh.comm, './transformation_global_domain.xdmf', 'w')
+    # xdmf.write_mesh(d.function_space.mesh)
 
-    mu_values = []
-    mu_values.append(auxp.parameters.parse([0.2 * a for _ in range(10)]))
-    values = np.array([0.15, 0.17, 0.19, 0.21, 0.23, 0.25, 0.27, 0.29, 0.2, 0.3]) * a
-    mu_values.append(auxp.parameters.parse(values))
+    # mu_values = []
+    # mu_values.append(auxp.parameters.parse([0.2 * a for _ in range(10)]))
+    # values = np.array([0.15, 0.17, 0.19, 0.21, 0.23, 0.25, 0.27, 0.29, 0.2, 0.3]) * a
+    # mu_values.append(auxp.parameters.parse(values))
 
-    for time, mu in enumerate(mu_values):
-        auxp.solve(d, mu)
-        xdmf.write_function(d.copy(), t=float(time))
-    xdmf.close()
+    # for time, mu in enumerate(mu_values):
+    #     auxp.solve(d, mu)
+    #     xdmf.write_function(d.copy(), t=float(time))
+    # xdmf.close()
 
 
 if __name__ == '__main__':
