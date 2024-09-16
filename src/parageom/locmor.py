@@ -4,6 +4,10 @@ from typing import Any, Callable, Optional, Tuple, Union
 
 import dolfinx as df
 import dolfinx.fem.petsc
+import numpy as np
+import numpy.typing as npt
+import scipy.linalg
+import ufl
 from multi.boundary import plane_at, point_at, within_range
 from multi.dofmap import DofMap
 from multi.domain import RectangularDomain, StructuredQuadGrid
@@ -14,8 +18,6 @@ from multi.projection import orthogonal_part
 from multi.sampling import create_random_values
 from multi.solver import build_nullspace
 from multi.utils import LogMixin
-import numpy as np
-import numpy.typing as npt
 from petsc4py import PETSc
 from pymor.algorithms.gram_schmidt import gram_schmidt
 from pymor.algorithms.projection import project
@@ -26,17 +28,14 @@ from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.parameters.base import Parameters
 from pymor.vectorarrays.interface import VectorArray
 from pymor.vectorarrays.numpy import NumpyVectorSpace
-import scipy.linalg
 from scipy.sparse import coo_array, csr_array
-import ufl
 
 from parageom.definitions import BeamData
 from parageom.dofmap_gfem import GFEMDofMap
 from parageom.matrix_based_operator import FenicsxMatrixBasedOperator
 
-
 EISubdomainOperatorWrapper = namedtuple(
-    "EISubdomainOperator", ["rop", "cb", "interpolation_matrix", "magic_dofs", "m_inv"]
+    'EISubdomainOperator', ['rop', 'cb', 'interpolation_matrix', 'magic_dofs', 'm_inv']
 )
 
 
@@ -62,7 +61,7 @@ class COOMatrixOperator(Operator):
         indexptr: np.ndarray,
         num_cells: int,
         shape: Tuple[int, int],
-        parameters: Parameters = {}, # type: ignore
+        parameters: Parameters = {},  # type: ignore
         solver_options: Optional[dict] = None,
         name: Optional[str] = None,
     ):
@@ -72,7 +71,7 @@ class COOMatrixOperator(Operator):
         self.range = NumpyVectorSpace(shape[0])
         self._data = data[0].copy()
 
-    def assemble(self, mu=None): # type: ignore
+    def assemble(self, mu=None):  # type: ignore
         assert self.parameters.assert_compatible(mu)
 
         data, rows, cols = self.data  # type: ignore
@@ -84,9 +83,7 @@ class COOMatrixOperator(Operator):
             m = mu.to_numpy()
             new[: indexptr[0]] = data[: indexptr[0]] * m[0]
             for i in range(1, num_cells):
-                new[indexptr[i - 1] : indexptr[i]] = (
-                    data[indexptr[i - 1] : indexptr[i]] * m[i]
-                )
+                new[indexptr[i - 1] : indexptr[i]] = data[indexptr[i - 1] : indexptr[i]] * m[i]
 
         K = coo_array((new, (rows, cols)), shape=self.shape)  # type: ignore
         K.eliminate_zeros()
@@ -95,7 +92,7 @@ class COOMatrixOperator(Operator):
             self.source.id,
             self.range.id,
             self.solver_options,
-            self.name + "_assembled",
+            self.name + '_assembled',
         )
 
     def apply(self, U, mu=None):
@@ -111,14 +108,11 @@ class COOMatrixOperator(Operator):
         return self.assemble(mu).as_source_array()
 
     def apply_inverse(self, V, mu=None, initial_guess=None, least_squares=False):
-        return self.assemble(mu).apply_inverse(
-            V, initial_guess=initial_guess, least_squares=least_squares
-        )
+        return self.assemble(mu).apply_inverse(V, initial_guess=initial_guess, least_squares=least_squares)
 
 
 class GlobalParaGeomOperator(Operator):
-    """Operator for geometrically parametrized linear elastic problem
-    in the context of localized MOR.
+    """Operator for geometrically parametrized linear elastic problem in the context of localized MOR.
 
     Args:
         r_sub_op: Restricted subdomain operator.
@@ -145,7 +139,7 @@ class GlobalParaGeomOperator(Operator):
         indexptr: np.ndarray,
         num_cells: int,
         shape: Tuple[int, int],
-        parameters: Parameters = {}, # type: ignore
+        parameters: Parameters = {},  # type: ignore
         solver_options: Optional[dict] = None,
         name: Optional[str] = None,
     ):
@@ -153,20 +147,20 @@ class GlobalParaGeomOperator(Operator):
         self.source = NumpyVectorSpace(shape[1])
         self.range = NumpyVectorSpace(shape[0])
 
-    def assemble(self, mu=None): # type: ignore
+    def assemble(self, mu=None):  # type: ignore
         assert self.parameters.assert_compatible(mu)
         assert self.parametric
         assert mu is not None
 
-        op = self.ei_sub_op.rop # type: ignore
-        magic_dofs = self.ei_sub_op.magic_dofs # type: ignore
-        m_inv = self.ei_sub_op.m_inv # type: ignore
+        op = self.ei_sub_op.rop  # type: ignore
+        magic_dofs = self.ei_sub_op.magic_dofs  # type: ignore
+        m_inv = self.ei_sub_op.m_inv  # type: ignore
         rdofs = op.restricted_range_dofs[m_inv].reshape(magic_dofs.shape)
-        interpolation_matrix = self.ei_sub_op.interpolation_matrix # type: ignore
-        indexptr = self.indexptr # type: ignore
-        M = len(self.ei_sub_op.cb) # type: ignore
+        interpolation_matrix = self.ei_sub_op.interpolation_matrix  # type: ignore
+        indexptr = self.indexptr  # type: ignore
+        M = len(self.ei_sub_op.cb)  # type: ignore
 
-        data = self.data # type: ignore
+        data = self.data  # type: ignore
         new = np.zeros((data.shape[1],), dtype=np.float64)
 
         for i, mu_i in enumerate(mu.to_numpy()):
@@ -190,7 +184,7 @@ class GlobalParaGeomOperator(Operator):
             self.source.id,
             self.range.id,
             self.solver_options,
-            self.name + "_assembled",
+            self.name + '_assembled',
         )
 
     def apply(self, U, mu=None):
@@ -206,9 +200,7 @@ class GlobalParaGeomOperator(Operator):
         return self.assemble(mu).as_source_array()
 
     def apply_inverse(self, V, mu=None, initial_guess=None, least_squares=False):
-        return self.assemble(mu).apply_inverse(
-            V, initial_guess=initial_guess, least_squares=least_squares
-        )
+        return self.assemble(mu).apply_inverse(V, initial_guess=initial_guess, least_squares=least_squares)
 
 
 def reconstruct(
@@ -221,7 +213,7 @@ def reconstruct(
     """Reconstructs rom solution on the global domain.
 
     Args:
-        Urb: ROM solution in the reduced space.
+        U_rb: ROM solution in the reduced space.
         dofmap: The dofmap of the reduced space.
         bases: Local basis for each subdomain.
         u_local: The local solution field.
@@ -262,7 +254,7 @@ def assemble_gfem_system(
     mu,
     bases: list[np.ndarray],
     dofs_per_vert: np.ndarray,
-    max_dofs_per_vert: np.ndarray
+    max_dofs_per_vert: np.ndarray,
 ):
     """Assembles ``operator`` and ``rhs`` for localized ROM as ``StationaryModel``.
 
@@ -310,48 +302,48 @@ def assemble_gfem_system(
         # local external force vector
         if ci == 0:
             b_local = project(b, B, None)
-            element_vector = b_local.matrix # type: ignore
+            element_vector = b_local.matrix  # type: ignore
         else:
             b_local = A_local.range.zeros(1)
             element_vector = b_local.to_numpy().transpose()
 
         for ld, x in enumerate(dofs):
             if x in bc_dofs:
-                rhs["rows"].append(x)
-                rhs["cols"].append(0)
-                rhs["data"].append(0.0)
+                rhs['rows'].append(x)
+                rhs['cols'].append(0)
+                rhs['data'].append(0.0)
             else:
-                rhs["rows"].append(x)
-                rhs["cols"].append(0)
-                rhs["data"].append(element_vector[ld, 0])
+                rhs['rows'].append(x)
+                rhs['cols'].append(0)
+                rhs['data'].append(element_vector[ld, 0])
 
             for k, y in enumerate(dofs):
                 if x in bc_dofs or y in bc_dofs:
                     # Note: in the MOR context set diagonal to zero
                     # for the matrices arising from a_q
                     if x == y:
-                        if x not in lhs["diagonals"]:  # only set diagonal entry once
-                            lhs["rows"].append(x)
-                            lhs["cols"].append(y)
-                            lhs["data"].append(0.0)
-                            lhs["diagonals"].append(x)
-                            bc_mat["rows"].append(x)
-                            bc_mat["cols"].append(y)
-                            bc_mat["data"].append(1.0)
-                            bc_mat["diagonals"].append(x)
+                        if x not in lhs['diagonals']:  # only set diagonal entry once
+                            lhs['rows'].append(x)
+                            lhs['cols'].append(y)
+                            lhs['data'].append(0.0)
+                            lhs['diagonals'].append(x)
+                            bc_mat['rows'].append(x)
+                            bc_mat['cols'].append(y)
+                            bc_mat['data'].append(1.0)
+                            bc_mat['diagonals'].append(x)
                 else:
-                    lhs["rows"].append(x)
-                    lhs["cols"].append(y)
-                    lhs["data"].append(element_matrix[ld, k])
+                    lhs['rows'].append(x)
+                    lhs['cols'].append(y)
+                    lhs['data'].append(element_matrix[ld, k])
 
-        lhs["indexptr"].append(len(lhs["rows"]))
-        rhs["indexptr"].append(len(rhs["rows"]))
+        lhs['indexptr'].append(len(lhs['rows']))
+        rhs['indexptr'].append(len(rhs['rows']))
 
     Ndofs = dofmap.num_dofs
-    data = np.array(lhs["data"], dtype=np.float64)
-    rows = np.array(lhs["rows"], dtype=np.int32)
-    cols = np.array(lhs["cols"], dtype=np.int32)
-    indexptr = np.array(lhs["indexptr"], dtype=np.int32)
+    data = np.array(lhs['data'], dtype=np.float64)
+    rows = np.array(lhs['rows'], dtype=np.int32)
+    cols = np.array(lhs['cols'], dtype=np.int32)
+    indexptr = np.array(lhs['indexptr'], dtype=np.int32)
     shape = (Ndofs, Ndofs)
     options = None
     op = COOMatrixOperator(
@@ -361,13 +353,13 @@ def assemble_gfem_system(
         shape,
         parameters=Parameters({}),
         solver_options=options,
-        name="K",
+        name='K',
     )
 
-    data = np.array(rhs["data"], dtype=np.float64)
-    rows = np.array(rhs["rows"], dtype=np.int32)
-    cols = np.array(rhs["cols"], dtype=np.int32)
-    indexptr = np.array(rhs["indexptr"], dtype=np.int32)
+    data = np.array(rhs['data'], dtype=np.float64)
+    rows = np.array(rhs['rows'], dtype=np.int32)
+    cols = np.array(rhs['cols'], dtype=np.int32)
+    indexptr = np.array(rhs['indexptr'], dtype=np.int32)
     shape = (Ndofs, 1)
     rhs_op = COOMatrixOperator(
         (data, rows, cols),
@@ -376,7 +368,7 @@ def assemble_gfem_system(
         shape,
         parameters=Parameters({}),
         solver_options=options,
-        name="F",
+        name='F',
     )
     return op, rhs_op, local_bases
 
@@ -402,7 +394,6 @@ def assemble_gfem_system_with_ei(
         parameters: The |Parameters| the global ROM depends on.
 
     """
-
     from parageom.dofmap_gfem import select_modes
 
     # basis functions satisfy BCs by construction
@@ -439,43 +430,43 @@ def assemble_gfem_system_with_ei(
 
         for ld, x in enumerate(dofs):
             if x in bc_dofs:
-                rhs["rows"].append(x)
-                rhs["cols"].append(0)
-                rhs["data"].append(0.0)
+                rhs['rows'].append(x)
+                rhs['cols'].append(0)
+                rhs['data'].append(0.0)
             else:
-                rhs["rows"].append(x)
-                rhs["cols"].append(0)
-                rhs["data"].append(element_vector[ld, 0])
+                rhs['rows'].append(x)
+                rhs['cols'].append(0)
+                rhs['data'].append(element_vector[ld, 0])
 
             for k, y in enumerate(dofs):
                 if x in bc_dofs or y in bc_dofs:
                     # Note: in the MOR context set diagonal to zero
                     # for the matrices arising from a_q
                     if x == y:
-                        if x not in lhs["diagonals"]:  # only set diagonal entry once
-                            lhs["rows"].append(x)
-                            lhs["cols"].append(y)
+                        if x not in lhs['diagonals']:  # only set diagonal entry once
+                            lhs['rows'].append(x)
+                            lhs['cols'].append(y)
                             for m in range(cb_size):
-                                lhs[f"data_{m}"].append(0.0)
-                            lhs["diagonals"].append(x)
-                            bc_mat["rows"].append(x)
-                            bc_mat["cols"].append(y)
-                            bc_mat["data"].append(1.0)
-                            bc_mat["diagonals"].append(x)
+                                lhs[f'data_{m}'].append(0.0)
+                            lhs['diagonals'].append(x)
+                            bc_mat['rows'].append(x)
+                            bc_mat['cols'].append(y)
+                            bc_mat['data'].append(1.0)
+                            bc_mat['diagonals'].append(x)
                 else:
-                    lhs["rows"].append(x)
-                    lhs["cols"].append(y)
+                    lhs['rows'].append(x)
+                    lhs['cols'].append(y)
                     for m, elem_mat in enumerate(element_matrices):
-                        lhs[f"data_{m}"].append(elem_mat[ld, k])
+                        lhs[f'data_{m}'].append(elem_mat[ld, k])
 
-        lhs["indexptr"].append(len(lhs["rows"]))
-        rhs["indexptr"].append(len(rhs["rows"]))
+        lhs['indexptr'].append(len(lhs['rows']))
+        rhs['indexptr'].append(len(rhs['rows']))
 
     Ndofs = dofmap.num_dofs
 
     _data = []
     for m in range(cb_size):
-        _data.append(lhs[f"data_{m}"])
+        _data.append(lhs[f'data_{m}'])
     data = np.vstack(_data, dtype=np.float64)
     # stack matrix data as row vectors
     # need to form linear combination with interpolation coeff per row
@@ -497,9 +488,9 @@ def assemble_gfem_system_with_ei(
 
     # ### LHS
     # Matrix operator
-    rows = np.array(lhs["rows"], dtype=np.int32)
-    cols = np.array(lhs["cols"], dtype=np.int32)
-    indexptr = np.array(lhs["indexptr"], dtype=np.int32)
+    rows = np.array(lhs['rows'], dtype=np.int32)
+    cols = np.array(lhs['cols'], dtype=np.int32)
+    indexptr = np.array(lhs['indexptr'], dtype=np.int32)
     shape = (Ndofs, Ndofs)
     options = None
     op = GlobalParaGeomOperator(
@@ -512,26 +503,22 @@ def assemble_gfem_system_with_ei(
         shape,
         parameters=parameters,
         solver_options=options,
-        name="K",
+        name='K',
     )
     # BC operator
     if np.any(bc_dofs):
-        bc_array = coo_array(
-            (bc_mat["data"], (bc_mat["rows"], bc_mat["cols"])), shape=shape
-        )
+        bc_array = coo_array((bc_mat['data'], (bc_mat['rows'], bc_mat['cols'])), shape=shape)
         bc_array.eliminate_zeros()
-        bc_op = NumpyMatrixOperator(
-            bc_array.tocsr(), op.source.id, op.range.id, op.solver_options, "bc_mat"
-        )
+        bc_op = NumpyMatrixOperator(bc_array.tocsr(), op.source.id, op.range.id, op.solver_options, 'bc_mat')
         lhs_op = LincombOperator([op, bc_op], [1.0, 1.0])
     else:
         lhs_op = op
 
     # ### RHS
-    data = np.array(rhs["data"], dtype=np.float64)
-    rows = np.array(rhs["rows"], dtype=np.int32)
-    cols = np.array(rhs["cols"], dtype=np.int32)
-    indexptr = np.array(rhs["indexptr"], dtype=np.int32)
+    data = np.array(rhs['data'], dtype=np.float64)
+    rows = np.array(rhs['rows'], dtype=np.int32)
+    cols = np.array(rhs['cols'], dtype=np.int32)
+    indexptr = np.array(rhs['indexptr'], dtype=np.int32)
     shape = (Ndofs, 1)
     rhs_op = COOMatrixOperator(
         (data, rows, cols),
@@ -540,7 +527,7 @@ def assemble_gfem_system_with_ei(
         shape,
         parameters=Parameters({}),
         solver_options=options,
-        name="F",
+        name='F',
     )
     return lhs_op, rhs_op, local_bases
 
@@ -591,6 +578,18 @@ class ParametricTransferProblem(LogMixin):
         kernel: Optional[VectorArray] = None,
         padding: float = 1e-14,
     ):
+        """Initializes ParametricTransferProblem.
+
+        Args:
+            operator: Parametric left hand side operator.
+            rhs: Right hand side operator.
+            range_space: The range space.
+            source_product: Inner product to use for the source space.
+            range_product: Inner product to use for the range space.
+            kernel: The kernel of the left hand side operator.
+            padding: `padding` parameter to compute restriction to range space.
+
+        """
         assert rhs.range is operator.range
         self.operator = operator
         self.rhs = rhs
@@ -600,7 +599,7 @@ class ParametricTransferProblem(LogMixin):
 
         self.source = operator.source  # type: ignore
         self.range = range_space
-        self._restriction = make_mapping(self.range.V, self.source.V, padding=padding, check=True) # type: ignore
+        self._restriction = make_mapping(self.range.V, self.source.V, padding=padding, check=True)  # type: ignore
 
     def generate_random_boundary_data(
         self, count: int, distribution: str, options: Optional[dict[str, Any]] = None
@@ -613,7 +612,6 @@ class ParametricTransferProblem(LogMixin):
             options: Arguments passed to sampling method of random number generator.
 
         """
-
         num_dofs = self.rhs.dofs.size
         options = options or {}
         values = create_random_values((count, num_dofs), distribution, **options)
@@ -621,15 +619,16 @@ class ParametricTransferProblem(LogMixin):
         return values
 
     def assemble_operator(self, mu=None):
-        self.logger.info(f"Assembling operator for {mu=}.")
-        self.op = self.operator.assemble(mu) # type: ignore
+        self.logger.info(f'Assembling operator for {mu=}.')
+        self.op = self.operator.assemble(mu)  # type: ignore
 
     def solve(self, boundary_values) -> VectorArray:
         """Solve the transfer problem for given `boundary_values`.
 
-        args:
+        Args:
             A: The assembled operator.
             boundary_values: Values to be prescribed on Gamma out.
+
         """
         assert isinstance(self.op, FenicsxMatrixOperator)
 
@@ -644,10 +643,8 @@ class ParametricTransferProblem(LogMixin):
         U_in.append(self.range.from_numpy(U.dofs(self._restriction))) # type: ignore
 
         if self.kernel is not None:
-            assert len(self.kernel) > 0 # type: ignore
-            return orthogonal_part(
-                U_in, self.kernel, product=None, orthonormal=True
-            )
+            assert len(self.kernel) > 0  # type: ignore
+            return orthogonal_part(U_in, self.kernel, product=None, orthonormal=True)
         else:
             return U_in
 
@@ -664,49 +661,48 @@ class OversamplingConfig:
 
 
 def oversampling_config_factory(k):
-    """Creates instance of `OversamplingConfig`"""
-
+    """Creates instance of `OversamplingConfig`."""
     cells_omega = {
-            0: np.array([0, 1], dtype=np.int32),
-            1: np.array([0, 1, 2], dtype=np.int32),
-            2: np.array([0, 1, 2, 3], dtype=np.int32),
-            3: np.array([1, 2, 3, 4], dtype=np.int32),
-            4: np.array([2, 3, 4, 5], dtype=np.int32),
-            5: np.array([3, 4, 5, 6], dtype=np.int32),
-            6: np.array([4, 5, 6, 7], dtype=np.int32),
-            7: np.array([5, 6, 7, 8], dtype=np.int32),
-            8: np.array([6, 7, 8, 9], dtype=np.int32),
-            9: np.array([7, 8, 9], dtype=np.int32),
-            10: np.array([8, 9], dtype=np.int32),
-            }
+        0: np.array([0, 1], dtype=np.int32),
+        1: np.array([0, 1, 2], dtype=np.int32),
+        2: np.array([0, 1, 2, 3], dtype=np.int32),
+        3: np.array([1, 2, 3, 4], dtype=np.int32),
+        4: np.array([2, 3, 4, 5], dtype=np.int32),
+        5: np.array([3, 4, 5, 6], dtype=np.int32),
+        6: np.array([4, 5, 6, 7], dtype=np.int32),
+        7: np.array([5, 6, 7, 8], dtype=np.int32),
+        8: np.array([6, 7, 8, 9], dtype=np.int32),
+        9: np.array([7, 8, 9], dtype=np.int32),
+        10: np.array([8, 9], dtype=np.int32),
+    }
 
     cells_omega_in = {
-            0: np.array([0], dtype=np.int32),
-            1: np.array([0, 1], dtype=np.int32),
-            2: np.array([1, 2], dtype=np.int32),
-            3: np.array([2, 3], dtype=np.int32),
-            4: np.array([3, 4], dtype=np.int32),
-            5: np.array([4, 5], dtype=np.int32),
-            6: np.array([5, 6], dtype=np.int32),
-            7: np.array([6, 7], dtype=np.int32),
-            8: np.array([7, 8], dtype=np.int32),
-            9: np.array([8, 9], dtype=np.int32),
-            10: np.array([9], dtype=np.int32),
-            }
+        0: np.array([0], dtype=np.int32),
+        1: np.array([0, 1], dtype=np.int32),
+        2: np.array([1, 2], dtype=np.int32),
+        3: np.array([2, 3], dtype=np.int32),
+        4: np.array([3, 4], dtype=np.int32),
+        5: np.array([4, 5], dtype=np.int32),
+        6: np.array([5, 6], dtype=np.int32),
+        7: np.array([6, 7], dtype=np.int32),
+        8: np.array([7, 8], dtype=np.int32),
+        9: np.array([8, 9], dtype=np.int32),
+        10: np.array([9], dtype=np.int32),
+    }
 
     kernel = {
-            0: (1, 2),
-            1: (1, 2),
-            2: (0, 1, 2),
-            3: (0, 1, 2),
-            4: (0, 1, 2),
-            5: (0, 1, 2),
-            6: (0, 1, 2),
-            7: (0, 1, 2),
-            8: (0, 1, 2),
-            9: (0, 2),
-            10: (0, 2),
-            }
+        0: (1, 2),
+        1: (1, 2),
+        2: (0, 1, 2),
+        3: (0, 1, 2),
+        4: (0, 1, 2),
+        5: (0, 1, 2),
+        6: (0, 1, 2),
+        7: (0, 1, 2),
+        8: (0, 1, 2),
+        9: (0, 2),
+        10: (0, 2),
+    }
     # required enrichment should be determined from kernel
     # see src/parageom/gfem.py
 
@@ -714,7 +710,7 @@ def oversampling_config_factory(k):
     x_max = 10.0
     y_max = 1.0
     unit_length = 1.0
-    support_left = plane_at(0.0, "x")
+    support_left = plane_at(0.0, 'x')
     support_right = point_at([x_max, 0.0, 0.0])
     neumann_top = within_range([0.0, y_max, 0.0], [unit_length, y_max, 0.0])
 
@@ -727,30 +723,43 @@ def oversampling_config_factory(k):
     tol = 1e-4
     left = within_range([x_left, 0.0 + tol, 0.0], [x_left, y_max - tol, 0.0])
     right = within_range([x_right, 0.0 + tol, 0.0], [x_right, y_max - tol, 0.0])
+
     def gamma_out_inner(x):
         return np.logical_or(left(x), right(x))
+
     gamma_out = {
-            0: right,
-            1: right,
-            2: right,
-            3: gamma_out_inner,
-            4: gamma_out_inner,
-            5: gamma_out_inner,
-            6: gamma_out_inner,
-            7: gamma_out_inner,
-            8: left,
-            9: left,
-            10: left,
-            }
+        0: right,
+        1: right,
+        2: right,
+        3: gamma_out_inner,
+        4: gamma_out_inner,
+        5: gamma_out_inner,
+        6: gamma_out_inner,
+        7: gamma_out_inner,
+        8: left,
+        9: left,
+        10: left,
+    }
     if k in (0, 1, 2):
-        return OversamplingConfig(k, cells_omega[k], cells_omega_in[k], kernel[k], gamma_out[k], gamma_d=support_left, gamma_n=neumann_top)
+        return OversamplingConfig(
+            k, cells_omega[k], cells_omega_in[k], kernel[k], gamma_out[k], gamma_d=support_left, gamma_n=neumann_top
+        )
     elif k in (8, 9, 10):
-        return OversamplingConfig(k, cells_omega[k], cells_omega_in[k], kernel[k], gamma_out[k], gamma_d=support_right, gamma_n=None)
+        return OversamplingConfig(
+            k, cells_omega[k], cells_omega_in[k], kernel[k], gamma_out[k], gamma_d=support_right, gamma_n=None
+        )
     else:
         return OversamplingConfig(k, cells_omega[k], cells_omega_in[k], kernel[k], gamma_out[k])
 
 
-def discretize_transfer_problem(example: BeamData, coarse_omega: StructuredQuadGrid, omega: RectangularDomain,  omega_in: RectangularDomain, osp_config: OversamplingConfig, debug: bool=False):
+def discretize_transfer_problem(
+    example: BeamData,
+    coarse_omega: StructuredQuadGrid,
+    omega: RectangularDomain,
+    omega_in: RectangularDomain,
+    osp_config: OversamplingConfig,
+    debug: bool = False,
+):
     """Discretize transfer problem.
 
     Args:
@@ -759,6 +768,8 @@ def discretize_transfer_problem(example: BeamData, coarse_omega: StructuredQuadG
         omega: Fine grid of the oversampling domain Ω.
         omega_in: Fine grid of the target subdomain Ω_in.
         osp_config: Configuration of this transfer problem.
+        debug: Run in debug mode. Make additional checks.
+
     """
     from parageom.auxiliary_problem import GlobalAuxiliaryProblem
     from parageom.fom import ParaGeomLinEla
@@ -768,7 +779,7 @@ def discretize_transfer_problem(example: BeamData, coarse_omega: StructuredQuadG
     cells_omega = osp_config.cells_omega
 
     # ### Function Spaces
-    V = df.fem.functionspace(omega.grid, ("P", example.geom_deg, (example.gdim,)))
+    V = df.fem.functionspace(omega.grid, ('P', example.geom_deg, (example.gdim,)))
     V_in = df.fem.functionspace(omega_in.grid, V.ufl_element())
     source_V_in = FenicsxVectorSpace(V_in)
 
@@ -781,11 +792,11 @@ def discretize_transfer_problem(example: BeamData, coarse_omega: StructuredQuadG
     interface_locators = []
     for i in range(1, cells_omega.size):
         x_coord = float(x_min + i)
-        interface_locators.append(plane_at(x_coord, "x"))
+        interface_locators.append(plane_at(x_coord, 'x'))
 
     if debug:
         for marker in interface_locators:
-            entities = df.mesh.locate_entities(V.mesh, V.mesh.topology.dim-1, marker)
+            entities = df.mesh.locate_entities(V.mesh, V.mesh.topology.dim - 1, marker)
             assert entities.size == example.num_intervals
 
     aux_tags = list(range(15, 15 + cells_omega.size))
@@ -795,15 +806,15 @@ def discretize_transfer_problem(example: BeamData, coarse_omega: StructuredQuadG
     nu = df.fem.Constant(omega.grid, df.default_scalar_type(0.25))
     mat = LinearElasticMaterial(example.gdim, E=emod, NU=nu, plane_stress=example.plane_stress)
     problem = LinearElasticityProblem(omega, V, phases=mat)
-    params = Parameters({"R": cells_omega.size})
+    params = Parameters({'R': cells_omega.size})
     auxiliary_problem = GlobalAuxiliaryProblem(
         problem, aux_tags, params, coarse_omega, interface_locators=interface_locators
     )
-    d_trafo = df.fem.Function(V, name="d_trafo")
+    d_trafo = df.fem.Function(V, name='d_trafo')
 
     # ### Dirichlet BCs (operator, range product)
-    bcs_op = [] # BCs for lhs operator of transfer problem, space V
-    bcs_range_product = [] # BCs for range product operator, space V_in
+    bcs_op = []  # BCs for lhs operator of transfer problem, space V
+    bcs_range_product = []  # BCs for range product operator, space V_in
 
     zero = df.default_scalar_type(0.0)
     fix_u = df.fem.Constant(V.mesh, (zero,) * example.gdim)
@@ -813,40 +824,28 @@ def discretize_transfer_problem(example: BeamData, coarse_omega: StructuredQuadG
     dirichlet_bc = []
     if osp_config.index in (0, 1, 2):
         # left Dirichlet boundary is active
-        dirichlet_bc.append({
-            "value": zero,
-            "boundary": osp_config.gamma_d,
-            "entity_dim": 1,
-            "sub": 0})
+        dirichlet_bc.append({'value': zero, 'boundary': osp_config.gamma_d, 'entity_dim': 1, 'sub': 0})
     elif osp_config.index in (8, 9, 10):
         # right Dirichlet boundary is active
-        dirichlet_bc.append({
-            "value": zero,
-            "boundary": osp_config.gamma_d,
-            "entity_dim": 0,
-            "sub": 1})
+        dirichlet_bc.append({'value': zero, 'boundary': osp_config.gamma_d, 'entity_dim': 0, 'sub': 1})
 
     for bc_spec in dirichlet_bc:
         # determine entities and define BCTopo
-        entities_omega = df.mesh.locate_entities_boundary(
-            V.mesh, bc_spec["entity_dim"], bc_spec["boundary"]
-        )
-        entities_omega_in = df.mesh.locate_entities_boundary(
-            V_in.mesh, bc_spec["entity_dim"], bc_spec["boundary"]
-        )
+        entities_omega = df.mesh.locate_entities_boundary(V.mesh, bc_spec['entity_dim'], bc_spec['boundary'])
+        entities_omega_in = df.mesh.locate_entities_boundary(V_in.mesh, bc_spec['entity_dim'], bc_spec['boundary'])
         bc = BCTopo(
-            df.fem.Constant(V.mesh, bc_spec["value"]),
+            df.fem.Constant(V.mesh, bc_spec['value']),
             entities_omega,
-            bc_spec["entity_dim"],
+            bc_spec['entity_dim'],
             V,
-            sub=bc_spec["sub"],
+            sub=bc_spec['sub'],
         )
         bc_rp = BCTopo(
-            df.fem.Constant(V_in.mesh, bc_spec["value"]),
+            df.fem.Constant(V_in.mesh, bc_spec['value']),
             entities_omega_in,
-            bc_spec["entity_dim"],
+            bc_spec['entity_dim'],
             V_in,
-            sub=bc_spec["sub"],
+            sub=bc_spec['sub'],
         )
         bcs_op.append(bc)
         bcs_range_product.append(bc_rp)
@@ -855,7 +854,12 @@ def discretize_transfer_problem(example: BeamData, coarse_omega: StructuredQuadG
     assert len(bcs_op) - 1 == len(bcs_range_product)
 
     # ### Discretize left hand side - FenicsxMatrixBasedOperator
-    matparam = {"gdim": example.gdim, "E": example.youngs_modulus, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
+    matparam = {
+        'gdim': example.gdim,
+        'E': example.youngs_modulus,
+        'NU': example.poisson_ratio,
+        'plane_stress': example.plane_stress,
+    }
     parageom = ParaGeomLinEla(
         omega,
         V,
@@ -869,43 +873,38 @@ def discretize_transfer_problem(example: BeamData, coarse_omega: StructuredQuadG
         d_trafo.x.scatter_forward()  # type: ignore
 
     # operator for left hand side on full oversampling domain
-    operator = FenicsxMatrixBasedOperator(
-        parageom.form_lhs, params, param_setter=param_setter, bcs=bcs_op
-    )
+    operator = FenicsxMatrixBasedOperator(parageom.form_lhs, params, param_setter=param_setter, bcs=bcs_op)
 
     # ### Discretize right hand side - DirichletLift
-    entities_gamma_out = df.mesh.locate_entities_boundary(
-        V.mesh, V.mesh.topology.dim - 1, osp_config.gamma_out
-    )
+    entities_gamma_out = df.mesh.locate_entities_boundary(V.mesh, V.mesh.topology.dim - 1, osp_config.gamma_out)
     expected_num_facets_gamma_out = (example.num_intervals - 2, 2 * (example.num_intervals - 2))
     assert entities_gamma_out.size in expected_num_facets_gamma_out
     rhs = DirichletLift(operator.range, operator.compiled_form, entities_gamma_out)  # type: ignore
 
-
     def l2(V):
-        """form for source product"""
+        """Form for source product."""
         u = ufl.TrialFunction(V)
         v = ufl.TestFunction(V)
-        return ufl.inner(u, v) * ufl.dx # type: ignore
+        return ufl.inner(u, v) * ufl.dx  # type: ignore
 
     # ### Source product operator
     l2_cpp = df.fem.form(l2(V))
-    pmat_source = dolfinx.fem.petsc.create_matrix(l2_cpp) # type: ignore
+    pmat_source = dolfinx.fem.petsc.create_matrix(l2_cpp)  # type: ignore
     pmat_source.zeroEntries()
     dolfinx.fem.petsc.assemble_matrix(pmat_source, l2_cpp, bcs=[])
     pmat_source.assemble()
     source_mat = csr_array(pmat_source.getValuesCSR()[::-1])  # type: ignore
-    source_product = NumpyMatrixOperator(source_mat[rhs.dofs, :][:, rhs.dofs], name="l2")
+    source_product = NumpyMatrixOperator(source_mat[rhs.dofs, :][:, rhs.dofs], name='l2')
 
     # ### Range Product
     range_mat = LinearElasticMaterial(**matparam)
     linela_target = LinearElasticityProblem(omega_in, V_in, phases=range_mat)
     a_cpp = df.fem.form(linela_target.form_lhs)
-    range_mat = dolfinx.fem.petsc.create_matrix(a_cpp) # type: ignore
+    range_mat = dolfinx.fem.petsc.create_matrix(a_cpp)  # type: ignore
     range_mat.zeroEntries()
     dolfinx.fem.petsc.assemble_matrix(range_mat, a_cpp, bcs=bcs_range_product)
     range_mat.assemble()
-    range_product = FenicsxMatrixOperator(range_mat, V_in, V_in, name="energy")
+    range_product = FenicsxMatrixOperator(range_mat, V_in, V_in, name='energy')
 
     # ### Rigid body modes
     kernel_set = osp_config.kernel
@@ -937,7 +936,7 @@ def discretize_transfer_problem(example: BeamData, coarse_omega: StructuredQuadG
     if osp_config.gamma_n is not None:
         top_tag = example.neumann_tag
         assert omega.facet_tags.find(top_tag).size == example.num_intervals * 1  # top
-        dA = ufl.Measure("ds", domain=omega.grid, subdomain_data=omega.facet_tags)
+        dA = ufl.Measure('ds', domain=omega.grid, subdomain_data=omega.facet_tags)
         t_y = -example.traction_y
         traction = df.fem.Constant(
             omega.grid,
@@ -963,10 +962,9 @@ def discretize_transfer_problem(example: BeamData, coarse_omega: StructuredQuadG
     else:
         F_ext = operator.range.zeros(1)
 
-
     return transfer, F_ext
 
 
-if __name__ == "__main__":
-    print("hi from locmor")
+if __name__ == '__main__':
+    print('hi from locmor')
     # TODO add basic test?
