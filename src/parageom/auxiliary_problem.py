@@ -1,21 +1,29 @@
 from typing import Callable, Optional, Union
 
-from basix.ufl import element
 import dolfinx as df
+import numpy as np
+from basix.ufl import element
 from mpi4py import MPI
 from multi.boundary import plane_at
 from multi.domain import Domain, StructuredQuadGrid
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinearElasticityProblem
-import numpy as np
-from parageom.definitions import BeamData
 from pymor.parameters.base import Mu, Parameters
+
+from parageom.definitions import BeamData
 
 
 class GlobalAuxiliaryProblem:
     """Represents auxiliary problem on global parent domain."""
 
-    def __init__(self, problem: LinearElasticityProblem, interface_tags: list[int], parameters: dict[str, int], coarse_grid: StructuredQuadGrid, interface_locators: list[Callable]):
+    def __init__(
+        self,
+        problem: LinearElasticityProblem,
+        interface_tags: list[int],
+        parameters: dict[str, int],
+        coarse_grid: StructuredQuadGrid,
+        interface_locators: list[Callable],
+    ):
         """Initializes the auxiliary problem.
 
         Args:
@@ -26,7 +34,6 @@ class GlobalAuxiliaryProblem:
             interface_locators: Functions to locate the interfaces between unit cells.
 
         """
-
         self.problem = problem
         self.interface_tags = interface_tags
         self.parameters = Parameters(parameters)
@@ -41,15 +48,12 @@ class GlobalAuxiliaryProblem:
         petsc_options = None  # defaults to mumps
         p = self.problem
         p.setup_solver(petsc_options=petsc_options)
-        u_zero = df.fem.Constant(
-            p.domain.grid, (df.default_scalar_type(0.0),) * p.domain.gdim
-        )
+        u_zero = df.fem.Constant(p.domain.grid, (df.default_scalar_type(0.0),) * p.domain.gdim)
         bc_zero = df.fem.dirichletbc(u_zero, self._boundary_dofs, p.V)
         p.assemble_matrix(bcs=[bc_zero])
 
     def _init_boundary_dofs(self, interface_tags: list[int], interface_locators: list[Callable]):
-        """Initializes dofs on ∂Ω and ∂Ω_int"""
-
+        """Initializes dofs on ∂Ω and ∂Ω_int."""
         omega = self.problem.domain
         tdim = omega.tdim
         fdim = tdim - 1
@@ -77,7 +81,7 @@ class GlobalAuxiliaryProblem:
             dofs = df.fem.locate_dofs_geometrical(V, locator)
             alldofs.append(dofs)
 
-        self._boundary_dofs = np.unique(np.hstack(alldofs)) # union of dofs on ∂Ω and ∂Ω_int
+        self._boundary_dofs = np.unique(np.hstack(alldofs))  # union of dofs on ∂Ω and ∂Ω_int
 
         # this is needed for each subdomain separately, use dictionary
         gdim = omega.gdim
@@ -96,8 +100,8 @@ class GlobalAuxiliaryProblem:
 
         Note: needs to be implemented by user for desired transformation map Φ(μ)
         Return value should have shape (num_points, num_components).flatten()
-        """
 
+        """
         grid = self.coarse_grid
         # computes midpoints of entity
         x_center = grid.get_entity_coordinates(grid.tdim, np.array([k], dtype=np.int32))
@@ -122,6 +126,7 @@ class GlobalAuxiliaryProblem:
         Args:
             u: The solution function.
             mu: The parameter value.
+
         """
         self.parameters.assert_compatible(mu)
 
@@ -153,7 +158,6 @@ class AuxiliaryProblem:
             parameters: Dictionary mapping parameter names to parameter dimensions.
 
         """
-
         # FIXME
         # I now have problem.omega.facet_tags (type meshtags)
         # and self.facet_tags (type dict)
@@ -174,7 +178,6 @@ class AuxiliaryProblem:
         Note: needs to be implemented by user for desired transformation map Φ(μ)
         Return value should have shape (num_points, num_components).flatten()
         """
-
         omega = self.problem.domain
         x_center = omega.xmin + (omega.xmax - omega.xmin) / 2
 
@@ -193,7 +196,7 @@ class AuxiliaryProblem:
         return d_values[:, :2].flatten()
 
     def _init_boundary_dofs(self, facet_tags: dict[str, int]):
-        assert "interface" in facet_tags.keys()
+        assert 'interface' in facet_tags.keys()
 
         omega = self.problem.domain
         tdim = omega.tdim
@@ -208,7 +211,7 @@ class AuxiliaryProblem:
         self._boundary_dofs = np.unique(np.hstack(alldofs))
 
         gdim = omega.gdim
-        dofs_interface = dof_indices["interface"]
+        dofs_interface = dof_indices['interface']
         self._dofs_interface = dofs_interface
         dummy_bc = df.fem.dirichletbc(np.array([0] * gdim, dtype=float), dofs_interface, V)
         self._dofs_interface_blocked = dummy_bc._cpp_object.dof_indices()[0]
@@ -217,9 +220,7 @@ class AuxiliaryProblem:
         petsc_options = None  # defaults to mumps
         p = self.problem
         p.setup_solver(petsc_options=petsc_options)
-        u_zero = df.fem.Constant(
-            p.domain.grid, (df.default_scalar_type(0.0),) * p.domain.gdim
-        )
+        u_zero = df.fem.Constant(p.domain.grid, (df.default_scalar_type(0.0),) * p.domain.gdim)
         bc_zero = df.fem.dirichletbc(u_zero, self._boundary_dofs, p.V)
         p.assemble_matrix(bcs=[bc_zero])
 
@@ -229,6 +230,7 @@ class AuxiliaryProblem:
         Args:
             u: The solution function.
             mu: The parameter value.
+
         """
         self.parameters.assert_compatible(mu)
 
@@ -245,7 +247,13 @@ class AuxiliaryProblem:
         solver.solve(p.b, u.vector)
 
 
-def discretize_auxiliary_problem(example: BeamData, omega: Domain, facet_tags: Union[dict[str, int], list[int]], param: dict[str, int], coarse_grid: Optional[StructuredQuadGrid] = None):
+def discretize_auxiliary_problem(
+    example: BeamData,
+    omega: Domain,
+    facet_tags: Union[dict[str, int], list[int]],
+    param: dict[str, int],
+    coarse_grid: Optional[StructuredQuadGrid] = None,
+):
     """Discretizes the auxiliary problem to compute transformation displacement.
 
     Args:
@@ -263,7 +271,7 @@ def discretize_auxiliary_problem(example: BeamData, omega: Domain, facet_tags: U
     emod = df.fem.Constant(omega.grid, df.default_scalar_type(1.0))
     nu = df.fem.Constant(omega.grid, df.default_scalar_type(0.25))
     mat = LinearElasticMaterial(gdim, E=emod, NU=nu, plane_stress=example.plane_stress)
-    ve = element("P", omega.grid.basix_cell(), degree, shape=(gdim,))
+    ve = element('P', omega.grid.basix_cell(), degree, shape=(gdim,))
     V = df.fem.functionspace(omega.grid, ve)
     problem = LinearElasticityProblem(omega, V, phases=mat)
 
@@ -274,15 +282,16 @@ def discretize_auxiliary_problem(example: BeamData, omega: Domain, facet_tags: U
         interface_locators = []
         for x_coord in range(1, 10):
             x_coord = float(x_coord)
-            interface_locators.append(plane_at(x_coord, "x"))
+            interface_locators.append(plane_at(x_coord, 'x'))
         aux = GlobalAuxiliaryProblem(problem, facet_tags, param, coarse_grid, interface_locators=interface_locators)
     return aux
 
 
 def main():
-    from parageom.tasks import example
     from dolfinx.io.utils import XDMFFile
     from multi.io import read_mesh
+
+    from parageom.tasks import example
 
     # transformation displacement is used to construct
     # phyiscal domains/meshes
@@ -293,16 +302,16 @@ def main():
     # discretize auxiliary problem for parent unit cell
     mshfile = example.parent_unit_cell
     comm = MPI.COMM_SELF
-    domain, ct, ft = read_mesh(mshfile, comm, kwargs={"gdim": example.gdim})
+    domain, ct, ft = read_mesh(mshfile, comm, kwargs={'gdim': example.gdim})
     omega = Domain(domain, cell_tags=ct, facet_tags=ft)
 
-    ftags = {"bottom": 11, "left": 12, "right": 13, "top": 14, "interface": 15}
-    param = {"R": 1}
+    ftags = {'bottom': 11, 'left': 12, 'right': 13, 'top': 14, 'interface': 15}
+    param = {'R': 1}
     auxp = discretize_auxiliary_problem(example, omega, ftags, param)
 
     # output function
     d = df.fem.Function(auxp.problem.V)
-    xdmf = XDMFFile(d.function_space.mesh.comm, "./transformation_unit_cell.xdmf", "w")
+    xdmf = XDMFFile(d.function_space.mesh.comm, './transformation_unit_cell.xdmf', 'w')
     xdmf.write_mesh(d.function_space.mesh)
 
     mu_values = []
@@ -315,16 +324,16 @@ def main():
         xdmf.write_function(d.copy(), t=float(time))
     xdmf.close()
 
-    global_domain_msh = example.parent_domain("global")
-    omega_gl = Domain(*read_mesh(global_domain_msh, comm, kwargs={"gdim": example.gdim}))
-    global_coarse_domain_msh = example.coarse_grid("global")
-    coarse_grid = StructuredQuadGrid(read_mesh(global_coarse_domain_msh, comm, kwargs={"gdim": example.gdim})[0])
-    param = {"R": 10}
+    global_domain_msh = example.parent_domain('global')
+    omega_gl = Domain(*read_mesh(global_domain_msh, comm, kwargs={'gdim': example.gdim}))
+    global_coarse_domain_msh = example.coarse_grid('global')
+    coarse_grid = StructuredQuadGrid(read_mesh(global_coarse_domain_msh, comm, kwargs={'gdim': example.gdim})[0])
+    param = {'R': 10}
     int_tags = [i for i in range(15, 25)]
     auxp = discretize_auxiliary_problem(example, omega_gl, int_tags, param, coarse_grid=coarse_grid)
 
     d = df.fem.Function(auxp.problem.V)
-    xdmf = XDMFFile(d.function_space.mesh.comm, "./transformation_global_domain.xdmf", "w")
+    xdmf = XDMFFile(d.function_space.mesh.comm, './transformation_global_domain.xdmf', 'w')
     xdmf.write_mesh(d.function_space.mesh)
 
     mu_values = []
@@ -338,5 +347,5 @@ def main():
     xdmf.close()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
