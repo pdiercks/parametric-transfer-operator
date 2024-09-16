@@ -84,7 +84,7 @@ class BeamData:
     rrf_ttol: float = 10e-2
     rrf_ftol: float = 1e-10
     rrf_num_testvecs: int = 20
-    neumann_rtol: float = 1e-5  # hrrf pod extension
+    neumann_rtol: float = 1e-8  # hrrf pod extension
     neumann_tag: int = 194
     mdeim_rtol: float = 1e-5
     debug: bool = False
@@ -217,7 +217,7 @@ class BeamData:
     def ntrain(self, k: int) -> int:
         """Define size of training set for k-th transfer problem."""
         if k in (0, 10):
-            return 50
+            return 100
         elif k in (1, 9):
             return 100
         else:
@@ -253,6 +253,13 @@ class BeamData:
             return dir / f'rom_error_s_ei_{num_modes}.npz'
         else:
             return dir / f'rom_error_s_{num_modes}.npz'
+
+    def rom_condition(self, nreal: int, num_modes: int, method='hapod', ei=False) -> Path:
+        dir = self.method_folder(nreal, method)
+        if ei:
+            return dir / f'rom_condition_ei_{num_modes}.npy'
+        else:
+            return dir / f'rom_condition_{num_modes}.npy'
 
     @property
     def fom_minimization_data(self) -> Path:
