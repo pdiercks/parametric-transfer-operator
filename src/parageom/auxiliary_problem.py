@@ -11,10 +11,13 @@ from multi.domain import Domain, StructuredQuadGrid
 from multi.materials import LinearElasticMaterial
 from multi.problems import LinearElasticityProblem
 from petsc4py import PETSc
-from pymor.bindings.fenicsx import FenicsxVectorSpace
+from pymor.algorithms.pod import pod
+from pymor.bindings.fenicsx import FenicsxMatrixOperator, FenicsxVectorSpace, FenicsxVisualizer
 from pymor.core.base import abstractmethod
+from pymor.models.basic import StationaryModel
 from pymor.operators.interface import Operator
 from pymor.parameters.base import Mu, Parameters
+from pymor.reductors.basic import StationaryRBReductor
 from pymor.vectorarrays.numpy import NumpyVectorSpace
 
 from parageom.definitions import BeamData
@@ -335,11 +338,13 @@ class ParametricDirichletLift(Operator):
         self._x = df.la.create_petsc_vector(range.V.dofmap.index_map, range.V.dofmap.bs)
 
         # TODO: rather loop over gdim
-        self._dofs_values = np.hstack(
-            [
-                df.fem.locate_dofs_topological(range.V.sub(0), fdim, inhom),
-                df.fem.locate_dofs_topological(range.V.sub(1), fdim, inhom),
-            ]
+        self._dofs_values = np.sort(
+            np.hstack(
+                [
+                    df.fem.locate_dofs_topological(range.V.sub(0), fdim, inhom),
+                    df.fem.locate_dofs_topological(range.V.sub(1), fdim, inhom),
+                ]
+            )
         )
         self._dofs = df.fem.locate_dofs_topological(range.V, fdim, inhom)
 
@@ -359,7 +364,7 @@ class ParametricDirichletLift(Operator):
         return self.assemble(mu).lincomb(U.to_numpy())
 
     def as_range_array(self, mu=None):
-        return self.assemble(mu).as_range_array()
+        return self.assemble(mu)
 
     def assemble(self, mu=None):
         assert self.parameters.assert_compatible(mu)
@@ -417,8 +422,6 @@ class ParaCircle(ParametricDirichletLift):
 
 def discretize_auxiliary_model(example: BeamData, omega: Domain):
     """Build FOM of the auxiliary problem on the unit cell."""
-    from pymor.bindings.fenicsx import FenicsxMatrixOperator
-
     # define linear elastic problem
     degree = example.geom_deg
     gdim = example.gdim
@@ -427,19 +430,12 @@ def discretize_auxiliary_model(example: BeamData, omega: Domain):
     material = LinearElasticMaterial(gdim, E=emod, NU=nu, plane_stress=example.plane_stress)
     V = df.fem.functionspace(omega.grid, ('P', degree, (gdim,)))
     problem = LinearElasticityProblem(omega, V, phases=material)
-    problem.setup_solver()  # defaults to mumps
 
-    # LHS: non-parametric FenicsxMatrixOperator
-    # RHS: parametric VectorOperator?
-    # - but I don't have the columns of A available as vectors
-    # - [ ] implement DirichletLift that inherits from Operator?
+    form_compiler_options = {}
+    jit_options = {}
+    a_cpp = df.fem.form(problem.form_lhs, form_compiler_options=form_compiler_options, jit_options=jit_options)
+    A = dolfinx.fem.petsc.create_matrix(a_cpp)
 
-    # determine DOFs on facets
-    # see parageom/preprocessing.py:discretize_parent_unit_cell for
-    # definition of facet tags
-
-    # boundary dofs --> definiton of bc for lhs operator
-    # interface dofs --> definitin of bc for rhs operator
     tdim = omega.tdim
     fdim = tdim - 1
     facet_tag_defs = {'bottom': 11, 'left': 12, 'right': 13, 'top': 14, 'interface': 15}
@@ -454,33 +450,42 @@ def discretize_auxiliary_model(example: BeamData, omega: Domain):
 
     zero = df.fem.Constant(omega.grid, (df.default_scalar_type(0.0),) * gdim)
     bc_zero = df.fem.dirichletbc(zero, boundary_dofs, V)
-    problem.assemble_matrix(bcs=[bc_zero])
-    # left hand side operator
-    operator = FenicsxMatrixOperator(problem.A, V, V)
+
+    A.zeroEntries()
+    dolfinx.fem.petsc.assemble_matrix(A, a_cpp, bcs=[bc_zero])
+    A.assemble()
+
+    operator = FenicsxMatrixOperator(A, V, V)
     params = Parameters({'R': 1})
-    rhs = ParaCircle(
-        operator.range, problem.a, omega.facet_tags.find(facet_tag_defs['interface']), boundary_facets, params
+    rhs = ParaCircle(operator.range, a_cpp, omega.facet_tags.find(facet_tag_defs['interface']), boundary_facets, params)
+    model = StationaryModel(
+        operator,
+        rhs,
+        products={'energy': operator},
+        visualizer=FenicsxVisualizer(operator.source),
+        name='AuxiliaryModel',
     )
-    breakpoint()
+    return model
 
 
-def reduce_auxiliary_model(aux: AuxiliaryProblem):
+def reduce_auxiliary_model(example: BeamData, aux: StationaryModel, ntrain: int):
     """Build ROM of Auxiliary problem for unit cell."""
+    ps = aux.parameters.space(example.mu_range)
+    training_set = ps.sample_uniformly(ntrain)
+    U = aux.solution_space.empty(reserve=ntrain)
+    for mu in training_set:
+        U.append(aux.solve(mu))
 
-    # - make auxiliary problem a StationaryModel
-    # - refactor AuxiliaryProblem?
-    # - still use global function for transformation displacement that is updated after each call to fom.solve(mu); implement update without `to_numpy()` ? # noqa
-    # - reduction process using ProjectionBasedReductor
+    modes, _ = pod(U, product=aux.operator, rtol=1e-6)
+    basis = modes[:1]
 
-    # Refactor Auxiliary Problem as StationaryModel
-    # - init boundary dofs (facet tags, interface tags)
-    # - discretize lhs operator
-    # - for each mu: assemble rhs (compute interface coord)
-    # - rhs as DirichletLift (using petsc vecs & interface coord & apply lifting)
+    reductor = StationaryRBReductor(aux, RB=basis, product=aux.operator, name='ReducedAuxiliaryModel')
+    rom = reductor.reduce()
+    return rom, reductor
 
 
 def main():
-    from dolfinx.io.utils import XDMFFile
+    """Discretize/reduce auxiliary problem for unit cell. Write singular values."""
     from multi.io import read_mesh
 
     from parageom.tasks import example
@@ -497,7 +502,46 @@ def main():
     domain, ct, ft = read_mesh(mshfile, comm, kwargs={'gdim': example.gdim})
     omega = Domain(domain, cell_tags=ct, facet_tags=ft)
 
-    discretize_auxiliary_model(example, omega)
+    aux = discretize_auxiliary_model(example, omega)
+    aux.disable_logging(True)
+
+    # rom, reductor = reduce_auxiliary_model(example, aux, 21)
+    ntrain = 21
+    ps = aux.parameters.space(example.mu_range)
+    training_set = ps.sample_uniformly(ntrain)
+    U = aux.solution_space.empty(reserve=ntrain)
+    for mu in training_set:
+        U.append(aux.solve(mu))
+
+    # set tolerance such that > 1 modes are returned
+    modes, svals = pod(U, product=aux.operator, modes=10, rtol=1e-15)
+    basis = modes[:1]
+
+    reductor = StationaryRBReductor(aux, RB=basis, product=aux.operator)
+    rom = reductor.reduce()
+
+    ntest = 51
+    testing_set = ps.sample_randomly(ntest)
+    U_fom = aux.solution_space.empty(reserve=ntest)
+    U_rom = aux.solution_space.empty(reserve=ntest)
+    for mu in testing_set:
+        U_fom.append(aux.solve(mu))
+        U_rom.append(reductor.reconstruct(rom.solve(mu)))
+    err = U_fom - U_rom
+    errn = err.norm(aux.products['energy'])
+    rel_err = errn / U_fom.norm(aux.products['energy'])
+    if np.sum(rel_err) < 1e-12:
+        print('Test passed. Writing singular values ...')
+        np.save(example.singular_values_auxiliary_problem, svals)
+    else:
+        print('Warning, reduced auxiliary problem may be inaccurate ...')
+
+    # Solution of auxiliary problem and update of transformation displacement d
+    # d = df.fem.Function(aux.solution_space.V)
+    # mu = rom.parameters.parse([0.1])
+    # urb = rom.solve(mu)
+    # U = reductor.reconstruct(urb)
+    # d.x.array[:] = U.to_numpy()[0, :]
 
     # ftags = {'bottom': 11, 'left': 12, 'right': 13, 'top': 14, 'interface': 15}
     # param = {'R': 1}

@@ -190,6 +190,10 @@ class BeamData:
         return self.grids_path / 'parent_unit_cell.msh'
 
     @property
+    def singular_values_auxiliary_problem(self) -> Path:
+        return self.rf / 'singular_values_auxiliary_problem.npy'
+
+    @property
     def cell_type(self) -> str:
         """The cell type of the parent unit cell mesh."""
         match self.geom_deg:
