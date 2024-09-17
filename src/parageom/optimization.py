@@ -47,7 +47,7 @@ def main(args):
     # ### Function for displacement on unit cell (for reconstruction)
     unit_cell_domain = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, kwargs={'gdim': example.gdim})[0]
     V_i = df.fem.functionspace(unit_cell_domain, ('P', example.fe_deg, (example.gdim,)))
-    d_local = df.fem.Function(V_i, name='u_i')
+    u_local = df.fem.Function(V_i, name='u_i')
 
     # ### Build localized ROM
     coarse_grid_path = example.coarse_grid('global')
@@ -59,11 +59,11 @@ def main(args):
 
     # ### Global Function for displacement solution
     V = fom.solution_space.V
-    d_fom = df.fem.Function(V, name='u_fom')
-    d_rom = df.fem.Function(V, name='u_rom')
+    u_fom = df.fem.Function(V, name='u_fom')
+    u_rom = df.fem.Function(V, name='u_rom')
 
     def constrained_cells(domain):
-        """Get active cells to deactivate constrain function in some part of the domain (near the support)."""
+        """Get active cells to deactivate constraint function in some part of the domain (near the support)."""
 
         def exclude(x):
             radius = 0.3
@@ -106,11 +106,11 @@ def main(args):
     stress_rom = df.fem.Function(QV)
 
     # ### UFL representation and Expression of stress for both models
-    suf = parageom_fom.weighted_stress(d_fom)
+    suf = parageom_fom.weighted_stress(u_fom)
     stress_ufl_fom_vector = ufl.as_vector([suf[0, 0], suf[1, 1], suf[2, 2], suf[0, 1]])
     stress_expr_fom = df.fem.Expression(stress_ufl_fom_vector, q_points)
 
-    sur = parageom_fom.weighted_stress(d_rom)
+    sur = parageom_fom.weighted_stress(u_rom)
     stress_ufl_rom_vector = ufl.as_vector([sur[0, 0], sur[1, 1], sur[2, 2], sur[0, 1]])
     stress_expr_rom = df.fem.Expression(stress_ufl_rom_vector, q_points)
 
@@ -172,8 +172,8 @@ def main(args):
     bounds = Bounds(lower, upper, keep_feasible=True)
 
     # Wrap models
-    wrapped_fom = ModelWrapper(fom, d_fom)
-    wrapped_rom = ModelWrapper(rom, d_rom, dofmap, selected_modes, d_local)
+    wrapped_fom = ModelWrapper(fom, u_fom)
+    wrapped_rom = ModelWrapper(rom, u_rom, dofmap, selected_modes, u_local)
 
     opt_fom_result = solve_optimization_problem(
         logger,
