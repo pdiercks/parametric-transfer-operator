@@ -141,33 +141,40 @@ class ParaGeomLinEla(LinearProblem):
 
 
 def discretize_subdomain_operators(example):
-    from parageom.auxiliary_problem import discretize_auxiliary_problem
+    from parageom.auxiliary_problem import discretize_auxiliary_model, reduce_auxiliary_model
     from parageom.matrix_based_operator import FenicsxMatrixBasedOperator
 
     # discretize auxiliary problem on unit cell domain
-    domain, ct, ft = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, kwargs={"gdim": example.gdim})
+    domain, ct, ft = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, kwargs={'gdim': example.gdim})
     omega = RectangularDomain(domain, ct, ft)
-    # facet tags are defined in preprocessing.discretize_unit_cell
-    ftags = {"bottom": 11, "left": 12, "right": 13, "top": 14, "interface": 15}
-    params = example.parameters["subdomain"]
-    aux = discretize_auxiliary_problem(example, omega, ftags, params)
-    d = df.fem.Function(aux.problem.V, name="d_trafo_unit_cell")
+    aux = discretize_auxiliary_model(example, omega)
+    rom, reductor = reduce_auxiliary_model(example, aux, 21)
+    V = aux.solution_space.V
+    d = df.fem.Function(V, name='d_trafo_unit_cell')
 
     # create problem to define (stiffness matrix) operator
-    matparam = {"gdim": omega.gdim, "E": example.youngs_modulus, "NU": example.poisson_ratio, "plane_stress": example.plane_stress}
-    problem = ParaGeomLinEla(omega, aux.problem.V, d, matparam)
+    matparam = {
+        'gdim': omega.gdim,
+        'E': example.youngs_modulus,
+        'NU': example.poisson_ratio,
+        'plane_stress': example.plane_stress,
+    }
+    problem = ParaGeomLinEla(omega, V, d, matparam)
 
     # ### wrap stiffness matrix as pymor operator
     def param_setter(mu):
         d.x.array[:] = 0.0
-        aux.solve(d, mu)
+        U = reductor.reconstruct(rom.solve(mu))
+        d.x.array[:] = U.to_numpy()[0, :]
         d.x.scatter_forward()
 
-    operator = FenicsxMatrixBasedOperator(problem.form_lhs, params, param_setter=param_setter, name='ParaGeom')
+    operator = FenicsxMatrixBasedOperator(problem.form_lhs, rom.params, param_setter=param_setter, name='ParaGeom')
 
     # ### wrap external force as pymor operator
     TY = -example.traction_y
     traction = df.fem.Constant(omega.grid, (df.default_scalar_type(0.0), df.default_scalar_type(TY)))
+    # facet tags are defined in preprocessing.discretize_unit_cell
+    ftags = {'bottom': 11, 'left': 12, 'right': 13, 'top': 14, 'interface': 15}
     problem.add_neumann_bc(ftags['top'], traction)
     problem.setup_solver()
     problem.assemble_vector(bcs=[])
@@ -181,7 +188,7 @@ def discretize_subdomain_operators(example):
         vol = df.fem.assemble_scalar(vol_cpp)
         return vol
 
-    theta_vol = GenericParameterFunctional(compute_volume, params)
+    theta_vol = GenericParameterFunctional(compute_volume, rom.params)
 
     # global ROM
     # loop over components of mu, compute Vol_gl = Σ v_i = Σ theta_vol(mu_i)
@@ -352,17 +359,17 @@ if __name__ == '__main__':
     from parageom.stress_analysis import principal_stress_2d, project
     from parageom.tasks import example
 
-    coarse_grid_path = example.coarse_grid("global")
-    coarse_grid = StructuredQuadGrid(*read_mesh(coarse_grid_path, MPI.COMM_WORLD, kwargs={"gdim": example.gdim}))
-    parent_domain_path = example.parent_domain("global")
-    omega_gl = RectangularDomain(*read_mesh(parent_domain_path, MPI.COMM_WORLD, kwargs={"gdim": example.gdim}))
+    coarse_grid_path = example.coarse_grid('global')
+    coarse_grid = StructuredQuadGrid(*read_mesh(coarse_grid_path, MPI.COMM_WORLD, kwargs={'gdim': example.gdim}))
+    parent_domain_path = example.parent_domain('global')
+    omega_gl = RectangularDomain(*read_mesh(parent_domain_path, MPI.COMM_WORLD, kwargs={'gdim': example.gdim}))
     degree = example.geom_deg
     interface_tags = [i for i in range(15, 25)]  # FIXME better define in Example data class
     auxp = discretize_auxiliary_problem(
         example,
         omega_gl,
         interface_tags,
-        example.parameters["global"],
+        example.parameters['global'],
         coarse_grid=coarse_grid,
     )
     d = df.fem.Function(auxp.problem.V, name='d_trafo')
