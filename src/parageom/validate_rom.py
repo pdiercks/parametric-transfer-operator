@@ -103,7 +103,7 @@ def main(args):
     if args.ei:
         logger.info('Building ROM with EI ...')
         tic = perf_counter()
-        rom, modes = build_rom(
+        rom, modes, _ = build_rom(
             example,
             dofmap,
             params,
@@ -271,7 +271,7 @@ def build_rom(example, dofmap, params, num_modes, ω=0.5, nreal=0, method='hapod
     from parageom.locmor import EISubdomainOperatorWrapper, assemble_gfem_system_with_ei
 
     # local high fidelity operators
-    operator_local, rhs_local, theta_vol = discretize_subdomain_operators(example)
+    operator_local, rhs_local, theta_vol, auxmodel = discretize_subdomain_operators(example)
 
     # ### Reduced bases
     num_coarse_grid_cells = dofmap.grid.num_cells
@@ -358,7 +358,7 @@ def build_rom(example, dofmap, params, num_modes, ω=0.5, nreal=0, method='hapod
         output = LincombOperator([one_op, compliance], [theta_vol_gl, ω])
 
         rom = StationaryModel(operator, rhs, output_functional=output, name='ROM_with_ei')
-        return rom, selected_modes
+        return rom, selected_modes, auxmodel
     else:
         return {
             'dofmap': dofmap,
@@ -368,6 +368,7 @@ def build_rom(example, dofmap, params, num_modes, ω=0.5, nreal=0, method='hapod
             'local_bases': local_bases,
             'dofs_per_vert': dofs_per_vert,
             'max_dofs_per_vert': max_dofs_per_vert,
+            'aux': auxmodel,
         }
 
 

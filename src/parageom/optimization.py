@@ -55,7 +55,7 @@ def main(args):
     struct_grid = StructuredQuadGrid(coarse_domain)
     dofmap = GFEMDofMap(struct_grid)
     params = fom.parameters
-    rom, selected_modes = build_rom(example, dofmap, params, args.num_modes, ω=args.omega, use_ei=True)
+    rom, selected_modes, aux = build_rom(example, dofmap, params, args.num_modes, ω=args.omega, use_ei=True)
 
     # ### Global Function for displacement solution
     V = fom.solution_space.V
@@ -110,6 +110,7 @@ def main(args):
     stress_ufl_fom_vector = ufl.as_vector([suf[0, 0], suf[1, 1], suf[2, 2], suf[0, 1]])
     stress_expr_fom = df.fem.Expression(stress_ufl_fom_vector, q_points)
 
+    # FIXME: use individual instance of ParaGeom for ROM
     sur = parageom_fom.weighted_stress(u_rom)
     stress_ufl_rom_vector = ufl.as_vector([sur[0, 0], sur[1, 1], sur[2, 2], sur[0, 1]])
     stress_expr_rom = df.fem.Expression(stress_ufl_rom_vector, q_points)

@@ -141,8 +141,12 @@ class ParaGeomLinEla(LinearProblem):
 
 
 def discretize_subdomain_operators(example):
+    from collections import namedtuple
+
     from parageom.auxiliary_problem import discretize_auxiliary_model, reduce_auxiliary_model
     from parageom.matrix_based_operator import FenicsxMatrixBasedOperator
+
+    AuxiliaryModelWrapper = namedtuple('AuxiliaryModelWrapper', ['model', 'd', 'reductor'], defaults=(None,))
 
     # discretize auxiliary problem on unit cell domain
     domain, ct, ft = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, kwargs={'gdim': example.gdim})
@@ -151,6 +155,7 @@ def discretize_subdomain_operators(example):
     rom, reductor = reduce_auxiliary_model(example, aux, 21)
     V = aux.solution_space.V
     d = df.fem.Function(V, name='d_trafo_unit_cell')
+    aux_model = AuxiliaryModelWrapper(rom, d, reductor)
 
     # create problem to define (stiffness matrix) operator
     matparam = {
@@ -195,7 +200,7 @@ def discretize_subdomain_operators(example):
     # Vol_gl can probably be implemented as another GenericParameterFunctional with global params
     # define global output as new LincombOperator with (1-ω) Vol_gl + ω Compliance
 
-    return operator, rhs, theta_vol
+    return operator, rhs, theta_vol, aux_model
 
 
 def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
