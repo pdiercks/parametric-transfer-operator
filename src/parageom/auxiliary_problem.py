@@ -482,7 +482,7 @@ def reduce_auxiliary_model(example: BeamData, aux: StationaryModel, ntrain: int)
     modes, _ = pod(U, product=aux.operator, rtol=1e-6)
     basis = modes[:1]
 
-    reductor = StationaryRBReductor(aux, RB=basis, product=aux.operator, name='ReducedAuxiliaryModel')
+    reductor = StationaryRBReductor(aux, RB=basis, product=aux.operator)
     rom = reductor.reduce()
     return rom, reductor
 
