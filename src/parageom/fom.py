@@ -141,7 +141,7 @@ class ParaGeomLinEla(LinearProblem):
 
 
 def discretize_subdomain_operators(example):
-    from parageom.auxiliary_problem import discretize_auxiliary_model, reduce_auxiliary_model, AuxiliaryModelWrapper
+    from parageom.auxiliary_problem import AuxiliaryModelWrapper, discretize_auxiliary_model, reduce_auxiliary_model
     from parageom.matrix_based_operator import FenicsxMatrixBasedOperator
 
     # discretize auxiliary problem on unit cell domain
@@ -169,7 +169,7 @@ def discretize_subdomain_operators(example):
         d.x.array[:] = U.to_numpy()[0, :]
         d.x.scatter_forward()
 
-    operator = FenicsxMatrixBasedOperator(problem.form_lhs, rom.params, param_setter=param_setter, name='ParaGeom')
+    operator = FenicsxMatrixBasedOperator(problem.form_lhs, rom.parameters, param_setter=param_setter, name='ParaGeom')
 
     # ### wrap external force as pymor operator
     TY = -example.traction_y
@@ -189,7 +189,7 @@ def discretize_subdomain_operators(example):
         vol = df.fem.assemble_scalar(vol_cpp)
         return vol
 
-    theta_vol = GenericParameterFunctional(compute_volume, rom.params)
+    theta_vol = GenericParameterFunctional(compute_volume, rom.parameters)
 
     # global ROM
     # loop over components of mu, compute Vol_gl = Σ v_i = Σ theta_vol(mu_i)
