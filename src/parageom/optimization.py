@@ -13,21 +13,91 @@ import dolfinx as df
 import numpy as np
 import ufl
 from mpi4py import MPI
+from multi.dofmap import DofMap
 from multi.domain import StructuredQuadGrid
+from multi.interpolation import make_mapping
 from multi.io import read_mesh
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
 from pymor.core.pickle import dump
+from pymor.parameters.base import Mu
 from scipy.optimize import Bounds, NonlinearConstraint, minimize
 
+from parageom.auxiliary_problem import AuxiliaryModelWrapper
+
 StressWrapper = namedtuple('StressWrapper', ['expr', 'cells', 'fun'])
-ModelWrapper = namedtuple('ModelWrapper', ['model', 'solution', 'dofmap', 'modes', 'sol_local'], defaults=(None,) * 3)
+# TODO Re-evaluate design of FOM and ROM (and ModelWrapper)
+ModelWrapper = namedtuple(
+    'ModelWrapper', ['model', 'solution', 'dofmap', 'modes', 'sol_local', 'aux', 'trafo'], defaults=(None,) * 5
+)
+
+
+def reconstruct(
+    U_rb: np.ndarray,
+    mu: Mu,
+    dofmap: DofMap,
+    bases: list[np.ndarray],
+    Vsub: df.fem.FunctionSpace,
+    u_global: df.fem.Function,
+    d_global: df.fem.Function,
+    aux: AuxiliaryModelWrapper,
+) -> None:
+    """Reconstructs ROM displacement solution & transformation displacement on the global domain.
+
+    Args:
+        U_rb: ROM solution in the reduced space.
+        mu: The current parameter value.
+        dofmap: The dofmap of the reduced space.
+        bases: Local basis for each subdomain.
+        Vsub: The local FE space.
+        u_global: The global solution field to be filled with values.
+        d_global: The global transformation displacement field to be filled with values.
+        aux: The model of the local auxiliary problem.
+
+    """
+    coarse_grid = dofmap.grid
+    V = u_global.function_space
+    submesh = Vsub.mesh
+    x_submesh = submesh.geometry.x
+
+    u_global_view = u_global.x.array
+    u_global_view[:] = 0.0
+    d_global_view = d_global.x.array
+    d_global_view[:] = 0.0
+
+    mu_values = mu.to_numpy()
+    rom = aux.model
+    reductor = aux.reductor
+
+    for i, cell in enumerate(dofmap.num_cells):
+        # translate subdomain mesh
+        vertices = coarse_grid.get_entities(0, cell)
+        dx_cell = coarse_grid.get_entity_coordinates(0, vertices)[0]
+        x_submesh += dx_cell
+
+        # fill u_local with rom solution
+        basis = bases[cell]
+        dofs = dofmap.cell_dofs(cell)
+
+        # fill global field via dof mapping
+        V_to_Vsub = make_mapping(Vsub, V, padding=1e-8, check=True)
+        u_global_view[V_to_Vsub] = U_rb[0, dofs] @ basis
+
+        mu_i = rom.parameters.parse(mu_values[i])
+        drb = rom.solve(mu_i)
+        d_global_view[V_to_Vsub] = reductor.reconstruct(drb).to_numpy()[0, :]
+
+        # move subdomain mesh to origin
+        x_submesh -= dx_cell
+
+    u_global.x.scatter_forward()
+    d_global.x.scatter_forward()
 
 
 def main(args):
     """Solve optimization problem for different models."""
     from parageom.dofmap_gfem import GFEMDofMap
-    from parageom.locmor import reconstruct
+    from parageom.fom import ParaGeomLinEla
     from parageom.tasks import example
     from parageom.validate_rom import build_fom, build_rom
 
@@ -48,6 +118,7 @@ def main(args):
     unit_cell_domain = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, kwargs={'gdim': example.gdim})[0]
     V_i = df.fem.functionspace(unit_cell_domain, ('P', example.fe_deg, (example.gdim,)))
     u_local = df.fem.Function(V_i, name='u_i')
+    # d_local = df.fem.Function(V_i, name='d_i')
 
     # ### Build localized ROM
     coarse_grid_path = example.coarse_grid('global')
@@ -61,6 +132,7 @@ def main(args):
     V = fom.solution_space.V
     u_fom = df.fem.Function(V, name='u_fom')
     u_rom = df.fem.Function(V, name='u_rom')
+    d_rom = df.fem.Function(V, name='d_rom')  # global transformation displacement
 
     def constrained_cells(domain):
         """Get active cells to deactivate constraint function in some part of the domain (near the support)."""
@@ -111,7 +183,14 @@ def main(args):
     stress_expr_fom = df.fem.Expression(stress_ufl_fom_vector, q_points)
 
     # FIXME: use individual instance of ParaGeom for ROM
-    sur = parageom_fom.weighted_stress(u_rom)
+    rommat = {
+        'gdim': parageom_fom.domain.gdim,
+        'E': example.youngs_modulus,
+        'NU': example.poisson_ratio,
+        'plane_stress': example.plane_stress,
+    }
+    parageom_rom = ParaGeomLinEla(parageom_fom.domain, V, d_rom, rommat)
+    sur = parageom_rom.weighted_stress(u_rom)
     stress_ufl_rom_vector = ufl.as_vector([sur[0, 0], sur[1, 1], sur[2, 2], sur[0, 1]])
     stress_expr_rom = df.fem.Expression(stress_ufl_rom_vector, q_points)
 
@@ -128,23 +207,23 @@ def main(args):
             wrapped_model.solution.x.array[:] = U.to_numpy().flatten()
         else:
             urb = model.solve(mu)
+            # reconstruct updates global displacement solution and
+            # transformation displacement
             reconstruct(
                 urb.to_numpy(),
+                mu,
                 wrapped_model.dofmap,
                 wrapped_model.modes,
-                wrapped_model.sol_local,
+                wrapped_model.sol_local.function_space,
                 wrapped_model.solution,
-            )  # type: ignore
+                wrapped_model.trafo,
+                wrapped_model.aux,
+            )
 
-            # TODO: update global d_trafo in case of ROM
-
-        # now that d is updated, compute stress
+        # now that u & d are uptodate, compute stress
         values = stress_fun.x.array.reshape(cells.size, -1)
         stress_expr.eval(V.mesh, entities=cells, values=values)
         s1, s2 = compute_principal_components(values, cells.size)
-        # if model.name.startswith("ROM"):
-        #     print(f"MAX s2 = {np.amax(s2)}")
-        #     breakpoint()
         return s1, s2
 
     # ### Dict's to gather minimization data
@@ -174,7 +253,7 @@ def main(args):
 
     # Wrap models
     wrapped_fom = ModelWrapper(fom, u_fom)
-    wrapped_rom = ModelWrapper(rom, u_rom, dofmap, selected_modes, u_local)
+    wrapped_rom = ModelWrapper(rom, u_rom, dofmap, selected_modes, u_local, aux, d_rom)
 
     opt_fom_result = solve_optimization_problem(
         logger,
