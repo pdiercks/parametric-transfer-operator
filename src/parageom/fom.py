@@ -141,12 +141,8 @@ class ParaGeomLinEla(LinearProblem):
 
 
 def discretize_subdomain_operators(example):
-    from collections import namedtuple
-
-    from parageom.auxiliary_problem import discretize_auxiliary_model, reduce_auxiliary_model
+    from parageom.auxiliary_problem import discretize_auxiliary_model, reduce_auxiliary_model, AuxiliaryModelWrapper
     from parageom.matrix_based_operator import FenicsxMatrixBasedOperator
-
-    AuxiliaryModelWrapper = namedtuple('AuxiliaryModelWrapper', ['model', 'd', 'reductor'], defaults=(None,))
 
     # discretize auxiliary problem on unit cell domain
     domain, ct, ft = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, kwargs={'gdim': example.gdim})
