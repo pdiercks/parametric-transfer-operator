@@ -69,7 +69,7 @@ def reconstruct(
     rom = aux.model
     reductor = aux.reductor
 
-    for i, cell in enumerate(dofmap.num_cells):
+    for i, cell in enumerate(range(dofmap.num_cells)):
         # translate subdomain mesh
         vertices = coarse_grid.get_entities(0, cell)
         dx_cell = coarse_grid.get_entity_coordinates(0, vertices)[0]
@@ -112,7 +112,8 @@ def main(args):
     logger = getLogger(stem, level=loglevel)
 
     # ### Build FOM
-    fom, parageom_fom = build_fom(example)
+    logger.info('Start building FOM ...')
+    fom, parageom_fom = build_fom(example, ω=args.omega)
 
     # ### Function for displacement on unit cell (for reconstruction)
     unit_cell_domain = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, kwargs={'gdim': example.gdim})[0]
@@ -126,7 +127,10 @@ def main(args):
     struct_grid = StructuredQuadGrid(coarse_domain)
     dofmap = GFEMDofMap(struct_grid)
     params = fom.parameters
-    rom, selected_modes, aux = build_rom(example, dofmap, params, args.num_modes, ω=args.omega, use_ei=True)
+    logger.info('Start building ROM ...')
+    rom, selected_modes, aux = build_rom(
+        example, dofmap, params, args.num_modes, ω=args.omega, nreal=0, method=args.method, use_ei=True
+    )
 
     # ### Global Function for displacement solution
     V = fom.solution_space.V
@@ -247,13 +251,33 @@ def main(args):
     parameter_space = fom.parameters.space(example.mu_range)
     mu_range = parameter_space.ranges['R']
 
-    lower = mu_range[0] * np.ones(10)
-    upper = mu_range[1] * np.ones(10)
+    lower = mu_range[0] * np.ones(num_subdomains)
+    upper = mu_range[1] * np.ones(num_subdomains)
     bounds = Bounds(lower, upper, keep_feasible=True)
 
     # Wrap models
     wrapped_fom = ModelWrapper(fom, u_fom)
     wrapped_rom = ModelWrapper(rom, u_rom, dofmap, selected_modes, u_local, aux, d_rom)
+
+    # debugging of reconstruct
+
+    breakpoint()
+    # urb = rom.solve(initial_guess)
+    # reconstruct(
+    #     urb.to_numpy(),
+    #     initial_guess,
+    #     wrapped_rom.dofmap,
+    #     wrapped_rom.modes,
+    #     wrapped_rom.sol_local.function_space,
+    #     wrapped_rom.solution,
+    #     wrapped_rom.trafo,
+    #     wrapped_rom.aux,
+    # )
+    # # write out displacement u and trafo disp d
+    # with df.io.XDMFFile(V.mesh.comm, 'output/debug_opt.xdmf', 'w') as xdmf:
+    #     xdmf.write_mesh(V.mesh)
+    #     xdmf.write_function(wrapped_rom.solution)
+    #     xdmf.write_function(wrapped_rom.trafo)
 
     opt_fom_result = solve_optimization_problem(
         logger,
@@ -426,7 +450,7 @@ def solve_optimization_problem(
     elif minimizer == 'COBYQA':
         options = {'f_target': 0.8}
     elif minimizer == 'SLSQP':
-        options = {'ftol': 1e-4, 'eps': 0.005}
+        options = {'ftol': 1e-3, 'eps': 0.01}
     elif minimizer == 'trust-constr':
         options = {'gtol': 1e-4, 'xtol': 1e-4, 'barrier_tol': 1e-4, 'finite_diff_rel_step': 5e-3}
     else:
@@ -466,7 +490,7 @@ def solve_optimization_problem(
         assert negative_vals.size > 0
         min_value = np.amin(negative_vals)
         logger.warning(
-            f'Constraint not satisfied by optimal solution (max constraint violation is {np.abs(min_value):2.e}!'
+            f'Constraint not satisfied by optimal solution (max constraint violation is {np.abs(min_value):1.2e}!'
         )
         return opt_result
 
@@ -484,6 +508,7 @@ if __name__ == '__main__':
         type=int,
         help='Local basis size to be used with local ROM.',
     )
+    parser.add_argument('method', type=str, help='Method used to generate local bases.')
     parser.add_argument(
         '--minimizer',
         type=str,
