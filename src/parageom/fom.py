@@ -374,7 +374,7 @@ if __name__ == '__main__':
         coarse_grid=coarse_grid,
     )
     d = df.fem.Function(auxp.problem.V, name='d_trafo')
-    fom = discretize_fom(example, auxp, d)
+    fom = discretize_fom(example, auxp, d)[0]
 
     parameter_space = auxp.parameters.space(example.mu_range)
     mu = parameter_space.parameters.parse([0.3 * example.unit_length for _ in range(10)])
