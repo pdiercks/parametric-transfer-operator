@@ -141,7 +141,7 @@ class ParaGeomLinEla(LinearProblem):
 
 
 def discretize_subdomain_operators(example):
-    from parageom.auxiliary_problem import discretize_auxiliary_model, reduce_auxiliary_model
+    from parageom.auxiliary_problem import AuxiliaryModelWrapper, discretize_auxiliary_model, reduce_auxiliary_model
     from parageom.matrix_based_operator import FenicsxMatrixBasedOperator
 
     # discretize auxiliary problem on unit cell domain
@@ -151,6 +151,7 @@ def discretize_subdomain_operators(example):
     rom, reductor = reduce_auxiliary_model(example, aux, 21)
     V = aux.solution_space.V
     d = df.fem.Function(V, name='d_trafo_unit_cell')
+    aux_model = AuxiliaryModelWrapper(rom, d, reductor)
 
     # create problem to define (stiffness matrix) operator
     matparam = {
@@ -168,7 +169,7 @@ def discretize_subdomain_operators(example):
         d.x.array[:] = U.to_numpy()[0, :]
         d.x.scatter_forward()
 
-    operator = FenicsxMatrixBasedOperator(problem.form_lhs, rom.params, param_setter=param_setter, name='ParaGeom')
+    operator = FenicsxMatrixBasedOperator(problem.form_lhs, rom.parameters, param_setter=param_setter, name='ParaGeom')
 
     # ### wrap external force as pymor operator
     TY = -example.traction_y
@@ -188,14 +189,14 @@ def discretize_subdomain_operators(example):
         vol = df.fem.assemble_scalar(vol_cpp)
         return vol
 
-    theta_vol = GenericParameterFunctional(compute_volume, rom.params)
+    theta_vol = GenericParameterFunctional(compute_volume, rom.parameters)
 
     # global ROM
     # loop over components of mu, compute Vol_gl = Σ v_i = Σ theta_vol(mu_i)
     # Vol_gl can probably be implemented as another GenericParameterFunctional with global params
     # define global output as new LincombOperator with (1-ω) Vol_gl + ω Compliance
 
-    return operator, rhs, theta_vol
+    return operator, rhs, theta_vol, aux_model
 
 
 def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):

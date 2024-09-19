@@ -1,4 +1,5 @@
 import typing
+from collections import namedtuple
 
 import dolfinx as df
 import dolfinx.fem.petsc
@@ -21,6 +22,8 @@ from pymor.reductors.basic import StationaryRBReductor
 from pymor.vectorarrays.numpy import NumpyVectorSpace
 
 from parageom.definitions import BeamData
+
+AuxiliaryModelWrapper = namedtuple('AuxiliaryModelWrapper', ['model', 'd', 'reductor'], defaults=(None,))
 
 
 class GlobalAuxiliaryProblem:
@@ -479,7 +482,7 @@ def reduce_auxiliary_model(example: BeamData, aux: StationaryModel, ntrain: int)
     modes, _ = pod(U, product=aux.operator, rtol=1e-6)
     basis = modes[:1]
 
-    reductor = StationaryRBReductor(aux, RB=basis, product=aux.operator, name='ReducedAuxiliaryModel')
+    reductor = StationaryRBReductor(aux, RB=basis, product=aux.operator)
     rom = reductor.reduce()
     return rom, reductor
 

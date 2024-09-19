@@ -13,21 +13,91 @@ import dolfinx as df
 import numpy as np
 import ufl
 from mpi4py import MPI
+from multi.dofmap import DofMap
 from multi.domain import StructuredQuadGrid
+from multi.interpolation import make_mapping
 from multi.io import read_mesh
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
 from pymor.core.pickle import dump
+from pymor.parameters.base import Mu
 from scipy.optimize import Bounds, NonlinearConstraint, minimize
 
+from parageom.auxiliary_problem import AuxiliaryModelWrapper
+
 StressWrapper = namedtuple('StressWrapper', ['expr', 'cells', 'fun'])
-ModelWrapper = namedtuple('ModelWrapper', ['model', 'solution', 'dofmap', 'modes', 'sol_local'], defaults=(None,) * 3)
+# TODO Re-evaluate design of FOM and ROM (and ModelWrapper)
+ModelWrapper = namedtuple(
+    'ModelWrapper', ['model', 'solution', 'dofmap', 'modes', 'sol_local', 'aux', 'trafo'], defaults=(None,) * 5
+)
+
+
+def reconstruct(
+    U_rb: np.ndarray,
+    mu: Mu,
+    dofmap: DofMap,
+    bases: list[np.ndarray],
+    Vsub: df.fem.FunctionSpace,
+    u_global: df.fem.Function,
+    d_global: df.fem.Function,
+    aux: AuxiliaryModelWrapper,
+) -> None:
+    """Reconstructs ROM displacement solution & transformation displacement on the global domain.
+
+    Args:
+        U_rb: ROM solution in the reduced space.
+        mu: The current parameter value.
+        dofmap: The dofmap of the reduced space.
+        bases: Local basis for each subdomain.
+        Vsub: The local FE space.
+        u_global: The global solution field to be filled with values.
+        d_global: The global transformation displacement field to be filled with values.
+        aux: The model of the local auxiliary problem.
+
+    """
+    coarse_grid = dofmap.grid
+    V = u_global.function_space
+    submesh = Vsub.mesh
+    x_submesh = submesh.geometry.x
+
+    u_global_view = u_global.x.array
+    u_global_view[:] = 0.0
+    d_global_view = d_global.x.array
+    d_global_view[:] = 0.0
+
+    mu_values = mu.to_numpy()
+    rom = aux.model
+    reductor = aux.reductor
+
+    for i, cell in enumerate(range(dofmap.num_cells)):
+        # translate subdomain mesh
+        vertices = coarse_grid.get_entities(0, cell)
+        dx_cell = coarse_grid.get_entity_coordinates(0, vertices)[0]
+        x_submesh += dx_cell
+
+        # fill u_local with rom solution
+        basis = bases[cell]
+        dofs = dofmap.cell_dofs(cell)
+
+        # fill global field via dof mapping
+        V_to_Vsub = make_mapping(Vsub, V, padding=1e-8, check=True)
+        u_global_view[V_to_Vsub] = U_rb[0, dofs] @ basis
+
+        mu_i = rom.parameters.parse(mu_values[i])
+        drb = rom.solve(mu_i)
+        d_global_view[V_to_Vsub] = reductor.reconstruct(drb).to_numpy()[0, :]
+
+        # move subdomain mesh to origin
+        x_submesh -= dx_cell
+
+    u_global.x.scatter_forward()
+    d_global.x.scatter_forward()
 
 
 def main(args):
     """Solve optimization problem for different models."""
     from parageom.dofmap_gfem import GFEMDofMap
-    from parageom.locmor import reconstruct
+    from parageom.fom import ParaGeomLinEla
     from parageom.tasks import example
     from parageom.validate_rom import build_fom, build_rom
 
@@ -42,12 +112,14 @@ def main(args):
     logger = getLogger(stem, level=loglevel)
 
     # ### Build FOM
-    fom, parageom_fom = build_fom(example)
+    logger.info('Start building FOM ...')
+    fom, parageom_fom = build_fom(example, ω=args.omega)
 
     # ### Function for displacement on unit cell (for reconstruction)
     unit_cell_domain = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, kwargs={'gdim': example.gdim})[0]
     V_i = df.fem.functionspace(unit_cell_domain, ('P', example.fe_deg, (example.gdim,)))
-    d_local = df.fem.Function(V_i, name='u_i')
+    u_local = df.fem.Function(V_i, name='u_i')
+    # d_local = df.fem.Function(V_i, name='d_i')
 
     # ### Build localized ROM
     coarse_grid_path = example.coarse_grid('global')
@@ -55,15 +127,19 @@ def main(args):
     struct_grid = StructuredQuadGrid(coarse_domain)
     dofmap = GFEMDofMap(struct_grid)
     params = fom.parameters
-    rom, selected_modes = build_rom(example, dofmap, params, args.num_modes, ω=args.omega, use_ei=True)
+    logger.info('Start building ROM ...')
+    rom, selected_modes, aux = build_rom(
+        example, dofmap, params, args.num_modes, ω=args.omega, nreal=0, method=args.method, use_ei=True
+    )
 
     # ### Global Function for displacement solution
     V = fom.solution_space.V
-    d_fom = df.fem.Function(V, name='u_fom')
-    d_rom = df.fem.Function(V, name='u_rom')
+    u_fom = df.fem.Function(V, name='u_fom')
+    u_rom = df.fem.Function(V, name='u_rom')
+    d_rom = df.fem.Function(V, name='d_rom')  # global transformation displacement
 
     def constrained_cells(domain):
-        """Get active cells to deactivate constrain function in some part of the domain (near the support)."""
+        """Get active cells to deactivate constraint function in some part of the domain (near the support)."""
 
         def exclude(x):
             radius = 0.3
@@ -106,11 +182,19 @@ def main(args):
     stress_rom = df.fem.Function(QV)
 
     # ### UFL representation and Expression of stress for both models
-    suf = parageom_fom.weighted_stress(d_fom)
+    suf = parageom_fom.weighted_stress(u_fom)
     stress_ufl_fom_vector = ufl.as_vector([suf[0, 0], suf[1, 1], suf[2, 2], suf[0, 1]])
     stress_expr_fom = df.fem.Expression(stress_ufl_fom_vector, q_points)
 
-    sur = parageom_fom.weighted_stress(d_rom)
+    # FIXME: use individual instance of ParaGeom for ROM
+    rommat = {
+        'gdim': parageom_fom.domain.gdim,
+        'E': example.youngs_modulus,
+        'NU': example.poisson_ratio,
+        'plane_stress': example.plane_stress,
+    }
+    parageom_rom = ParaGeomLinEla(parageom_fom.domain, V, d_rom, rommat)
+    sur = parageom_rom.weighted_stress(u_rom)
     stress_ufl_rom_vector = ufl.as_vector([sur[0, 0], sur[1, 1], sur[2, 2], sur[0, 1]])
     stress_expr_rom = df.fem.Expression(stress_ufl_rom_vector, q_points)
 
@@ -127,23 +211,23 @@ def main(args):
             wrapped_model.solution.x.array[:] = U.to_numpy().flatten()
         else:
             urb = model.solve(mu)
+            # reconstruct updates global displacement solution and
+            # transformation displacement
             reconstruct(
                 urb.to_numpy(),
+                mu,
                 wrapped_model.dofmap,
                 wrapped_model.modes,
-                wrapped_model.sol_local,
+                wrapped_model.sol_local.function_space,
                 wrapped_model.solution,
-            )  # type: ignore
+                wrapped_model.trafo,
+                wrapped_model.aux,
+            )
 
-            # TODO: update global d_trafo in case of ROM
-
-        # now that d is updated, compute stress
+        # now that u & d are uptodate, compute stress
         values = stress_fun.x.array.reshape(cells.size, -1)
         stress_expr.eval(V.mesh, entities=cells, values=values)
         s1, s2 = compute_principal_components(values, cells.size)
-        # if model.name.startswith("ROM"):
-        #     print(f"MAX s2 = {np.amax(s2)}")
-        #     breakpoint()
         return s1, s2
 
     # ### Dict's to gather minimization data
@@ -167,14 +251,15 @@ def main(args):
     parameter_space = fom.parameters.space(example.mu_range)
     mu_range = parameter_space.ranges['R']
 
-    lower = mu_range[0] * np.ones(10)
-    upper = mu_range[1] * np.ones(10)
+    lower = mu_range[0] * np.ones(num_subdomains)
+    upper = mu_range[1] * np.ones(num_subdomains)
     bounds = Bounds(lower, upper, keep_feasible=True)
 
     # Wrap models
-    wrapped_fom = ModelWrapper(fom, d_fom)
-    wrapped_rom = ModelWrapper(rom, d_rom, dofmap, selected_modes, d_local)
+    wrapped_fom = ModelWrapper(fom, u_fom)
+    wrapped_rom = ModelWrapper(rom, u_rom, dofmap, selected_modes, u_local, aux, d_rom)
 
+    # ### Solve Optimization Problem using FOM
     opt_fom_result = solve_optimization_problem(
         logger,
         args,
@@ -346,7 +431,7 @@ def solve_optimization_problem(
     elif minimizer == 'COBYQA':
         options = {'f_target': 0.8}
     elif minimizer == 'SLSQP':
-        options = {'ftol': 1e-4, 'eps': 0.005}
+        options = {'ftol': 1e-3, 'eps': 0.01}
     elif minimizer == 'trust-constr':
         options = {'gtol': 1e-4, 'xtol': 1e-4, 'barrier_tol': 1e-4, 'finite_diff_rel_step': 5e-3}
     else:
@@ -386,7 +471,7 @@ def solve_optimization_problem(
         assert negative_vals.size > 0
         min_value = np.amin(negative_vals)
         logger.warning(
-            f'Constraint not satisfied by optimal solution (max constraint violation is {np.abs(min_value):2.e}!'
+            f'Constraint not satisfied by optimal solution (max constraint violation is {np.abs(min_value):1.2e}!'
         )
         return opt_result
 
@@ -404,6 +489,7 @@ if __name__ == '__main__':
         type=int,
         help='Local basis size to be used with local ROM.',
     )
+    parser.add_argument('method', type=str, help='Method used to generate local bases.')
     parser.add_argument(
         '--minimizer',
         type=str,

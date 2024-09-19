@@ -353,6 +353,7 @@ def task_optimization():
     source = SRC / 'optimization.py'
 
     num_modes = 100
+    method = 'hapod'  # TODO add heuristic --> adjust log, targets
     minimizer = 'SLSQP'
     omega = example.omega
 
@@ -368,7 +369,9 @@ def task_optimization():
     return {
         'file_dep': deps,
         'actions': [
-            'python3 {} {} --minimizer {} --omega {} --ei'.format(source.as_posix(), num_modes, minimizer, omega)
+            'python3 {} {} {} --minimizer {} --omega {} --ei'.format(
+                source.as_posix(), num_modes, method, minimizer, omega
+            )
         ],
         'targets': targets,
         'clean': True,
