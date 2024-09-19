@@ -259,26 +259,7 @@ def main(args):
     wrapped_fom = ModelWrapper(fom, u_fom)
     wrapped_rom = ModelWrapper(rom, u_rom, dofmap, selected_modes, u_local, aux, d_rom)
 
-    # debugging of reconstruct
-
-    breakpoint()
-    # urb = rom.solve(initial_guess)
-    # reconstruct(
-    #     urb.to_numpy(),
-    #     initial_guess,
-    #     wrapped_rom.dofmap,
-    #     wrapped_rom.modes,
-    #     wrapped_rom.sol_local.function_space,
-    #     wrapped_rom.solution,
-    #     wrapped_rom.trafo,
-    #     wrapped_rom.aux,
-    # )
-    # # write out displacement u and trafo disp d
-    # with df.io.XDMFFile(V.mesh.comm, 'output/debug_opt.xdmf', 'w') as xdmf:
-    #     xdmf.write_mesh(V.mesh)
-    #     xdmf.write_function(wrapped_rom.solution)
-    #     xdmf.write_function(wrapped_rom.trafo)
-
+    # ### Solve Optimization Problem using FOM
     opt_fom_result = solve_optimization_problem(
         logger,
         args,
