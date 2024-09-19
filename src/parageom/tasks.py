@@ -168,8 +168,6 @@ def task_hrrf():
             targets = []
             targets.append(example.log_basis_construction(nreal, 'heuristic', k))
             targets.append(example.heuristic_modes_npy(nreal, k))
-            if k in (0, 1, 2):
-                targets.append(example.heuristic_neumann_svals(nreal, k))
             if example.debug:
                 targets.extend(with_h5(example.heuristic_modes_xdmf(nreal, k)))
             yield {
@@ -266,6 +264,8 @@ def task_gfem():
                 targets.append(example.local_basis_npy(nreal, cell, method=method))
                 targets.append(example.local_basis_dofs_per_vert(nreal, cell, method=method))
                 targets.append(example.log_gfem(nreal, cell, method=method))
+                if example.debug:
+                    targets.extend(with_h5(example.local_basis_npy(nreal, cell, method=method).with_suffix('.xdmf')))
                 yield {
                     'name': ':'.join([str(nreal), str(cell), method]),
                     'file_dep': deps,
@@ -308,6 +308,7 @@ def task_validate_rom():
                     targets = []
                     targets.append(example.rom_error_u(nreal, num_modes, method=method, ei=value))
                     targets.append(example.rom_error_s(nreal, num_modes, method=method, ei=value))
+                    targets.append(example.log_validate_rom(nreal, num_modes, method=method, ei=value))
                     if value:
                         options['--ei'] = ''
                     yield {

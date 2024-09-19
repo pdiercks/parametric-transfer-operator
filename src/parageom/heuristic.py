@@ -7,7 +7,6 @@ from multi.domain import RectangularDomain, StructuredQuadGrid
 from multi.io import read_mesh
 from multi.projection import orthogonal_part
 from pymor.algorithms.gram_schmidt import gram_schmidt
-from pymor.algorithms.pod import pod
 from pymor.bindings.fenicsx import FenicsxVisualizer
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
@@ -64,13 +63,21 @@ def heuristic_range_finder(
         )
         lambda_min = eigsh(L, sigma=0, which='LM', return_eigenvectors=False, k=1, OPinv=Linv)[0]
 
-    logger.debug(f'Computing test set of size {len(testing_set) * num_testvecs}.')
-    M = tp.range.empty()  # global test set
+    logger.debug(f'Computing test set of size {len(testing_set) * num_testvecs} for spectral modes.')
+    if compute_neumann:
+        logger.debug(f'Computing test set of size {len(testing_set)} for neumann modes.')
+        assert fext is not None
+
+    M_s = tp.range.empty()  # global test set for spectral modes
+    M_n = tp.range.empty()  # global test set for neumann modes
     for mu in testing_set:
         tp.assemble_operator(mu)
         R = tp.generate_random_boundary_data(count=num_testvecs, distribution=distribution, options=sampling_options)
-        M.append(tp.solve(R))
-    ntest = len(M)
+        M_s.append(tp.solve(R))
+        if compute_neumann:
+            R_neumann = tp.op.apply_inverse(fext)
+            R_in_neumann = tp.range.from_numpy(R_neumann.dofs(tp._restriction))
+            M_n.append(orthogonal_part(R_in_neumann, tp.kernel, product=None, orthonormal=True))
 
     # ### Compute non-parametric testlimit
     # NOTE tp.source is the full space, while the source product
@@ -78,29 +85,32 @@ def heuristic_range_finder(
     num_source_dofs = tp.rhs.dofs.size
     testfail = failure_tolerance / min(num_source_dofs, tp.range.dim)
     # use ntest instead of num_testvectors for the testlimit
-    testlimit = np.sqrt(2.0 * lambda_min) * erfinv(testfail ** (1.0 / ntest)) * error_tol
+    testlimit = np.sqrt(2.0 * lambda_min) * erfinv(testfail ** (1.0 / len(M_s))) * error_tol
     logger.info(f'{lambda_min=}')
     logger.info(f'{testlimit=}')
 
     B = tp.range.empty()
-    maxnorm = np.inf
-    l2 = np.sum(M.norm2(range_product)) / len(M)
-    num_iter = 0
     ntrain = len(training_set)
     # re-use {mu_0, ..., mu_ntrain} until target tolerance is reached
     mu_j = np.hstack((np.arange(ntrain, dtype=np.int32),) * 3)
     logger.debug(f'{ntrain=}')
 
-    l2_errors = [
-        l2,
-    ]
-    max_norms = [
-        maxnorm,
-    ]
+    l2_errors = None
+    maxnorms = None
+    M_s_norm = M_s.norm2(range_product)
+    # l2_s = np.sum(M_s.norm2(range_product)) / len(M_s)  # use np.inf, I used this at some point for debugging ...
+    if compute_neumann:
+        # l2_n = np.sum(M_n.norm2(range_product)) / len(M_n)  # use np.inf, I used this at some point for debugging ...
+        l2_errors = np.array([np.inf, np.inf], dtype=np.float64)
+        maxnorms = np.array([np.inf, np.inf], dtype=np.float64)
+        M_n_norm = M_n.norm2(range_product)
+    else:
+        l2_errors = np.array([np.inf], dtype=np.float64)
+        maxnorms = np.array([np.inf], dtype=np.float64)
 
-    neumann_snapshots = tp.range.empty(reserve=len(training_set))
-
-    while (maxnorm > testlimit) and (l2 > l2_err**2.0):
+    num_iter = 0
+    num_neumann = 0
+    while np.any(maxnorms > testlimit) and np.any(l2_errors > l2_err**2.0):
         basis_length = len(B)
         # TODO
         # adaptive latin hypercube sampling or greedy parameter selection
@@ -108,34 +118,38 @@ def heuristic_range_finder(
         mu = training_set[j]
         tp.assemble_operator(mu)
 
-        if compute_neumann:
-            assert fext is not None
-            U_neumann = tp.op.apply_inverse(fext)
-            U_in_neumann = tp.range.from_numpy(U_neumann.dofs(tp._restriction))  # type: ignore
-
-            # ### Remove kernel after restriction to target subdomain
-            U_orth = orthogonal_part(U_in_neumann, tp.kernel, product=None, orthonormal=True)  # type: ignore
-            neumann_snapshots.append(U_orth)
-
+        # add mode for spectral basis
         v = tp.generate_random_boundary_data(1, distribution, options=sampling_options)
-
         B.append(tp.solve(v))
-        gram_schmidt(B, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
-        M -= B.lincomb(B.inner(M, range_product).T)
-        maxnorm = np.max(M.norm(range_product))
-        l2 = np.sum(M.norm2(range_product)) / len(M)
 
-        l2_errors.append(l2)
-        max_norms.append(maxnorm)
+        add_neumann = l2_errors[-1] > l2_err**2
+        if compute_neumann and add_neumann:
+            U_neumann = tp.op.apply_inverse(fext)
+            U_in_neumann = tp.range.from_numpy(U_neumann.dofs(tp._restriction))
+            U_orth = orthogonal_part(U_in_neumann, tp.kernel, product=None, orthonormal=True)
+            B.append(U_orth)
+            num_neumann += 1
+
+        gram_schmidt(B, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
+
+        M_s -= B.lincomb(B.inner(M_s, range_product).T)
+        maxnorms[0] = np.max(M_s.norm(range_product))
+        l2_errors[0] = np.sum(M_s.norm2(range_product) / M_s_norm) / len(M_s)
+
+        if compute_neumann and add_neumann:
+            M_n -= B.lincomb(B.inner(M_n, range_product).T)
+            maxnorms[-1] = np.max(M_n.norm2(range_product))
+            l2_errors[-1] = np.sum(M_n.norm2(range_product) / M_n_norm) / len(M_n)
 
         num_iter += 1
-        logger.debug(f'{num_iter=}\t{maxnorm=}')
-        logger.debug(f'{num_iter=}\t{l2=}')
+        logger.debug(f'{num_iter=}\t{maxnorms=}')
+        logger.debug(f'{num_iter=}\t{l2_errors=}')
 
-    reason = 'maxnorm' if maxnorm < testlimit else 'l2err'
+    reason = 'maxnorm' if np.all(maxnorms < testlimit) else 'l2err'
+    logger.info(f'Had to compute {num_neumann} neumann modes.')
     logger.info(f'Finished heuristic range approx. in {num_iter} iterations ({reason=}).')
 
-    return B, neumann_snapshots
+    return B
 
 
 def main(args):
@@ -222,7 +236,7 @@ def main(args):
 
     logger.debug(f'{seed_seqs_rrf[0]=}')
     with new_rng(seed_seqs_rrf[0]):
-        spectral_basis, neumann_snapshots = heuristic_range_finder(
+        spectral_basis = heuristic_range_finder(
             logger,
             transfer,
             training_set,
@@ -237,33 +251,11 @@ def main(args):
 
     # ### Compute Neumann Modes and extend basis
     basis_length = len(spectral_basis)
-    if require_neumann_data:
-        assert len(neumann_snapshots) > 0
-        with logger.block('Extending spectral basis by Neumann modes via POD with Re-orthogonalization ...'):  # type: ignore
-            U_proj_err = neumann_snapshots - spectral_basis.lincomb(
-                neumann_snapshots.inner(spectral_basis, transfer.range_product)
-            )
-            neumann_modes, neumann_svals = pod(
-                U_proj_err, product=transfer.range_product, rtol=example.neumann_rtol, orth_tol=np.inf
-            )  # type: ignore
-            spectral_basis.append(neumann_modes)
-            gram_schmidt(
-                spectral_basis,
-                product=transfer.range_product,
-                offset=basis_length,
-                check=False,
-                copy=False,
-            )
-    else:
-        neumann_modes = []
-        neumann_svals = []
 
     if args.debug:
         assert np.allclose(spectral_basis.gramian(transfer.range_product), np.eye(len(spectral_basis)))
 
-    logger.info(f'Spectral basis size: {basis_length}.')
-    logger.info(f'Neumann modes/snapshots: {len(neumann_modes)}/{len(neumann_snapshots)}')  # type: ignore
-    logger.info(f'Final basis length: {len(spectral_basis)}.')
+    logger.info(f'Final basis length (k={args.k:02}): {basis_length}.')
 
     if logger.level == 10:  # DEBUG
         viz = FenicsxVisualizer(spectral_basis.space)
@@ -272,8 +264,6 @@ def main(args):
         example.heuristic_modes_npy(args.nreal, args.k),
         spectral_basis.to_numpy(),
     )
-    if np.any(neumann_svals):
-        np.save(example.heuristic_neumann_svals(args.nreal, args.k), neumann_svals)
 
 
 if __name__ == '__main__':
