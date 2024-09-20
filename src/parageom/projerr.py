@@ -61,7 +61,7 @@ def main(args):
     parameter_name = 'R'
 
     myseeds_train = np.random.SeedSequence(example.training_set_seed).generate_state(11)
-    ntrain = example.ntrain(args.k)
+    ntrain = args.ntrain
     training_set = sample_lhs(
         parameter_space,
         name=parameter_name,
@@ -135,6 +135,7 @@ def main(args):
                 error_tol=example.rrf_ttol,
                 failure_tolerance=example.rrf_ftol,
                 num_testvecs=example.rrf_num_testvecs,
+                block_size=args.bs,
                 l2_err=epsilon_star,
                 compute_neumann=False,
                 fext=None,
@@ -233,16 +234,23 @@ if __name__ == '__main__':
     import argparse
     import sys
 
-    parser = argparse.ArgumentParser('Compute projection error over set of size `num_samples` * `num_testvecs`.')
+    parser = argparse.ArgumentParser(
+        'Compute projection error over set of size `num_samples` * `num_testvecs`.',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     parser.add_argument('nreal', type=int, help='The n-th realization.')
     parser.add_argument('method', type=str, help='Method used for basis construction.')
     parser.add_argument('k', type=int, help='Use the k-th oversampling problem.')
+    parser.add_argument('ntrain', type=int, help='Number of parameter samples in the training set.')
     parser.add_argument('num_samples', type=int, help='Number of parameters used to define the test set.')
     parser.add_argument('num_testvecs', type=int, help='Number of test vectors used to define the test set.')
     parser.add_argument(
         '--output',
         type=str,
         help='Write absolute and relative projection error to file.',
+    )
+    parser.add_argument(
+        '--bs', type=int, help='Number of random samples per iteration in HRRF (block size).', default=1
     )
     parser.add_argument('--debug', action='store_true', help='Run in debug mode.')
     parser.add_argument('--show', action='store_true', help='Show projection error plot.')
