@@ -25,6 +25,7 @@ def heuristic_range_finder(
     error_tol: float = 1e-4,
     failure_tolerance: float = 1e-15,
     num_testvecs: int = 20,
+    block_size: int = 1,
     lambda_min=None,
     l2_err: float = 0.0,
     sampling_options=None,
@@ -92,25 +93,29 @@ def heuristic_range_finder(
     B = tp.range.empty()
     ntrain = len(training_set)
     # re-use {mu_0, ..., mu_ntrain} until target tolerance is reached
-    mu_j = np.hstack((np.arange(ntrain, dtype=np.int32),) * 3)
+    mu_j = np.hstack((np.arange(ntrain, dtype=np.int32),) * 4)
     logger.debug(f'{ntrain=}')
 
     l2_errors = None
+    testlimit_l2 = None
     maxnorms = None
     M_s_norm = M_s.norm2(range_product)
+    M_n_norm = None
     # l2_s = np.sum(M_s.norm2(range_product)) / len(M_s)  # use np.inf, I used this at some point for debugging ...
     if compute_neumann:
         # l2_n = np.sum(M_n.norm2(range_product)) / len(M_n)  # use np.inf, I used this at some point for debugging ...
         l2_errors = np.array([np.inf, np.inf], dtype=np.float64)
         maxnorms = np.array([np.inf, np.inf], dtype=np.float64)
         M_n_norm = M_n.norm2(range_product)
+        testlimit_l2 = l2_err**2 * np.ones_like(l2_errors) / np.array([np.max(M_s_norm), np.max(M_n_norm)])
     else:
         l2_errors = np.array([np.inf], dtype=np.float64)
         maxnorms = np.array([np.inf], dtype=np.float64)
+        testlimit_l2 = l2_err**2 * np.ones_like(l2_errors) / np.array([np.max(M_s_norm)])
 
     num_iter = 0
     num_neumann = 0
-    while np.any(maxnorms > testlimit) and np.any(l2_errors > l2_err**2.0):
+    while np.any(maxnorms > testlimit) and np.any(l2_errors > testlimit_l2):
         basis_length = len(B)
         # TODO
         # adaptive latin hypercube sampling or greedy parameter selection
@@ -119,7 +124,7 @@ def heuristic_range_finder(
         tp.assemble_operator(mu)
 
         # add mode for spectral basis
-        v = tp.generate_random_boundary_data(1, distribution, options=sampling_options)
+        v = tp.generate_random_boundary_data(block_size, distribution, options=sampling_options)
         B.append(tp.solve(v))
 
         add_neumann = l2_errors[-1] > l2_err**2
