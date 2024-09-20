@@ -58,6 +58,9 @@ class BeamData:
     youngs_modulus: float = 30e3  # [MPa]
     plane_stress: bool = True
     traction_y: float = 0.0375  # [MPa]
+    # TODO extent this for all k -> use list or array
+    parameter_name: str = 'R'
+    parameter_dim: tuple[int, ...] = (2, 3, 4, 4, 4, 4, 4, 4, 4, 3, 2)
     parameters: dict = field(
         default_factory=lambda: {
             'subdomain': Parameters({'R': 1}),

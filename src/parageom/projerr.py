@@ -13,6 +13,7 @@ from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
 from pymor.parameters.base import ParameterSpace
 from pymor.tools.random import new_rng
+from scipy.stats import qmc
 
 
 def main(args):
@@ -152,8 +153,18 @@ def main(args):
     # Definition of (random) test set (μ) and test data (g)
     size_test_set = args.num_samples * args.num_testvecs
     logger.info(f'Computing test set of size {size_test_set}...')
-    with new_rng(example.projerr_seed):
-        test_set = parameter_space.sample_randomly(args.num_samples)
+
+    dim = example.parameter_dim[args.k]
+    sampler = qmc.LatinHypercube(dim, optimization='random-cd', seed=example.projerr_seed)
+    _samples = sampler.random(args.num_samples)
+    l_bounds = [0.1] * dim
+    u_bounds = [0.3] * dim
+    samples = qmc.scale(_samples, l_bounds, u_bounds)
+    test_set = []
+    for s in samples:
+        test_set.append(parameter_space.parameters.parse(s))
+
+    with new_rng(example.projerr_seed // 2):
         test_data = transfer.range.empty(reserve=size_test_set)
         for mu in test_set:
             transfer.assemble_operator(mu)
