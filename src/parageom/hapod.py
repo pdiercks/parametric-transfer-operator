@@ -1,9 +1,9 @@
-from dolfinx.io import XDMFFile # type: ignore
+import numpy as np
+from dolfinx.io import XDMFFile  # type: ignore
 from mpi4py import MPI
 from multi.domain import RectangularDomain, StructuredQuadGrid
 from multi.io import read_mesh
 from multi.projection import orthogonal_part
-import numpy as np
 from pymor.algorithms.gram_schmidt import gram_schmidt
 from pymor.algorithms.pod import pod
 from pymor.core.defaults import set_defaults
@@ -27,6 +27,7 @@ def adaptive_rrf_normal(
     sampling_options=None,
 ):
     r"""Adaptive randomized range approximation of `A`.
+
     This is an implementation of Algorithm 1 in [BS18]_.
 
     Given the |Operator| `A`, the return value of this method is the
@@ -50,6 +51,8 @@ def adaptive_rrf_normal(
 
     Parameters
     ----------
+    logger
+        The logger.
     transfer_problem
         The transfer problem associated with a (transfer) |Operator| A.
     source_product
@@ -65,6 +68,8 @@ def adaptive_rrf_normal(
     lambda_min
         The smallest eigenvalue of source_product.
         If `None`, the smallest eigenvalue is computed using scipy.
+    l2_err
+        Bound l2 mean err by this value.
     sampling_options
         Optional keyword arguments for the generation of
         random samples (training data).
@@ -76,9 +81,8 @@ def adaptive_rrf_normal(
         |VectorArray| which contains the basis, whose span approximates the range of A.
 
     """
-
     tp = transfer_problem
-    distribution = "normal"
+    distribution = 'normal'
     sampling_options = sampling_options or {}
 
     source_product = tp.source_product
@@ -106,7 +110,7 @@ def adaptive_rrf_normal(
             (source_product.range.dim, source_product.source.dim),  # type: ignore
             matvec=mvinv,  # type: ignore
         )
-        lambda_min = eigsh(L, sigma=0, which="LM", return_eigenvectors=False, k=1, OPinv=Linv)[0]
+        lambda_min = eigsh(L, sigma=0, which='LM', return_eigenvectors=False, k=1, OPinv=Linv)[0]
 
     # NOTE tp.source is the full space, while the source product
     # is of lower dimension
@@ -114,17 +118,18 @@ def adaptive_rrf_normal(
     testfail = failure_tolerance / min(num_source_dofs, tp.range.dim)
     testlimit = np.sqrt(2.0 * lambda_min) * erfinv(testfail ** (1.0 / num_testvecs)) * error_tol
 
-    logger.info(f"{lambda_min=}")
-    logger.info(f"{testlimit=}")
+    logger.info(f'{lambda_min=}')
+    logger.info(f'{testlimit=}')
 
     R = tp.generate_random_boundary_data(count=num_testvecs, distribution=distribution, options=sampling_options)
     M = tp.solve(R)
     B = tp.range.empty()
     maxnorm = np.inf
-    l2 = np.sum(M.norm2(range_product)) / len(M)
+    # l2 = np.sum(M.norm2(range_product)) / len(M)
+    l2 = np.sum(M.norm2(range_product))
 
-    l2_errors = [l2,]
-    max_norms = [maxnorm,]
+    l2_errors = [l2]
+    max_norms = [maxnorm]
 
     while (maxnorm > testlimit) and (l2 > l2_err**2.0):
         basis_length = len(B)
@@ -134,54 +139,55 @@ def adaptive_rrf_normal(
         gram_schmidt(B, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
         M -= B.lincomb(B.inner(M, range_product).T)
         maxnorm = np.max(M.norm(range_product))
-        l2 = np.sum(M.norm2(range_product)) / len(M)
-        logger.debug(f"{maxnorm=}")
+        # l2 = np.sum(M.norm2(range_product)) / len(M)
+        l2 = np.sum(M.norm2(range_product))
+        logger.debug(f'{maxnorm=}')
 
         l2_errors.append(l2)
         max_norms.append(maxnorm)
 
-    reason = "maxnorm" if maxnorm < testlimit else "l2err"
-    logger.info(f"{maxnorm < testlimit =}\t{maxnorm=}\t{testlimit=}")
-    logger.info(f"{l2 < l2_err ** 2 =}\t{l2=}")
-    logger.info(f"Finished RRF in {len(B)} iterations ({reason=}).")
+    reason = 'maxnorm' if maxnorm < testlimit else 'l2err'
+    logger.info(f'{maxnorm < testlimit =}\t{maxnorm=}\t{testlimit=}')
+    logger.info(f'{l2 < l2_err ** 2 =}\t{l2=}')
+    logger.info(f'Finished RRF in {len(B)} iterations ({reason=}).')
 
     return B
 
 
 def main(args):
-    from parageom.tasks import example
     from parageom.lhs import sample_lhs
     from parageom.locmor import discretize_transfer_problem, oversampling_config_factory
+    from parageom.tasks import example
 
     if args.debug:
         loglevel = 10
     else:
         loglevel = 20
 
-    logfilename = example.log_basis_construction(args.nreal, "hapod", args.k).as_posix()
-    set_defaults({"pymor.core.logger.getLogger.filename": logfilename})
-    logger = getLogger("hapod", level=loglevel)
+    logfilename = example.log_basis_construction(args.nreal, 'hapod', args.k).as_posix()
+    set_defaults({'pymor.core.logger.getLogger.filename': logfilename})
+    logger = getLogger('hapod', level=loglevel)
 
     # ### Coarse grid partition of omega
     coarse_grid_path = example.path_omega_coarse(args.k)
-    coarse_domain = read_mesh(coarse_grid_path, MPI.COMM_WORLD, cell_tags=None, kwargs={"gdim": example.gdim})[0]
+    coarse_domain = read_mesh(coarse_grid_path, MPI.COMM_WORLD, cell_tags=None, kwargs={'gdim': example.gdim})[0]
     struct_grid = StructuredQuadGrid(coarse_domain)
 
     # ### Fine grid partition of omega
     path_omega = example.path_omega(args.k)
-    with XDMFFile(MPI.COMM_WORLD, path_omega.as_posix(), "r") as xdmf:
+    with XDMFFile(MPI.COMM_WORLD, path_omega.as_posix(), 'r') as xdmf:
         omega_mesh = xdmf.read_mesh()
-        omega_ct = xdmf.read_meshtags(omega_mesh, name="Cell tags")
-        omega_ft = xdmf.read_meshtags(omega_mesh, name="mesh_tags")
+        omega_ct = xdmf.read_meshtags(omega_mesh, name='Cell tags')
+        omega_ft = xdmf.read_meshtags(omega_mesh, name='mesh_tags')
     omega = RectangularDomain(omega_mesh, cell_tags=omega_ct, facet_tags=omega_ft)
 
     # ### Fine grid partition of omega_in
     path_omega_in = example.path_omega_in(args.k)
-    with XDMFFile(MPI.COMM_WORLD, path_omega_in.as_posix(), "r") as xdmf:
+    with XDMFFile(MPI.COMM_WORLD, path_omega_in.as_posix(), 'r') as xdmf:
         omega_in_mesh = xdmf.read_mesh()
     omega_in = RectangularDomain(omega_in_mesh)
 
-    logger.info(f"Discretizing transfer problem for k = {args.k:02} ...")
+    logger.info(f'Discretizing transfer problem for k = {args.k:02} ...')
     osp_config = oversampling_config_factory(args.k)
     transfer, fext = discretize_transfer_problem(example, struct_grid, omega, omega_in, osp_config, debug=args.debug)
 
@@ -189,16 +195,16 @@ def main(args):
     myseeds = np.random.SeedSequence(example.training_set_seed).generate_state(11)
 
     parameter_space = ParameterSpace(transfer.operator.parameters, example.mu_range)
-    parameter_name = "R"
+    parameter_name = 'R'
     ntrain = example.ntrain(args.k)
     training_set = sample_lhs(
         parameter_space,
         name=parameter_name,
         samples=ntrain,
-        criterion="center",
+        criterion='center',
         random_state=myseeds[args.k],
     )
-    logger.info("Starting range approximation of transfer operators" f" for training set of size {len(training_set)}.")
+    logger.info('Starting range approximation of transfer operators' f' for training set of size {len(training_set)}.')
 
     # ### Generate random seed for each specific mu in the training set
     realizations = np.load(example.realizations)
@@ -217,7 +223,7 @@ def main(args):
     neumann_snapshots = transfer.range.empty(reserve=len(training_set))
     spectral_basis_sizes = list()
 
-    epsilon_star = example.epsilon_star["hapod"]
+    epsilon_star = example.epsilon_star['hapod']
     Nin = transfer.rhs.dofs.size
     epsilon_alpha = np.sqrt(1 - example.omega**2.0) * epsilon_star
     epsilon_pod = np.sqrt(ntrain) * example.omega * epsilon_star
@@ -228,19 +234,19 @@ def main(args):
             basis = adaptive_rrf_normal(
                 logger,
                 transfer,
-                error_tol=example.rrf_ttol / example.l_char,
+                error_tol=example.rrf_ttol,
                 failure_tolerance=example.rrf_ftol,
                 num_testvecs=Nin,
                 l2_err=epsilon_alpha,
             )
-            logger.info(f"\nSpectral Basis length: {len(basis)}.")
+            logger.info(f'\nSpectral Basis length: {len(basis)}.')
             spectral_basis_sizes.append(len(basis))
             snapshots.append(basis)  # type: ignore
 
             if require_neumann_data:
-                logger.info("\nSolving for additional Neumann mode ...")
+                logger.info('\nSolving for additional Neumann mode ...')
                 U_neumann = transfer.op.apply_inverse(fext)
-                U_in_neumann = transfer.range.from_numpy(U_neumann.dofs(transfer._restriction)) # type: ignore
+                U_in_neumann = transfer.range.from_numpy(U_neumann.dofs(transfer._restriction))  # type: ignore
 
                 # ### Remove kernel after restriction to target subdomain
                 if transfer.kernel is not None:
@@ -254,13 +260,13 @@ def main(args):
                     U_orth = U_in_neumann
                 neumann_snapshots.append(U_orth)  # type: ignore
 
-    logger.info(f"Average length of spectral basis: {np.average(spectral_basis_sizes)}.")
-    if len(neumann_snapshots) > 0: # type: ignore
-        logger.info("Appending Neumann snapshots to global snapshot set.")
-        snapshots.append(neumann_snapshots) # type: ignore
+    logger.info(f'Average length of spectral basis: {np.average(spectral_basis_sizes)}.')
+    if len(neumann_snapshots) > 0:  # type: ignore
+        logger.info('Appending Neumann snapshots to global snapshot set.')
+        snapshots.append(neumann_snapshots)  # type: ignore
 
-    logger.info("Computing final POD")
-    spectral_modes, spectral_svals = pod(snapshots, product=transfer.range_product, l2_err=epsilon_pod) # type: ignore
+    logger.info('Computing final POD')
+    spectral_modes, spectral_svals = pod(snapshots, product=transfer.range_product, l2_err=epsilon_pod)  # type: ignore
 
     if logger.level == 10:  # DEBUG
         from pymor.bindings.fenicsx import FenicsxVisualizer
@@ -278,27 +284,27 @@ def main(args):
         spectral_svals,
     )
     hapod_info = {
-            "epsilon_star": epsilon_star,
-            "epsilon_alpha": epsilon_alpha,
-            "epsilon_pod": epsilon_pod,
-            "avg_basis_length": np.average(spectral_basis_sizes),
-            "num_snapshots": len(snapshots), # type: ignore
-            "num_modes": len(spectral_modes), # type: ignore
-            }
-    with example.hapod_info(args.nreal, args.k).open("wb") as fh:
+        'epsilon_star': epsilon_star,
+        'epsilon_alpha': epsilon_alpha,
+        'epsilon_pod': epsilon_pod,
+        'avg_basis_length': np.average(spectral_basis_sizes),
+        'num_snapshots': len(snapshots),  # type: ignore
+        'num_modes': len(spectral_modes),  # type: ignore
+    }
+    with example.hapod_info(args.nreal, args.k).open('wb') as fh:
         dump(hapod_info, fh)
 
 
-if __name__ == "__main__":
-    import sys
+if __name__ == '__main__':
     import argparse
+    import sys
 
     parser = argparse.ArgumentParser(
-        description="Oversampling for ParaGeom example using HAPOD",
+        description='Oversampling for ParaGeom example using HAPOD',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("nreal", type=int, help="The n-th realization of the problem.")
-    parser.add_argument("k", type=int, help="The oversampling problem for target subdomain Ω_in^k.")
-    parser.add_argument("--debug", action="store_true", help="Run in debug mode.")
+    parser.add_argument('nreal', type=int, help='The n-th realization of the problem.')
+    parser.add_argument('k', type=int, help='The oversampling problem for target subdomain Ω_in^k.')
+    parser.add_argument('--debug', action='store_true', help='Run in debug mode.')
     args = parser.parse_args(sys.argv[1:])
     main(args)
