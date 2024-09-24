@@ -16,8 +16,17 @@ from pymor.tools.random import new_rng
 from scipy.stats import qmc
 
 
+def parameter_set(sampler, num_samples, ps, name='R'):
+    l_bounds = ps.ranges[name][:1] * ps.parameters[name]
+    u_bounds = ps.ranges[name][1:] * ps.parameters[name]
+    samples = qmc.scale(sampler.random(num_samples), l_bounds, u_bounds)
+    s = []
+    for x in samples:
+        s.append(ps.parameters.parse(x))
+    return s
+
+
 def main(args):
-    from parageom.lhs import sample_lhs
     from parageom.locmor import discretize_transfer_problem, oversampling_config_factory
     from parageom.tasks import example
 
@@ -56,20 +65,15 @@ def main(args):
     osp_config = oversampling_config_factory(args.k)
     transfer, _ = discretize_transfer_problem(example, struct_grid, omega, omega_in, osp_config, debug=args.debug)
 
-    # use same seeding as in actual training
     # ### Generate training seed for each of the 11 oversampling problems
     parameter_space = ParameterSpace(transfer.operator.parameters, example.mu_range)
     parameter_name = 'R'
 
     myseeds_train = np.random.SeedSequence(example.training_set_seed).generate_state(11)
     ntrain = args.ntrain
-    training_set = sample_lhs(
-        parameter_space,
-        name=parameter_name,
-        samples=ntrain,
-        criterion='center',
-        random_state=myseeds_train[args.k],
-    )
+    dim = example.parameter_dim[args.k]
+    sampler_train = qmc.LatinHypercube(dim, optimization='random-cd', seed=myseeds_train[args.k])
+    training_set = parameter_set(sampler_train, ntrain, parameter_space, name=parameter_name)
 
     # seeds for the randomized range finder
     realizations = np.load(example.realizations)
@@ -89,6 +93,7 @@ def main(args):
         snapshots = transfer.range.empty()
         spectral_basis_sizes = list()
 
+        # use most conservative estimate on tolerances Nin=1
         epsilon_alpha = np.sqrt(1 - example.omega**2) * epsilon_star
         epsilon_pod = np.sqrt(ntrain) * example.omega * epsilon_star
 
@@ -116,21 +121,16 @@ def main(args):
     elif args.method == 'heuristic':
         from parageom.heuristic import heuristic_range_finder
 
-        # do the same for the testing set
-        # only needed for the heuristic rrf
         myseeds_test = np.random.SeedSequence(example.testing_set_seed).generate_state(11)
-        testing_set = sample_lhs(
-            parameter_space,
-            name=parameter_name,
-            samples=ntrain,  # same number of samples as in the training
-            criterion='center',
-            random_state=myseeds_test[args.k],
-        )
+        sampler_test = qmc.LatinHypercube(dim, optimization='random-cd', seed=myseeds_test[args.k])
+        testing_set = parameter_set(sampler_test, args.ntest, parameter_space, name=parameter_name)
 
         with new_rng(seed_seqs_rrf[0]):
             spectral_basis = heuristic_range_finder(
                 logger,
                 transfer,
+                sampler_train,
+                parameter_space,
                 training_set,
                 testing_set,
                 error_tol=example.rrf_ttol,
@@ -154,19 +154,12 @@ def main(args):
     size_test_set = args.num_samples * args.num_testvecs
     logger.info(f'Computing test set of size {size_test_set}...')
 
-    dim = example.parameter_dim[args.k]
-    sampler = qmc.LatinHypercube(dim, optimization='random-cd', seed=example.projerr_seed)
-    _samples = sampler.random(args.num_samples)
-    l_bounds = [0.1] * dim
-    u_bounds = [0.3] * dim
-    samples = qmc.scale(_samples, l_bounds, u_bounds)
-    test_set = []
-    for s in samples:
-        test_set.append(parameter_space.parameters.parse(s))
+    sampler_validation = qmc.LatinHypercube(dim, optimization='random-cd', seed=example.projerr_seed)
+    validation_set = parameter_set(sampler_validation, args.num_samples, parameter_space, name=parameter_name)
 
     with new_rng(example.projerr_seed // 2):
         test_data = transfer.range.empty(reserve=size_test_set)
-        for mu in test_set:
+        for mu in validation_set:
             transfer.assemble_operator(mu)
             g = transfer.generate_random_boundary_data(args.num_testvecs, 'normal')
             test_data.append(transfer.solve(g))
@@ -219,7 +212,7 @@ def main(args):
         )
         plt.semilogy(
             np.arange(basis_length + 1),
-            rerrs[transfer.range_product.name],
+            aerrs[transfer.range_product.name],
             label='rel. err, ' + transfer.range_product.name,
         )
         plt.legend()
@@ -253,8 +246,8 @@ if __name__ == '__main__':
     parser.add_argument('method', type=str, help='Method used for basis construction.')
     parser.add_argument('k', type=int, help='Use the k-th oversampling problem.')
     parser.add_argument('ntrain', type=int, help='Number of parameter samples in the training set.')
-    parser.add_argument('num_samples', type=int, help='Number of parameters used to define the test set.')
-    parser.add_argument('num_testvecs', type=int, help='Number of test vectors used to define the test set.')
+    parser.add_argument('num_samples', type=int, help='Number of parameters used to define the validation set.')
+    parser.add_argument('num_testvecs', type=int, help='Number of test vectors used to define the validation set.')
     parser.add_argument(
         '--output',
         type=str,
@@ -263,6 +256,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--bs', type=int, help='Number of random samples per iteration in HRRF (block size).', default=1
     )
+    parser.add_argument('--ntest', type=int, help='Nmuber of parameter sapmles in the testing set (HRRF).')
     parser.add_argument('--debug', action='store_true', help='Run in debug mode.')
     parser.add_argument('--show', action='store_true', help='Show projection error plot.')
     args = parser.parse_args(sys.argv[1:])

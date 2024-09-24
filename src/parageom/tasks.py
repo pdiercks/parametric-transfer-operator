@@ -184,13 +184,17 @@ def task_projerr():
     source = SRC / 'projerr.py'
     k = 5  # use this oversampling problem
     # check sensitivity wrt mu rather than uncertainty in g
-    num_samples = 400
-    num_testvecs = 1
+    num_samples = 100
+    num_testvecs = 10
+    ntrain = {'heuristic': 50, 'hapod': 200}
+    ntest = {'heuristic': 200, 'hapod': None}
 
-    def create_action_projerr(nreal, method, output, debug=False):
-        action = f'python3 {source} {nreal} {method} {k}'
+    def create_action_projerr(nreal, method, ntrain, output, ntest=None, debug=False):
+        action = f'python3 {source} {nreal} {method} {k} {ntrain}'
         action += f' {num_samples} {num_testvecs}'
         action += f' --output {output}'
+        if ntest is not None:
+            action += f' --ntest {ntest}'
         if debug:
             action += ' --debug'
         return action
@@ -207,7 +211,7 @@ def task_projerr():
             yield {
                 'name': ':'.join([str(nreal), method, str(k)]),
                 'file_dep': deps,
-                'actions': [create_action_projerr(nreal, method, targets[0])],
+                'actions': [create_action_projerr(nreal, method, ntrain[method], targets[0], ntest=ntest[method])],
                 'targets': targets,
                 'clean': True,
             }
