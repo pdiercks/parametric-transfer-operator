@@ -196,7 +196,7 @@ def main(args):
 
     parameter_space = ParameterSpace(transfer.operator.parameters, example.mu_range)
     parameter_name = 'R'
-    ntrain = example.ntrain(args.k)
+    ntrain = example.ntrain('hapod', args.k)
     training_set = sample_lhs(
         parameter_space,
         name=parameter_name,

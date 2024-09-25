@@ -191,6 +191,16 @@ def heuristic_range_finder(
     return B
 
 
+def parameter_set(sampler, num_samples, ps, name='R'):
+    l_bounds = ps.ranges[name][:1] * ps.parameters[name]
+    u_bounds = ps.ranges[name][1:] * ps.parameters[name]
+    samples = qmc.scale(sampler.random(num_samples), l_bounds, u_bounds)
+    s = []
+    for x in samples:
+        s.append(ps.parameters.parse(x))
+    return s
+
+
 def main(args):
     from parageom.lhs import sample_lhs
     from parageom.locmor import discretize_transfer_problem, oversampling_config_factory
@@ -234,24 +244,16 @@ def main(args):
     parameter_name = 'R'
 
     myseeds_train = np.random.SeedSequence(example.training_set_seed).generate_state(11)
-    ntrain = example.ntrain(args.k)
-    training_set = sample_lhs(
-        parameter_space,
-        name=parameter_name,
-        samples=ntrain,
-        criterion='center',
-        random_state=myseeds_train[args.k],
-    )
+    ntrain = example.ntrain('heuristic', args.k)
+    dim = example.parameter_dim[args.k]
+    sampler_train = qmc.LatinHypercube(dim, optimization='random-cd', seed=myseeds_train[args.k])
+    training_set = parameter_set(sampler_train, ntrain, parameter_space, name=parameter_name)
 
     # do the same for testing set
     myseeds_test = np.random.SeedSequence(example.testing_set_seed).generate_state(11)
-    testing_set = sample_lhs(
-        parameter_space,
-        name=parameter_name,
-        samples=ntrain,  # same number of samples as in the training
-        criterion='center',
-        random_state=myseeds_test[args.k],
-    )
+    sampler_test = qmc.LatinHypercube(dim, optimization='random-cd', seed=myseeds_test[args.k])
+    ntest = example.ntest('heuristic', args.k)
+    testing_set = parameter_set(sampler_test, ntest, parameter_space, name=parameter_name)
 
     logger.info(
         'Starting Heuristic Randomized Range Approximation of parametric transfer operator'
@@ -278,6 +280,8 @@ def main(args):
         spectral_basis = heuristic_range_finder(
             logger,
             transfer,
+            sampler_train,
+            parameter_space,
             training_set,
             testing_set,
             error_tol=example.rrf_ttol,

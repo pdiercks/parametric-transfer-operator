@@ -221,14 +221,35 @@ class BeamData:
         map = {'inner': 1, 'left': 0, 'right': 1}
         return map[config]
 
-    def ntrain(self, k: int) -> int:
+    def ntrain(self, method: str, k: int) -> int:
         """Define size of training set for k-th transfer problem."""
-        if k in (0, 10):
-            return 100
-        elif k in (1, 9):
-            return 100
+        if method == 'hapod':
+            if k in (0, 10):
+                return 100
+            elif k in (1, 9):
+                return 150
+            else:
+                return 200
+        elif method == 'heuristic':
+            if k in (0, 10):
+                return 30
+            elif k in (1, 9):
+                return 40
+            else:
+                return 50
         else:
-            return 200
+            raise NotImplementedError
+
+    def ntest(self, method: str, k: int) -> int:
+        if method == 'heuristic':
+            if k in (0, 10):
+                return 100
+            elif k in (1, 9):
+                return 150
+            else:
+                return 200
+        else:
+            raise NotImplementedError
 
     def cell_to_config(self, cell: int) -> str:
         """Maps global cell index to config."""
