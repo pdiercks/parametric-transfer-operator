@@ -48,15 +48,13 @@ class BeamData:
 
     name: str = 'parageom'
     gdim: int = 2
-    # characteristic_length = 100.0  # [mm] length of the concrete slab
-    characteristic_length = 1.0  # [mm] length of the concrete slab
-    # characteristic_displacement = 0.1  # [mm]
-    characteristic_displacement = 1.0  # [mm]
+    characteristic_length = 100.0  # [mm]
+    characteristic_displacement = 0.1  # [mm]
     unit_length: float = 1.0  # dimensionless unit length
     nx: int = 10
     ny: int = 1
-    geom_deg: int = 1
-    fe_deg: int = 1
+    geom_deg: int = 2
+    fe_deg: int = 2
     poisson_ratio: float = 0.2
     youngs_modulus: float = 30e3  # [MPa]
     plane_stress: bool = True
@@ -108,8 +106,7 @@ class BeamData:
         self.λ = E * NU / (1 + NU) / (1 - 2 * NU)
         self.μ = E / 2 / (1 + NU)
         # μ_c = 2.4μ, such that E/μ_c = 100
-        # self.characteristic_mu = 0.024 * self.μ
-        self.characteristic_mu = 1.0
+        self.characteristic_mu = 0.024 * self.μ
         self.E = E / self.characteristic_mu
         self.NU = NU
         self.sigma_scale = self.characteristic_length / (self.characteristic_mu * self.characteristic_displacement)

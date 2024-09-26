@@ -378,20 +378,10 @@ if __name__ == '__main__':
 
     parameter_space = auxp.parameters.space(example.mu_range)
     mu = parameter_space.parameters.parse([0.3 * example.unit_length for _ in range(10)])
-    U = fom.solve(mu)  # dimensionless solution U, real displacement D=l_char * U
-    # with characteristic length l_char = 100. mm (unit length)
-    fext = fom.rhs.as_range_array().to_numpy()
-    A = fom.operator.assemble(mu).matrix
-    aj, ai, aij = A.getValuesCSR()
-    breakpoint()
-
-    # D = U.copy()
-    # l_char = 100.
-    # D.scal(l_char)
-
-    # check norm of displacement field
-    # assert np.isclose(D.norm(), U.norm() * l_char)
-    # assert np.isclose(D.norm(fom.h1_0_semi_product), U.norm(fom.h1_0_semi_product) * l_char)
+    U = fom.solve(mu)  # dimensionless solution U
+    # fext = fom.rhs.as_range_array().to_numpy()
+    # A = fom.operator.assemble(mu).matrix
+    # aj, ai, aij = A.getValuesCSR()
 
     # check load
     total_load = np.sum(fom.rhs.as_range_array().to_numpy())  # type: ignore
@@ -432,16 +422,16 @@ if __name__ == '__main__':
     map_c = V.mesh.topology.index_map(tdim)
     num_cells = map_c.size_local + map_c.num_ghosts
     cells = np.arange(0, num_cells, dtype=np.int32)
-    f_quad = lambda x: (0.1 - 0.3) / 81 * x**2 + 0.3  # noqa
+    f_quad = lambda x: (0.3 - 0.1) / 81 * x**2 + 0.1
 
     designs = {
         'max_vol': fom.parameters.parse([0.1 for _ in range(10)]),
         'reference': fom.parameters.parse([0.2 for _ in range(10)]),
         'min_vol': fom.parameters.parse([0.3 for _ in range(10)]),
         'random': parameter_space.sample_randomly(1)[0],
-        'linear': fom.parameters.parse(np.linspace(0.3, 0.1, num=10)),
+        'linear': fom.parameters.parse(np.linspace(0.1, 0.3, num=10)),
         'quadratic': fom.parameters.parse(f_quad(np.linspace(0, 10, num=10, endpoint=False))),
-        'optimum': fom.parameters.parse([0.28793595814454276, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3]),
+        # 'optimum': fom.parameters.parse([0.28793595814454276, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3]),
     }
     for name, mu in designs.items():
         u.x.array[:] = 0.0
