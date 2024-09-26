@@ -228,8 +228,8 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
     omega = RectangularDomain(domain, facet_tags=facet_tags)
     matparam = {
         'gdim': omega.gdim,
-        'E': example.youngs_modulus,
-        'NU': example.poisson_ratio,
+        'E': example.E,
+        'NU': example.NU,
         'plane_stress': example.plane_stress,
     }
     problem = ParaGeomLinEla(omega, auxiliary_problem.problem.V, trafo_disp, matparam)
@@ -268,7 +268,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
     bcs = _create_dirichlet_bcs(tuple(dirichlet_bcs))
 
     # Neumann BCs
-    TY = -example.traction_y
+    TY = -example.traction_y * example.sigma_scale
     traction = df.fem.Constant(domain, (df.default_scalar_type(0.0), df.default_scalar_type(TY)))
     problem.add_neumann_bc(neumann[0], traction)
 
@@ -380,6 +380,10 @@ if __name__ == '__main__':
     mu = parameter_space.parameters.parse([0.3 * example.unit_length for _ in range(10)])
     U = fom.solve(mu)  # dimensionless solution U, real displacement D=l_char * U
     # with characteristic length l_char = 100. mm (unit length)
+    fext = fom.rhs.as_range_array().to_numpy()
+    A = fom.operator.assemble(mu).matrix
+    aj, ai, aij = A.getValuesCSR()
+    breakpoint()
 
     # D = U.copy()
     # l_char = 100.
@@ -391,7 +395,7 @@ if __name__ == '__main__':
 
     # check load
     total_load = np.sum(fom.rhs.as_range_array().to_numpy())  # type: ignore
-    assert np.isclose(total_load, -example.traction_y)
+    assert np.isclose(total_load, -example.traction_y * example.sigma_scale)
 
     u = df.fem.Function(auxp.problem.V)
     mesh = u.function_space.mesh
@@ -406,10 +410,11 @@ if __name__ == '__main__':
     QV = df.fem.functionspace(V.mesh, QVe)
     stress = df.fem.Function(QV, name='Cauchy')
 
+    # use scaled material to compute real stress from scaled displacement
     matparam = {
         'gdim': 2,
-        'E': example.youngs_modulus,
-        'NU': example.poisson_ratio,
+        'E': example.E / example.sigma_scale,
+        'NU': example.NU,
         'plane_stress': example.plane_stress,
     }
     parageom_physical = ParaGeomLinEla(auxp.problem.domain, auxp.problem.V, d, matparam)

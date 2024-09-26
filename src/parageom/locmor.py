@@ -272,7 +272,6 @@ def assemble_gfem_system(
         assemble the global operators.
 
     """
-
     from parageom.dofmap_gfem import select_modes
 
     # basis functions satisfy BCs by construction
@@ -640,7 +639,7 @@ class ParametricTransferProblem(LogMixin):
         U = self.op.apply_inverse(Ag)
 
         # ### restrict full solution to target subdomain
-        U_in.append(self.range.from_numpy(U.dofs(self._restriction))) # type: ignore
+        U_in.append(self.range.from_numpy(U.dofs(self._restriction)))  # type: ignore
 
         if self.kernel is not None:
             assert len(self.kernel) > 0  # type: ignore
@@ -773,8 +772,7 @@ def discretize_transfer_problem(
     """
     from parageom.auxiliary_problem import GlobalAuxiliaryProblem
     from parageom.fom import ParaGeomLinEla
-    from parageom.matrix_based_operator import _create_dirichlet_bcs, BCTopo, BCGeom
-    # from parageom.locmor import ParametricTransferProblem, DirichletLift
+    from parageom.matrix_based_operator import BCGeom, BCTopo, _create_dirichlet_bcs
 
     cells_omega = osp_config.cells_omega
 
@@ -786,7 +784,7 @@ def discretize_transfer_problem(
     # ### Auxiliary problem defined on oversampling domain Omega
     # locate interfaces for definition of auxiliary problem
     left_most_cell = np.amin(cells_omega)
-    unit_length = 1.0
+    unit_length = example.unit_length
     x_min = float(left_most_cell * unit_length)
 
     interface_locators = []
