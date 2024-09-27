@@ -10,7 +10,7 @@ from parageom.definitions import ROOT, BeamData
 
 os.environ['PYMOR_COLORS_DISABLE'] = '1'
 example = BeamData(name='scaled_parageom', debug=True)
-SRC = ROOT / 'src' / f'{example.name}'
+SRC = ROOT / 'src' / 'parageom'
 
 
 def rm_rf(task, dryrun):
