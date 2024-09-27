@@ -125,12 +125,12 @@ def heuristic_range_finder(
     testlimit_l2 = None
     maxnorms = None
     M_s_norm2 = M_s.norm2(range_product)
-    M_n_norm = None
+    M_n_norm2 = None
     if compute_neumann:
         l2_errors = np.array([np.inf, np.inf], dtype=np.float64)
         maxnorms = np.array([np.inf, np.inf], dtype=np.float64)
-        M_n_norm = M_n.norm2(range_product)
-        testlimit_l2 = l2_err**2 * np.ones_like(l2_errors) / np.array([np.average(M_s_norm2), np.average(M_n_norm)])
+        M_n_norm2 = M_n.norm2(range_product)
+        testlimit_l2 = l2_err**2 * np.ones_like(l2_errors) / np.array([np.average(M_s_norm2), np.max(M_n_norm2)])
     else:
         l2_errors = np.array([np.inf], dtype=np.float64)
         maxnorms = np.array([np.inf], dtype=np.float64)
@@ -177,7 +177,7 @@ def heuristic_range_finder(
         if compute_neumann and add_neumann:
             M_n -= B.lincomb(B.inner(M_n, range_product).T)
             maxnorms[-1] = np.max(M_n.norm2(range_product))
-            l2_errors[-1] = np.sum(M_n.norm2(range_product) / M_n_norm) / len(M_n)
+            l2_errors[-1] = np.sum(M_n.norm2(range_product) / M_n_norm2) / len(M_n)
 
         num_iter += 1
         logger.debug(f'{num_iter=}\t{maxnorms=}')
@@ -202,7 +202,6 @@ def parameter_set(sampler, num_samples, ps, name='R'):
 
 
 def main(args):
-    from parageom.lhs import sample_lhs
     from parageom.locmor import discretize_transfer_problem, oversampling_config_factory
     from parageom.tasks import example
 
@@ -288,6 +287,7 @@ def main(args):
             failure_tolerance=example.rrf_ftol,
             num_testvecs=example.rrf_num_testvecs,
             l2_err=epsilon_star,
+            sampling_options={'scale': 1 / example.characteristic_length},
             compute_neumann=require_neumann_data,
             fext=fext,
         )
