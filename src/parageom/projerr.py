@@ -110,6 +110,7 @@ def main(args):
                     failure_tolerance=example.rrf_ftol,
                     num_testvecs=Nin,
                     l2_err=epsilon_alpha,
+                    sampling_options={'scale': 1 / example.characteristic_length},
                 )
                 logger.info(f'\nSpectral Basis length: {len(rb)}.')
                 spectral_basis_sizes.append(len(rb))
@@ -138,6 +139,7 @@ def main(args):
                 num_testvecs=example.rrf_num_testvecs,
                 block_size=args.bs,
                 l2_err=epsilon_star,
+                sampling_options={'scale': 1 / example.characteristic_length},
                 compute_neumann=False,
                 fext=None,
             )
