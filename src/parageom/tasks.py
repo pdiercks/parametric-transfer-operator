@@ -340,7 +340,7 @@ def task_fig_rom_error():
     with_ei = {True: 'ei'}
     # with_ei = {False: '', True: 'ei'}
     for method in example.methods:
-        for ei in [False, True]:
+        for ei in with_ei.keys():
             deps = [source]
             for num_modes in number_of_modes:
                 deps.append(example.rom_error_u(nreal, num_modes, method=method, ei=ei))
