@@ -293,7 +293,8 @@ def task_validate_rom():
     source = SRC / 'validate_rom.py'
     num_params = example.validate_rom['num_params']
     number_of_modes = example.validate_rom['num_modes']
-    with_ei = {'no_ei': False, 'ei': True}
+    with_ei = {'ei': True}
+    # with_ei = {'no_ei': False, 'ei': True}
     num_cells = example.nx * example.ny
 
     for nreal in range(example.num_real):
@@ -311,7 +312,7 @@ def task_validate_rom():
                 for key, value in with_ei.items():
                     targets = []
                     targets.append(example.rom_error_u(nreal, num_modes, method=method, ei=value))
-                    targets.append(example.rom_error_s(nreal, num_modes, method=method, ei=value))
+                    # targets.append(example.rom_error_s(nreal, num_modes, method=method, ei=value))
                     targets.append(example.log_validate_rom(nreal, num_modes, method=method, ei=value))
                     if value:
                         options['--ei'] = ''
@@ -336,13 +337,14 @@ def task_fig_rom_error():
             action += ' --ei'
         return action
 
-    with_ei = {False: '', True: 'ei'}
+    with_ei = {True: 'ei'}
+    # with_ei = {False: '', True: 'ei'}
     for method in example.methods:
         for ei in [False, True]:
             deps = [source]
             for num_modes in number_of_modes:
                 deps.append(example.rom_error_u(nreal, num_modes, method=method, ei=ei))
-                deps.append(example.rom_error_s(nreal, num_modes, method=method, ei=ei))
+                # deps.append(example.rom_error_s(nreal, num_modes, method=method, ei=ei))
             targets = [example.fig_rom_error(method, ei=ei)]
             yield {
                 'name': ':'.join([method, with_ei[ei]]),
