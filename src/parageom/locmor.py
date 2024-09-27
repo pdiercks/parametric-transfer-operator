@@ -955,7 +955,7 @@ def discretize_transfer_problem(
         f_ext.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
         dolfinx.fem.petsc.set_bc(f_ext, bcs_neumann)
 
-        assert np.isclose(np.sum(f_ext.array), -example.traction_y)
+        assert np.isclose(np.sum(f_ext.array), -example.traction_y * example.sigma_scale)
         F_ext = operator.range.make_array([f_ext])  # type: ignore
     else:
         F_ext = operator.range.zeros(1)
