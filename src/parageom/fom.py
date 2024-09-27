@@ -156,8 +156,8 @@ def discretize_subdomain_operators(example):
     # create problem to define (stiffness matrix) operator
     matparam = {
         'gdim': omega.gdim,
-        'E': example.youngs_modulus,
-        'NU': example.poisson_ratio,
+        'E': example.E,
+        'NU': example.NU,
         'plane_stress': example.plane_stress,
     }
     problem = ParaGeomLinEla(omega, V, d, matparam)
@@ -172,7 +172,7 @@ def discretize_subdomain_operators(example):
     operator = FenicsxMatrixBasedOperator(problem.form_lhs, rom.parameters, param_setter=param_setter, name='ParaGeom')
 
     # ### wrap external force as pymor operator
-    TY = -example.traction_y
+    TY = -example.traction_y * example.sigma_scale
     traction = df.fem.Constant(omega.grid, (df.default_scalar_type(0.0), df.default_scalar_type(TY)))
     # facet tags are defined in preprocessing.discretize_unit_cell
     ftags = {'bottom': 11, 'left': 12, 'right': 13, 'top': 14, 'interface': 15}
