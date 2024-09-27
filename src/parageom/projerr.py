@@ -94,8 +94,8 @@ def main(args):
         spectral_basis_sizes = list()
 
         # use most conservative estimate on tolerances Nin=1
-        epsilon_alpha = np.sqrt(1 - example.omega**2) * epsilon_star
-        epsilon_pod = np.sqrt(ntrain) * example.omega * epsilon_star
+        epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2) * epsilon_star
+        epsilon_pod = np.sqrt(Nin * ntrain) * example.omega * epsilon_star
 
         # as number of testvectors we use Nin
         # the l2-mean error will be computed over set of testvectors

@@ -130,16 +130,21 @@ def heuristic_range_finder(
         l2_errors = np.array([np.inf, np.inf], dtype=np.float64)
         maxnorms = np.array([np.inf, np.inf], dtype=np.float64)
         M_n_norm2 = M_n.norm2(range_product)
-        testlimit_l2 = l2_err**2 * np.ones_like(l2_errors) / np.array([np.average(M_s_norm2), np.max(M_n_norm2)])
+        # testlimit_l2 = l2_err**2 * np.ones_like(l2_errors)
+        testlimit_l2 = l2_err**2 * np.ones_like(l2_errors) * np.array([np.average(M_s_norm2), np.max(M_n_norm2)])
     else:
         l2_errors = np.array([np.inf], dtype=np.float64)
         maxnorms = np.array([np.inf], dtype=np.float64)
-        testlimit_l2 = l2_err**2 * np.ones_like(l2_errors) / np.array([np.average(M_s_norm2)])
+        testlimit_l2 = l2_err**2 * np.ones_like(l2_errors) * np.array([np.average(M_s_norm2)])
+        # testlimit_l2 = l2_err**2 * np.ones_like(l2_errors)
+
+    breakpoint()
 
     num_iter = 0
     num_neumann = 0
     enriched = 0
-    while np.any(maxnorms > testlimit) and np.any(l2_errors > testlimit_l2):
+    while np.any(l2_errors > testlimit_l2):
+        # while np.any(maxnorms > testlimit) and np.any(l2_errors > testlimit_l2):
         basis_length = len(B)
         ntrain = len(training_set)
         if num_iter > ntrain - 1:
@@ -172,11 +177,13 @@ def heuristic_range_finder(
 
         M_s -= B.lincomb(B.inner(M_s, range_product).T)
         maxnorms[0] = np.max(M_s.norm(range_product))
+        # l2_errors[0] = np.sum(M_s.norm2(range_product)) / len(M_s)
         l2_errors[0] = np.sum(M_s.norm2(range_product) / M_s_norm2) / len(M_s)
 
         if compute_neumann and add_neumann:
             M_n -= B.lincomb(B.inner(M_n, range_product).T)
             maxnorms[-1] = np.max(M_n.norm2(range_product))
+            # l2_errors[-1] = np.sum(M_n.norm2(range_product)) / len(M_n)
             l2_errors[-1] = np.sum(M_n.norm2(range_product) / M_n_norm2) / len(M_n)
 
         num_iter += 1
