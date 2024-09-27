@@ -854,8 +854,8 @@ def discretize_transfer_problem(
     # ### Discretize left hand side - FenicsxMatrixBasedOperator
     matparam = {
         'gdim': example.gdim,
-        'E': example.youngs_modulus,
-        'NU': example.poisson_ratio,
+        'E': example.E,
+        'NU': example.NU,
         'plane_stress': example.plane_stress,
     }
     parageom = ParaGeomLinEla(
@@ -935,7 +935,7 @@ def discretize_transfer_problem(
         top_tag = example.neumann_tag
         assert omega.facet_tags.find(top_tag).size == example.num_intervals * 1  # top
         dA = ufl.Measure('ds', domain=omega.grid, subdomain_data=omega.facet_tags)
-        t_y = -example.traction_y
+        t_y = -example.traction_y * example.sigma_scale
         traction = df.fem.Constant(
             omega.grid,
             (df.default_scalar_type(0.0), df.default_scalar_type(t_y)),
