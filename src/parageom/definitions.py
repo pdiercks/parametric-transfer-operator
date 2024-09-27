@@ -92,7 +92,7 @@ class BeamData:
     neumann_tag: int = 194
     mdeim_rtol: float = 1e-5
     debug: bool = False
-    validate_rom: dict = field(default_factory=lambda: {'num_params': 200, 'num_modes': list(range(20, 161, 20))})
+    validate_rom: dict = field(default_factory=lambda: {'num_params': 200, 'num_modes': list(range(20, 101, 20))})
 
     def __post_init__(self):
         """Creates directory structure and dependent attributes."""
