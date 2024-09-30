@@ -7,7 +7,7 @@ from dolfinx.io import XDMFFile
 from mpi4py import MPI
 from multi.domain import RectangularDomain, StructuredQuadGrid
 from multi.io import read_mesh
-from multi.projection import project_array
+from multi.projection import project_array, orthogonal_part
 from pymor.algorithms.pod import pod
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
@@ -35,9 +35,6 @@ def main(args):
     else:
         loglevel = 20
 
-    if args.k in (0, 1, 2):
-        raise NotImplementedError('Choose an oversampling problem without Neumann data!')
-
     logfilename = example.log_projerr(args.nreal, args.method, args.k).as_posix()
     set_defaults({'pymor.core.logger.getLogger.filename': logfilename})
     logger = getLogger('projerr', level=loglevel)
@@ -63,7 +60,12 @@ def main(args):
 
     logger.info(f'Discretizing transfer problem for k = {args.k:02} ...')
     osp_config = oversampling_config_factory(args.k)
-    transfer, _ = discretize_transfer_problem(example, struct_grid, omega, omega_in, osp_config, debug=args.debug)
+    transfer, fext = discretize_transfer_problem(example, struct_grid, omega, omega_in, osp_config, debug=args.debug)
+    require_neumann_data = bool(np.any(np.nonzero(fext.to_numpy())[1]))
+    if 0 in osp_config.cells_omega:
+        assert require_neumann_data
+    else:
+        assert not require_neumann_data
 
     # ### Generate training seed for each of the 11 oversampling problems
     parameter_space = ParameterSpace(transfer.operator.parameters, example.mu_range)
@@ -91,6 +93,7 @@ def main(args):
         from parageom.hapod import adaptive_rrf_normal
 
         snapshots = transfer.range.empty()
+        neumann_snapshots = transfer.range.empty(reserve=ntrain)
         spectral_basis_sizes = list()
 
         # use most conservative estimate on tolerances Nin=1
@@ -115,7 +118,28 @@ def main(args):
                 logger.info(f'\nSpectral Basis length: {len(rb)}.')
                 spectral_basis_sizes.append(len(rb))
                 snapshots.append(rb)
+
+            if require_neumann_data:
+                logger.info('\nSolving for additional Neumann mode ...')
+                U_neumann = transfer.op.apply_inverse(fext)
+                U_in_neumann = transfer.range.from_numpy(U_neumann.dofs(transfer._restriction))  # type: ignore
+
+                # ### Remove kernel after restriction to target subdomain
+                if transfer.kernel is not None:
+                    U_orth = orthogonal_part(
+                        U_in_neumann,
+                        transfer.kernel,
+                        product=None,
+                        orthonormal=True,
+                    )
+                else:
+                    U_orth = U_in_neumann
+                neumann_snapshots.append(U_orth)
+
         logger.info(f'Average length of spectral basis: {np.average(spectral_basis_sizes)}.')
+        if require_neumann_data:
+            logger.info(f'Number of Neumann snapshots: {len(neumann_snapshots)}.')
+            snapshots.append(neumann_snapshots)
         logger.info('Computing final POD ...')
         basis, svals = pod(snapshots, product=transfer.range_product, l2_err=epsilon_pod)
 
@@ -134,14 +158,14 @@ def main(args):
                 parameter_space,
                 training_set,
                 testing_set,
-                error_tol=example.rrf_ttol,
+                error_tol=0.01,
                 failure_tolerance=example.rrf_ftol,
                 num_testvecs=example.rrf_num_testvecs,
                 block_size=args.bs,
-                l2_err=epsilon_star,
+                # l2_err=epsilon_star,
                 sampling_options={'scale': 1 / example.characteristic_length},
-                compute_neumann=False,
-                fext=None,
+                compute_neumann=require_neumann_data,
+                fext=fext,
             )
         basis = spectral_basis
     else:
@@ -154,17 +178,38 @@ def main(args):
 
     # Definition of (random) test set (μ) and test data (g)
     size_test_set = args.num_samples * args.num_testvecs
-    logger.info(f'Computing test set of size {size_test_set}...')
+    if require_neumann_data:
+        size_test_set += args.num_samples
 
     sampler_validation = qmc.LatinHypercube(dim, optimization='random-cd', seed=example.projerr_seed)
     validation_set = parameter_set(sampler_validation, args.num_samples, parameter_space, name=parameter_name)
 
-    with new_rng(example.projerr_seed // 2):
-        test_data = transfer.range.empty(reserve=size_test_set)
-        for mu in validation_set:
-            transfer.assemble_operator(mu)
-            g = transfer.generate_random_boundary_data(args.num_testvecs, 'normal')
-            test_data.append(transfer.solve(g))
+    with logger.block(f'Computing test set of size {size_test_set}...'):
+        with new_rng(example.projerr_seed // 2):
+            test_data = transfer.range.empty(reserve=size_test_set)
+            for mu in validation_set:
+                transfer.assemble_operator(mu)
+                g = transfer.generate_random_boundary_data(
+                    args.num_testvecs, 'normal', options={'scale': 1 / example.characteristic_length}
+                )
+                test_data.append(transfer.solve(g))
+
+                if require_neumann_data:
+                    logger.info('\nSolving for additional Neumann mode ...')
+                    U_neumann = transfer.op.apply_inverse(fext)
+                    U_in_neumann = transfer.range.from_numpy(U_neumann.dofs(transfer._restriction))  # type: ignore
+
+                    # ### Remove kernel after restriction to target subdomain
+                    if transfer.kernel is not None:
+                        U_orth = orthogonal_part(
+                            U_in_neumann,
+                            transfer.kernel,
+                            product=None,
+                            orthonormal=True,
+                        )
+                    else:
+                        U_orth = U_in_neumann
+                    test_data.append(U_orth)
 
     aerrs = defaultdict(list)
     rerrs = defaultdict(list)
@@ -215,7 +260,7 @@ def main(args):
         plt.semilogy(
             np.arange(basis_length + 1),
             aerrs[transfer.range_product.name],
-            label='rel. err, ' + transfer.range_product.name,
+            label='abs err, ' + transfer.range_product.name,
         )
         plt.legend()
         plt.show()
