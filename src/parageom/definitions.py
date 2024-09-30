@@ -85,8 +85,8 @@ class BeamData:
     )
     epsilon_star_projerr: float = 0.001
     omega: float = 0.5  # ω related to HAPOD (not output functional)
-    rrf_ttol: float = 10e-2
-    rrf_ftol: float = 1e-10
+    rrf_ttol: float = 0.01
+    rrf_ftol: float = 1e-15
     rrf_num_testvecs: int = 20
     neumann_rtol: float = 1e-8  # hrrf pod extension
     neumann_tag: int = 194
