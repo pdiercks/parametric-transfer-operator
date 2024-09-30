@@ -377,7 +377,7 @@ if __name__ == '__main__':
     fom = discretize_fom(example, auxp, d)[0]
 
     parameter_space = auxp.parameters.space(example.mu_range)
-    mu = parameter_space.parameters.parse([0.3 * example.unit_length for _ in range(10)])
+    mu = parameter_space.parameters.parse([0.2 * example.unit_length for _ in range(10)])
     U = fom.solve(mu)  # dimensionless solution U
     # fext = fom.rhs.as_range_array().to_numpy()
     # A = fom.operator.assemble(mu).matrix
