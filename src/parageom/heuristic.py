@@ -111,40 +111,23 @@ def heuristic_range_finder(
             M_n.append(orthogonal_part(R_in_neumann, tp.kernel, product=None, orthonormal=True))
 
     # ### Compute non-parametric testlimit
-    # NOTE tp.source is the full space, while the source product
-    # is of lower dimension
     num_source_dofs = tp.rhs.dofs.size
     testfail = failure_tolerance / min(num_source_dofs, tp.range.dim)
-    # use ntest instead of num_testvectors for the testlimit
     testlimit = np.sqrt(2.0 * lambda_min) * erfinv(testfail ** (1.0 / len(M_s))) * error_tol
     logger.info(f'{lambda_min=}')
     logger.info(f'{testlimit=}')
 
     B = tp.range.empty()
-    l2_errors = None
-    testlimit_l2 = None
     maxnorms = None
-    M_s_norm2 = M_s.norm2(range_product)
-    M_n_norm2 = None
     if compute_neumann:
-        l2_errors = np.array([np.inf, np.inf], dtype=np.float64)
         maxnorms = np.array([np.inf, np.inf], dtype=np.float64)
-        M_n_norm2 = M_n.norm2(range_product)
-        # testlimit_l2 = l2_err**2 * np.ones_like(l2_errors)
-        testlimit_l2 = l2_err**2 * np.ones_like(l2_errors) * np.array([np.average(M_s_norm2), np.max(M_n_norm2)])
     else:
-        l2_errors = np.array([np.inf], dtype=np.float64)
         maxnorms = np.array([np.inf], dtype=np.float64)
-        testlimit_l2 = l2_err**2 * np.ones_like(l2_errors) * np.array([np.average(M_s_norm2)])
-        # testlimit_l2 = l2_err**2 * np.ones_like(l2_errors)
-
-    breakpoint()
 
     num_iter = 0
     num_neumann = 0
     enriched = 0
-    while np.any(l2_errors > testlimit_l2):
-        # while np.any(maxnorms > testlimit) and np.any(l2_errors > testlimit_l2):
+    while np.any(maxnorms > testlimit):
         basis_length = len(B)
         ntrain = len(training_set)
         if num_iter > ntrain - 1:
@@ -165,7 +148,7 @@ def heuristic_range_finder(
         v = tp.generate_random_boundary_data(block_size, distribution, options=sampling_options)
         B.append(tp.solve(v))
 
-        add_neumann = l2_errors[-1] > l2_err**2
+        add_neumann = maxnorms[-1] > testlimit
         if compute_neumann and add_neumann:
             U_neumann = tp.op.apply_inverse(fext)
             U_in_neumann = tp.range.from_numpy(U_neumann.dofs(tp._restriction))
@@ -177,18 +160,13 @@ def heuristic_range_finder(
 
         M_s -= B.lincomb(B.inner(M_s, range_product).T)
         maxnorms[0] = np.max(M_s.norm(range_product))
-        # l2_errors[0] = np.sum(M_s.norm2(range_product)) / len(M_s)
-        l2_errors[0] = np.sum(M_s.norm2(range_product) / M_s_norm2) / len(M_s)
 
         if compute_neumann and add_neumann:
             M_n -= B.lincomb(B.inner(M_n, range_product).T)
-            maxnorms[-1] = np.max(M_n.norm2(range_product))
-            # l2_errors[-1] = np.sum(M_n.norm2(range_product)) / len(M_n)
-            l2_errors[-1] = np.sum(M_n.norm2(range_product) / M_n_norm2) / len(M_n)
+            maxnorms[-1] = np.max(M_n.norm(range_product))
 
         num_iter += 1
         logger.debug(f'{num_iter=}\t{maxnorms=}')
-        logger.debug(f'{num_iter=}\t{l2_errors=}')
 
     reason = 'maxnorm' if np.all(maxnorms < testlimit) else 'l2err'
     logger.info(f'Had to compute {num_neumann} neumann modes.')
