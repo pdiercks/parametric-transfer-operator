@@ -112,8 +112,6 @@ def adaptive_rrf_normal(
         )
         lambda_min = eigsh(L, sigma=0, which='LM', return_eigenvectors=False, k=1, OPinv=Linv)[0]
 
-    # NOTE tp.source is the full space, while the source product
-    # is of lower dimension
     num_source_dofs = tp.rhs.dofs.size
     testfail = failure_tolerance / min(num_source_dofs, tp.range.dim)
     testlimit = np.sqrt(2.0 * lambda_min) * erfinv(testfail ** (1.0 / num_testvecs)) * error_tol
@@ -125,8 +123,7 @@ def adaptive_rrf_normal(
     M = tp.solve(R)
     B = tp.range.empty()
     maxnorm = np.inf
-    # l2 = np.sum(M.norm2(range_product)) / len(M)
-    l2 = np.sum(M.norm2(range_product))
+    l2 = np.inf
 
     l2_errors = [l2]
     max_norms = [maxnorm]
@@ -139,7 +136,6 @@ def adaptive_rrf_normal(
         gram_schmidt(B, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
         M -= B.lincomb(B.inner(M, range_product).T)
         maxnorm = np.max(M.norm(range_product))
-        # l2 = np.sum(M.norm2(range_product)) / len(M)
         l2 = np.sum(M.norm2(range_product))
         logger.debug(f'{maxnorm=}')
 
