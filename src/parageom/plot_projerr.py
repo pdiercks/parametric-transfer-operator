@@ -17,7 +17,7 @@ def main(cli):
         for method in example.methods:
             infile = example.projerr(cli.nreal, method, cli.k)
             data = np.load(infile)
-            for key in ['l2err_h1_semi']:
+            for key in ['l2_err_energy']:
                 e = data[key]
                 if method == 'heuristic':
                     label = 'HRRF'
@@ -25,14 +25,10 @@ def main(cli):
                 elif method == 'hapod':
                     label = 'RRF+POD'
                     color = red
-                    eps = np.ones_like(e) * example.epsilon_star_projerr**2
-                    ax.semilogy(  # type: ignore
-                        np.arange(e.size), eps, 'k-', label=r'$(\varepsilon^{\ast})^2$'
-                    )
-                ax.semilogy(np.arange(e.size), e, color=color, label=label)  # type: ignore
+                ax.semilogy(np.arange(e.size), e, color=color, label=label)
         ax.legend(loc='best')  # type: ignore
-        ax.set_xlabel('Number of basis functions')  # type: ignore
-        ax.set_ylabel(r'$\ell^2$-mean projection error')  # type: ignore
+        ax.set_xlabel('Number of basis functions')
+        ax.set_ylabel(r'$\ell^2$-mean projection error')
 
 
 if __name__ == '__main__':

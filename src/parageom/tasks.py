@@ -185,9 +185,9 @@ def task_projerr():
     k = 5  # use this oversampling problem
     # check sensitivity wrt mu rather than uncertainty in g
     num_samples = 100
-    num_testvecs = 10
-    ntrain = {'heuristic': 50, 'hapod': 200}
-    ntest = {'heuristic': 200, 'hapod': None}
+    num_testvecs = 1
+    ntrain = {'heuristic': 50, 'hapod': 300}
+    ntest = {'heuristic': 300, 'hapod': None}
 
     def create_action_projerr(nreal, method, ntrain, output, ntest=None, debug=False):
         action = f'python3 {source} {nreal} {method} {k} {ntrain}'

@@ -1,13 +1,11 @@
 """Compute projection error to assess quality of the basis."""
 
-from collections import defaultdict
-
 import numpy as np
 from dolfinx.io import XDMFFile
 from mpi4py import MPI
 from multi.domain import RectangularDomain, StructuredQuadGrid
 from multi.io import read_mesh
-from multi.projection import project_array, orthogonal_part
+from multi.projection import orthogonal_part, project_array
 from pymor.algorithms.pod import pod
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
@@ -88,6 +86,7 @@ def main(args):
     Nin = transfer.rhs.dofs.size
     basis = None
     svals = None
+    sampling_options = {'scale': 1}
 
     if args.method == 'hapod':
         from parageom.hapod import adaptive_rrf_normal
@@ -100,9 +99,6 @@ def main(args):
         epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2) * epsilon_star
         epsilon_pod = np.sqrt(Nin * ntrain) * example.omega * epsilon_star
 
-        # as number of testvectors we use Nin
-        # the l2-mean error will be computed over set of testvectors
-
         for mu, seed_seq in zip(training_set, seed_seqs_rrf):
             with new_rng(seed_seq):
                 transfer.assemble_operator(mu)
@@ -113,7 +109,7 @@ def main(args):
                     failure_tolerance=example.rrf_ftol,
                     num_testvecs=Nin,
                     l2_err=epsilon_alpha,
-                    sampling_options={'scale': 1 / example.characteristic_length},
+                    sampling_options=sampling_options,
                 )
                 logger.info(f'\nSpectral Basis length: {len(rb)}.')
                 spectral_basis_sizes.append(len(rb))
@@ -158,12 +154,14 @@ def main(args):
                 parameter_space,
                 training_set,
                 testing_set,
-                error_tol=0.01,
-                failure_tolerance=example.rrf_ftol,
-                num_testvecs=example.rrf_num_testvecs,
+                error_tol=0.01 * example.characteristic_length,
+                failure_tolerance=1e-15,
+                num_testvecs=1,
                 block_size=args.bs,
+                num_enrichments=10,
+                radius_mu=0.01,
                 # l2_err=epsilon_star,
-                sampling_options={'scale': 1 / example.characteristic_length},
+                sampling_options=sampling_options,
                 compute_neumann=require_neumann_data,
                 fext=fext,
             )
@@ -189,9 +187,7 @@ def main(args):
             test_data = transfer.range.empty(reserve=size_test_set)
             for mu in validation_set:
                 transfer.assemble_operator(mu)
-                g = transfer.generate_random_boundary_data(
-                    args.num_testvecs, 'normal', options={'scale': 1 / example.characteristic_length}
-                )
+                g = transfer.generate_random_boundary_data(args.num_testvecs, 'normal', options=sampling_options)
                 test_data.append(transfer.solve(g))
 
                 if require_neumann_data:
@@ -211,10 +207,6 @@ def main(args):
                         U_orth = U_in_neumann
                     test_data.append(U_orth)
 
-    aerrs = defaultdict(list)
-    rerrs = defaultdict(list)
-    l2errs = defaultdict(list)
-
     def compute_norm(U, key, value):
         if key == 'max':
             return U.amax()[1]
@@ -224,8 +216,12 @@ def main(args):
 
     products = {transfer.range_product.name: transfer.range_product, 'euclidean': None, 'max': False}
     test_norms = {}
+    output = {}
     for k, v in products.items():
         test_norms[k] = compute_norm(test_data, k, v)
+        output[f'relerr_{k}'] = list()
+        output[f'abserr_{k}'] = list()
+        output[f'l2_err_{k}'] = list()
 
     logger.info('Computing projection error ...')
     for N in range(basis_length + 1):
@@ -245,22 +241,22 @@ def main(args):
                 rel_err = error_norm / test_norms[k]
             l2_err = np.sum(error_norm**2.0) / size_test_set
 
-            aerrs[k].append(np.max(error_norm))
-            rerrs[k].append(np.max(rel_err))
-            l2errs[k].append(l2_err)
+            output[f'abserr_{k}'].append(np.max(error_norm))
+            output[f'relerr_{k}'].append(np.max(rel_err))
+            output[f'l2_err_{k}'].append(l2_err)
 
     if args.show:
         import matplotlib.pyplot as plt
 
         plt.semilogy(
             np.arange(basis_length + 1),
-            l2errs[transfer.range_product.name],
+            output[f'l2_err_{transfer.range_product.name}'],
             label='l2-mean, ' + transfer.range_product.name,
         )
         plt.semilogy(
             np.arange(basis_length + 1),
-            aerrs[transfer.range_product.name],
-            label='abs err, ' + transfer.range_product.name,
+            output[f'relerr_{transfer.range_product.name}'],
+            label='rel. err, ' + transfer.range_product.name,
         )
         plt.legend()
         plt.show()
@@ -268,15 +264,7 @@ def main(args):
     if args.output is not None:
         np.savez(
             args.output,
-            rerr_h1_semi=rerrs[transfer.range_product.name],
-            rerr_euclidean=rerrs['euclidean'],
-            rerr_max=rerrs['max'],
-            aerr_h1_semi=aerrs[transfer.range_product.name],
-            aerr_euclidean=aerrs['euclidean'],
-            aerr_max=aerrs['max'],
-            l2err_h1_semi=l2errs[transfer.range_product.name],
-            l2err_euclidean=l2errs['euclidean'],
-            l2err_max=l2errs['max'],
+            **output,
             svals=svals if svals is not None else np.array([], dtype=np.float32),
         )
 

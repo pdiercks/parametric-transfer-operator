@@ -36,6 +36,7 @@ def enrich_training_set(sampler, parameter_space, training_set, testing_set, sco
     for mu in parameters:
         refined_samples.append(mu.to_numpy())
     refined_samples = np.array(refined_samples)
+    # TODO new_samples may not be within bounds
     new_samples = refined_samples + radius * new_samples
 
     # convert back to Mu and append to training set
