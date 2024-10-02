@@ -86,7 +86,7 @@ def main(args):
     Nin = transfer.rhs.dofs.size
     basis = None
     svals = None
-    sampling_options = {'scale': 1}
+    sampling_options = {'scale': 0.01}
 
     if args.method == 'hapod':
         from parageom.hapod import adaptive_rrf_normal
@@ -154,7 +154,7 @@ def main(args):
                 parameter_space,
                 training_set,
                 testing_set,
-                error_tol=0.01 * example.characteristic_length,
+                error_tol=0.01,
                 failure_tolerance=1e-15,
                 num_testvecs=1,
                 block_size=args.bs,

@@ -17,7 +17,7 @@ def main(cli):
         for method in example.methods:
             infile = example.projerr(cli.nreal, method, cli.k)
             data = np.load(infile)
-            for key in ['l2_err_energy']:
+            for key in ['l2_err_energy', 'relerr_energy']:
                 e = data[key]
                 if method == 'heuristic':
                     label = 'HRRF'
@@ -25,7 +25,11 @@ def main(cli):
                 elif method == 'hapod':
                     label = 'RRF+POD'
                     color = red
-                ax.semilogy(np.arange(e.size), e, color=color, label=label)
+                if key == 'l2_err_energy':
+                    marker = 'x'
+                elif key == 'relerr_energy':
+                    marker = 'o'
+                ax.semilogy(np.arange(e.size), e, marker=marker, markevery=5, color=color, label=label)
         ax.legend(loc='best')  # type: ignore
         ax.set_xlabel('Number of basis functions')
         ax.set_ylabel(r'$\ell^2$-mean projection error')
