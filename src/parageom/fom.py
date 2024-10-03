@@ -387,7 +387,6 @@ if __name__ == '__main__':
     # Unorm_ = 1.3938
     # Unorm2_ = 1.9427
     energy_norm = U.norm(fom.products['energy']) * example.energy_scale
-    breakpoint()
 
     # check load
     total_load = np.sum(fom.rhs.as_range_array().to_numpy())  # type: ignore
