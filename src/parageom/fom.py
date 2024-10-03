@@ -383,6 +383,12 @@ if __name__ == '__main__':
     # A = fom.operator.assemble(mu).matrix
     # aj, ai, aij = A.getValuesCSR()
 
+    # correct value unit sqrt(Nmm) for the energy norm
+    # Unorm_ = 1.3938
+    # Unorm2_ = 1.9427
+    energy_norm = U.norm(fom.products['energy']) * example.energy_scale
+    breakpoint()
+
     # check load
     total_load = np.sum(fom.rhs.as_range_array().to_numpy())  # type: ignore
     assert np.isclose(total_load, -example.traction_y * example.sigma_scale)

@@ -110,6 +110,7 @@ class BeamData:
         self.E = E / self.characteristic_mu
         self.NU = NU
         self.sigma_scale = self.characteristic_length / (self.characteristic_mu * self.characteristic_displacement)
+        self.energy_scale = self.characteristic_displacement * np.sqrt(self.characteristic_mu)
 
         self.grids_path.mkdir(exist_ok=True, parents=True)
         self.figures_path.mkdir(exist_ok=True, parents=True)
