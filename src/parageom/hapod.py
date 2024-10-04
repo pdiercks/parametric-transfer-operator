@@ -13,74 +13,19 @@ from pymor.operators.interface import Operator
 from pymor.parameters.base import ParameterSpace
 from pymor.tools.random import new_rng
 from scipy.sparse.linalg import LinearOperator, eigsh
-from scipy.special import erfinv
+
+# from scipy.special import erfinv
 
 
 def adaptive_rrf_normal(
     logger,
     transfer_problem,
-    error_tol: float = 1e-4,
-    failure_tolerance: float = 1e-15,
     num_testvecs: int = 20,
     lambda_min=None,
     l2_err: float = 0.0,
     sampling_options=None,
 ):
-    r"""Adaptive randomized range approximation of `A`.
-
-    This is an implementation of Algorithm 1 in [BS18]_.
-
-    Given the |Operator| `A`, the return value of this method is the
-    |VectorArray| `B` with the property
-
-    .. math::
-        \Vert A - P_{span(B)} A \Vert \leq tol
-
-    with a failure probability smaller than `failure_tolerance`, where the
-    norm denotes the operator norm. The inner product of the range of
-    `A` is given by `range_product` and
-    the inner product of the source of `A` is given by `source_product`.
-
-    NOTE
-    ----
-    Instead of a transfer operator A, a transfer problem is used.
-    (see multi.problem.TransferProblem)
-    The image Av = A.apply(v) is equivalent to the restriction
-    of the full solution to the target domain Ω_in, i.e.
-        U = transfer_problem.solve(v)
-
-    Parameters
-    ----------
-    logger
-        The logger.
-    transfer_problem
-        The transfer problem associated with a (transfer) |Operator| A.
-    source_product
-        Inner product |Operator| of the source of A.
-    range_product
-        Inner product |Operator| of the range of A.
-    error_tol
-        Error tolerance for the algorithm.
-    failure_tolerance
-        Maximum failure probability.
-    num_testvecs
-        Number of test vectors.
-    lambda_min
-        The smallest eigenvalue of source_product.
-        If `None`, the smallest eigenvalue is computed using scipy.
-    l2_err
-        Bound l2 mean err by this value.
-    sampling_options
-        Optional keyword arguments for the generation of
-        random samples (training data).
-        see `_create_random_values`.
-
-    Returns
-    -------
-    B
-        |VectorArray| which contains the basis, whose span approximates the range of A.
-
-    """
+    r"""Adaptive randomized range approximation of `A`."""
     tp = transfer_problem
     distribution = 'normal'
     sampling_options = sampling_options or {}
@@ -112,44 +57,23 @@ def adaptive_rrf_normal(
         )
         lambda_min = eigsh(L, sigma=0, which='LM', return_eigenvectors=False, k=1, OPinv=Linv)[0]
 
-    # NOTE tp.source is the full space, while the source product
-    # is of lower dimension
-    num_source_dofs = tp.rhs.dofs.size
-    testfail = failure_tolerance / min(num_source_dofs, tp.range.dim)
-    testlimit = np.sqrt(2.0 * lambda_min) * erfinv(testfail ** (1.0 / num_testvecs)) * error_tol
-
-    logger.info(f'{lambda_min=}')
-    logger.info(f'{testlimit=}')
-
-    R = tp.generate_random_boundary_data(count=num_testvecs, distribution=distribution, options=sampling_options)
+    R = tp.generate_random_boundary_data(num_testvecs)
     M = tp.solve(R)
     B = tp.range.empty()
-    maxnorm = np.inf
-    # l2 = np.sum(M.norm2(range_product)) / len(M)
-    l2 = np.sum(M.norm2(range_product))
+    l2 = np.inf
 
-    l2_errors = [l2]
-    max_norms = [maxnorm]
-
-    while (maxnorm > testlimit) and (l2 > l2_err**2.0):
+    while l2 > l2_err**2.0:
         basis_length = len(B)
-        v = tp.generate_random_boundary_data(1, distribution, options=sampling_options)
+        v = tp.generate_random_boundary_data(1)
 
         B.append(tp.solve(v))
         gram_schmidt(B, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
         M -= B.lincomb(B.inner(M, range_product).T)
-        maxnorm = np.max(M.norm(range_product))
-        # l2 = np.sum(M.norm2(range_product)) / len(M)
         l2 = np.sum(M.norm2(range_product))
-        logger.debug(f'{maxnorm=}')
+        logger.debug(f'{l2=}')
 
-        l2_errors.append(l2)
-        max_norms.append(maxnorm)
-
-    reason = 'maxnorm' if maxnorm < testlimit else 'l2err'
-    logger.info(f'{maxnorm < testlimit =}\t{maxnorm=}\t{testlimit=}')
     logger.info(f'{l2 < l2_err ** 2 =}\t{l2=}')
-    logger.info(f'Finished RRF in {len(B)} iterations ({reason=}).')
+    logger.info(f'Finished RRF in {len(B)} iterations.')
 
     return B
 
@@ -234,8 +158,6 @@ def main(args):
             basis = adaptive_rrf_normal(
                 logger,
                 transfer,
-                error_tol=example.rrf_ttol,
-                failure_tolerance=example.rrf_ftol,
                 num_testvecs=Nin,
                 l2_err=epsilon_alpha,
             )

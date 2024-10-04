@@ -10,7 +10,7 @@ from parageom.definitions import ROOT, BeamData
 
 os.environ['PYMOR_COLORS_DISABLE'] = '1'
 example = BeamData(name='parageom', debug=True)
-SRC = ROOT / 'src' / f'{example.name}'
+SRC = ROOT / 'src' / 'parageom'
 
 
 def rm_rf(task, dryrun):
@@ -182,14 +182,13 @@ def task_hrrf():
 def task_projerr():
     """ParaGeom: Compute projection error."""
     source = SRC / 'projerr.py'
-    k = 5  # use this oversampling problem
     # check sensitivity wrt mu rather than uncertainty in g
     num_samples = 100
-    num_testvecs = 10
-    ntrain = {'heuristic': 50, 'hapod': 200}
-    ntest = {'heuristic': 200, 'hapod': None}
+    num_testvecs = 1
+    ntrain = {'heuristic': 50, 'hapod': 300}
+    ntest = {'heuristic': 300, 'hapod': None}
 
-    def create_action_projerr(nreal, method, ntrain, output, ntest=None, debug=False):
+    def create_action_projerr(nreal, method, k, ntrain, output, ntest=None, debug=False):
         action = f'python3 {source} {nreal} {method} {k} {ntrain}'
         action += f' {num_samples} {num_testvecs}'
         action += f' --output {output}'
@@ -200,40 +199,43 @@ def task_projerr():
         return action
 
     for nreal in range(example.num_real):
-        for method in example.methods:
-            deps = [source]
-            deps.append(example.path_omega_coarse(k))
-            deps.extend(with_h5(example.path_omega(k)))
-            deps.extend(with_h5(example.path_omega_in(k)))
-            targets = []
-            targets.append(example.projerr(nreal, method, k))
-            targets.append(example.log_projerr(nreal, method, k))
-            yield {
-                'name': ':'.join([str(nreal), method, str(k)]),
-                'file_dep': deps,
-                'actions': [create_action_projerr(nreal, method, ntrain[method], targets[0], ntest=ntest[method])],
-                'targets': targets,
-                'clean': True,
-            }
+        for k in (0, 5):
+            for method in example.methods:
+                deps = [source]
+                deps.append(example.path_omega_coarse(k))
+                deps.extend(with_h5(example.path_omega(k)))
+                deps.extend(with_h5(example.path_omega_in(k)))
+                targets = []
+                targets.append(example.projerr(nreal, method, k))
+                targets.append(example.log_projerr(nreal, method, k))
+                yield {
+                    'name': ':'.join([str(nreal), method, str(k)]),
+                    'file_dep': deps,
+                    'actions': [
+                        create_action_projerr(nreal, method, k, ntrain[method], targets[0], ntest=ntest[method])
+                    ],
+                    'targets': targets,
+                    'clean': True,
+                }
 
 
 def task_fig_projerr():
     """ParaGeom: Plot projection error."""
     source = SRC / 'plot_projerr.py'
-    k = 5
     for nreal in range(example.num_real):
-        deps = [source]
-        for method in example.methods:
-            deps.append(example.projerr(nreal, method, k))
-        targets = []
-        targets.append(example.fig_projerr(k))
-        yield {
-            'name': ':'.join([str(nreal), str(k)]),
-            'file_dep': deps,
-            'actions': ['python3 {} {} {} %(targets)s'.format(source, nreal, k)],
-            'targets': targets,
-            'clean': True,
-        }
+        for k in (0, 5):
+            deps = [source]
+            for method in example.methods:
+                deps.append(example.projerr(nreal, method, k))
+            targets = []
+            targets.append(example.fig_projerr(k))
+            yield {
+                'name': ':'.join([str(nreal), str(k)]),
+                'file_dep': deps,
+                'actions': ['python3 {} {} {} %(targets)s'.format(source, nreal, k)],
+                'targets': targets,
+                'clean': True,
+            }
 
 
 def task_gfem():
@@ -293,7 +295,8 @@ def task_validate_rom():
     source = SRC / 'validate_rom.py'
     num_params = example.validate_rom['num_params']
     number_of_modes = example.validate_rom['num_modes']
-    with_ei = {'no_ei': False, 'ei': True}
+    with_ei = {'ei': True}
+    # with_ei = {'no_ei': False, 'ei': True}
     num_cells = example.nx * example.ny
 
     for nreal in range(example.num_real):
@@ -311,7 +314,7 @@ def task_validate_rom():
                 for key, value in with_ei.items():
                     targets = []
                     targets.append(example.rom_error_u(nreal, num_modes, method=method, ei=value))
-                    targets.append(example.rom_error_s(nreal, num_modes, method=method, ei=value))
+                    # targets.append(example.rom_error_s(nreal, num_modes, method=method, ei=value))
                     targets.append(example.log_validate_rom(nreal, num_modes, method=method, ei=value))
                     if value:
                         options['--ei'] = ''
@@ -336,13 +339,14 @@ def task_fig_rom_error():
             action += ' --ei'
         return action
 
-    with_ei = {False: '', True: 'ei'}
+    with_ei = {True: 'ei'}
+    # with_ei = {False: '', True: 'ei'}
     for method in example.methods:
-        for ei in [False, True]:
+        for ei in with_ei.keys():
             deps = [source]
             for num_modes in number_of_modes:
                 deps.append(example.rom_error_u(nreal, num_modes, method=method, ei=ei))
-                deps.append(example.rom_error_s(nreal, num_modes, method=method, ei=ei))
+                # deps.append(example.rom_error_s(nreal, num_modes, method=method, ei=ei))
             targets = [example.fig_rom_error(method, ei=ei)]
             yield {
                 'name': ':'.join([method, with_ei[ei]]),

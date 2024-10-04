@@ -26,6 +26,7 @@ from pymor.operators.constructions import LincombOperator, VectorOperator
 from pymor.operators.interface import Operator
 from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.parameters.base import Parameters
+from pymor.tools.random import get_rng
 from pymor.vectorarrays.interface import VectorArray
 from pymor.vectorarrays.numpy import NumpyVectorSpace
 from scipy.sparse import coo_array, csr_array
@@ -272,7 +273,6 @@ def assemble_gfem_system(
         assemble the global operators.
 
     """
-
     from parageom.dofmap_gfem import select_modes
 
     # basis functions satisfy BCs by construction
@@ -601,20 +601,31 @@ class ParametricTransferProblem(LogMixin):
         self.range = range_space
         self._restriction = make_mapping(self.range.V, self.source.V, padding=padding, check=True)  # type: ignore
 
-    def generate_random_boundary_data(
-        self, count: int, distribution: str, options: Optional[dict[str, Any]] = None
-    ) -> npt.NDArray:
-        """Generates random vectors of shape (count, num_dofs_Γ_out).
+    def generate_random_boundary_data(self, count: int) -> npt.NDArray:
+        """Generates random normal vectors of shape (count, num_dofs_Γ_out).
 
         Args:
             count: Number of random vectors.
-            distribution: The distribution used for sampling.
-            options: Arguments passed to sampling method of random number generator.
 
         """
+
+        def draw_samples(shape):
+            rng = get_rng()
+            mu, sigma = 0.0, 1.0
+            x = rng.normal(mu, sigma, shape)
+
+            a = -0.2
+            b = 0.2
+            xmin = -3
+            xmax = 3
+
+            x_clipped = np.clip(x, xmin, xmax)
+            x_scaled = ((b - a) / (xmax - xmin)) * (x_clipped - xmin) + a
+
+            return x_scaled
+
         num_dofs = self.rhs.dofs.size
-        options = options or {}
-        values = create_random_values((count, num_dofs), distribution, **options)
+        values = draw_samples((count, num_dofs))
 
         return values
 
@@ -640,7 +651,7 @@ class ParametricTransferProblem(LogMixin):
         U = self.op.apply_inverse(Ag)
 
         # ### restrict full solution to target subdomain
-        U_in.append(self.range.from_numpy(U.dofs(self._restriction))) # type: ignore
+        U_in.append(self.range.from_numpy(U.dofs(self._restriction)))  # type: ignore
 
         if self.kernel is not None:
             assert len(self.kernel) > 0  # type: ignore
@@ -773,8 +784,7 @@ def discretize_transfer_problem(
     """
     from parageom.auxiliary_problem import GlobalAuxiliaryProblem
     from parageom.fom import ParaGeomLinEla
-    from parageom.matrix_based_operator import _create_dirichlet_bcs, BCTopo, BCGeom
-    # from parageom.locmor import ParametricTransferProblem, DirichletLift
+    from parageom.matrix_based_operator import BCGeom, BCTopo, _create_dirichlet_bcs
 
     cells_omega = osp_config.cells_omega
 
@@ -786,7 +796,7 @@ def discretize_transfer_problem(
     # ### Auxiliary problem defined on oversampling domain Omega
     # locate interfaces for definition of auxiliary problem
     left_most_cell = np.amin(cells_omega)
-    unit_length = 1.0
+    unit_length = example.unit_length
     x_min = float(left_most_cell * unit_length)
 
     interface_locators = []
@@ -856,8 +866,8 @@ def discretize_transfer_problem(
     # ### Discretize left hand side - FenicsxMatrixBasedOperator
     matparam = {
         'gdim': example.gdim,
-        'E': example.youngs_modulus,
-        'NU': example.poisson_ratio,
+        'E': example.E,
+        'NU': example.NU,
         'plane_stress': example.plane_stress,
     }
     parageom = ParaGeomLinEla(
@@ -937,7 +947,7 @@ def discretize_transfer_problem(
         top_tag = example.neumann_tag
         assert omega.facet_tags.find(top_tag).size == example.num_intervals * 1  # top
         dA = ufl.Measure('ds', domain=omega.grid, subdomain_data=omega.facet_tags)
-        t_y = -example.traction_y
+        t_y = -example.traction_y * example.sigma_scale
         traction = df.fem.Constant(
             omega.grid,
             (df.default_scalar_type(0.0), df.default_scalar_type(t_y)),
@@ -957,7 +967,7 @@ def discretize_transfer_problem(
         f_ext.ghostUpdate(addv=PETSc.InsertMode.ADD, mode=PETSc.ScatterMode.REVERSE)  # type: ignore
         dolfinx.fem.petsc.set_bc(f_ext, bcs_neumann)
 
-        assert np.isclose(np.sum(f_ext.array), -example.traction_y)
+        assert np.isclose(np.sum(f_ext.array), -example.traction_y * example.sigma_scale)
         F_ext = operator.range.make_array([f_ext])  # type: ignore
     else:
         F_ext = operator.range.zeros(1)

@@ -36,6 +36,7 @@ def enrich_training_set(sampler, parameter_space, training_set, testing_set, sco
     for mu in parameters:
         refined_samples.append(mu.to_numpy())
     refined_samples = np.array(refined_samples)
+    # TODO new_samples may not be within bounds
     new_samples = refined_samples + radius * new_samples
 
     # convert back to Mu and append to training set
@@ -57,7 +58,6 @@ def heuristic_range_finder(
     num_enrichments: int = 5,
     radius_mu: float = 0.05,
     lambda_min=None,
-    l2_err: float = 0.0,
     sampling_options=None,
     compute_neumann=True,
     fext=None,
@@ -103,7 +103,7 @@ def heuristic_range_finder(
     M_n = tp.range.empty(reserve=num_testvecs)  # global test set for neumann modes
     for mu in testing_set:
         tp.assemble_operator(mu)
-        R = tp.generate_random_boundary_data(count=num_testvecs, distribution=distribution, options=sampling_options)
+        R = tp.generate_random_boundary_data(num_testvecs)
         M_s.append(tp.solve(R))
         if compute_neumann:
             R_neumann = tp.op.apply_inverse(fext)
@@ -111,35 +111,23 @@ def heuristic_range_finder(
             M_n.append(orthogonal_part(R_in_neumann, tp.kernel, product=None, orthonormal=True))
 
     # ### Compute non-parametric testlimit
-    # NOTE tp.source is the full space, while the source product
-    # is of lower dimension
     num_source_dofs = tp.rhs.dofs.size
     testfail = failure_tolerance / min(num_source_dofs, tp.range.dim)
-    # use ntest instead of num_testvectors for the testlimit
     testlimit = np.sqrt(2.0 * lambda_min) * erfinv(testfail ** (1.0 / len(M_s))) * error_tol
     logger.info(f'{lambda_min=}')
     logger.info(f'{testlimit=}')
 
     B = tp.range.empty()
-    l2_errors = None
-    testlimit_l2 = None
     maxnorms = None
-    M_s_norm2 = M_s.norm2(range_product)
-    M_n_norm = None
     if compute_neumann:
-        l2_errors = np.array([np.inf, np.inf], dtype=np.float64)
         maxnorms = np.array([np.inf, np.inf], dtype=np.float64)
-        M_n_norm = M_n.norm2(range_product)
-        testlimit_l2 = l2_err**2 * np.ones_like(l2_errors) / np.array([np.average(M_s_norm2), np.average(M_n_norm)])
     else:
-        l2_errors = np.array([np.inf], dtype=np.float64)
         maxnorms = np.array([np.inf], dtype=np.float64)
-        testlimit_l2 = l2_err**2 * np.ones_like(l2_errors) / np.array([np.average(M_s_norm2)])
 
     num_iter = 0
     num_neumann = 0
     enriched = 0
-    while np.any(maxnorms > testlimit) and np.any(l2_errors > testlimit_l2):
+    while np.any(maxnorms > testlimit):
         basis_length = len(B)
         ntrain = len(training_set)
         if num_iter > ntrain - 1:
@@ -157,10 +145,10 @@ def heuristic_range_finder(
         tp.assemble_operator(mu)
 
         # add mode for spectral basis
-        v = tp.generate_random_boundary_data(block_size, distribution, options=sampling_options)
+        v = tp.generate_random_boundary_data(block_size)
         B.append(tp.solve(v))
 
-        add_neumann = l2_errors[-1] > l2_err**2
+        add_neumann = maxnorms[-1] > testlimit
         if compute_neumann and add_neumann:
             U_neumann = tp.op.apply_inverse(fext)
             U_in_neumann = tp.range.from_numpy(U_neumann.dofs(tp._restriction))
@@ -172,21 +160,17 @@ def heuristic_range_finder(
 
         M_s -= B.lincomb(B.inner(M_s, range_product).T)
         maxnorms[0] = np.max(M_s.norm(range_product))
-        l2_errors[0] = np.sum(M_s.norm2(range_product) / M_s_norm2) / len(M_s)
 
         if compute_neumann and add_neumann:
             M_n -= B.lincomb(B.inner(M_n, range_product).T)
-            maxnorms[-1] = np.max(M_n.norm2(range_product))
-            l2_errors[-1] = np.sum(M_n.norm2(range_product) / M_n_norm) / len(M_n)
+            maxnorms[-1] = np.max(M_n.norm(range_product))
 
         num_iter += 1
         logger.debug(f'{num_iter=}\t{maxnorms=}')
-        logger.debug(f'{num_iter=}\t{l2_errors=}')
 
-    reason = 'maxnorm' if np.all(maxnorms < testlimit) else 'l2err'
     logger.info(f'Had to compute {num_neumann} neumann modes.')
     logger.info(f'Had to enrich training set {enriched} times by {num_enrichments}.')
-    logger.info(f'Finished heuristic range approx. in {num_iter} iterations ({reason=}).')
+    logger.info(f'Finished heuristic range approx. in {num_iter} iterations.')
 
     return B
 
@@ -202,7 +186,6 @@ def parameter_set(sampler, num_samples, ps, name='R'):
 
 
 def main(args):
-    from parageom.lhs import sample_lhs
     from parageom.locmor import discretize_transfer_problem, oversampling_config_factory
     from parageom.tasks import example
 
@@ -288,6 +271,7 @@ def main(args):
             failure_tolerance=example.rrf_ftol,
             num_testvecs=example.rrf_num_testvecs,
             l2_err=epsilon_star,
+            sampling_options={'scale': 1 / example.characteristic_length},
             compute_neumann=require_neumann_data,
             fext=fext,
         )

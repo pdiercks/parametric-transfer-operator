@@ -48,7 +48,8 @@ class BeamData:
 
     name: str = 'parageom'
     gdim: int = 2
-    l_char: float = 1.0  # [mm], characteristic length = unit length
+    characteristic_length = 100.0  # [mm]
+    characteristic_displacement = 0.1  # [mm]
     unit_length: float = 1.0  # dimensionless unit length
     nx: int = 10
     ny: int = 1
@@ -84,31 +85,36 @@ class BeamData:
     )
     epsilon_star_projerr: float = 0.001
     omega: float = 0.5  # ω related to HAPOD (not output functional)
-    rrf_ttol: float = 10e-2
-    rrf_ftol: float = 1e-10
+    rrf_ttol: float = 0.01
+    rrf_ftol: float = 1e-15
     rrf_num_testvecs: int = 20
     neumann_rtol: float = 1e-8  # hrrf pod extension
     neumann_tag: int = 194
     mdeim_rtol: float = 1e-5
     debug: bool = False
-    validate_rom: dict = field(default_factory=lambda: {'num_params': 200, 'num_modes': list(range(20, 161, 20))})
+    validate_rom: dict = field(default_factory=lambda: {'num_params': 200, 'num_modes': list(range(20, 101, 20))})
 
     def __post_init__(self):
         """Creates directory structure and dependent attributes."""
-        self.length: float = self.unit_length * self.nx
-        self.height: float = self.unit_length * self.ny
         a = self.unit_length
+        self.length: float = a * self.nx
+        self.height: float = a * self.ny
         self.mu_range: tuple[float, float] = (0.1 * a, 0.3 * a)  # [mm]
         self.mu_bar: float = 0.2 * a  # [mm]
+        E = self.youngs_modulus
+        NU = self.poisson_ratio
+        self.λ = E * NU / (1 + NU) / (1 - 2 * NU)
+        self.μ = E / 2 / (1 + NU)
+        # μ_c = 2.4μ, such that E/μ_c = 100
+        self.characteristic_mu = 0.024 * self.μ
+        self.E = E / self.characteristic_mu
+        self.NU = NU
+        self.sigma_scale = self.characteristic_length / (self.characteristic_mu * self.characteristic_displacement)
+        self.energy_scale = self.characteristic_displacement * np.sqrt(self.characteristic_mu)
 
         self.grids_path.mkdir(exist_ok=True, parents=True)
         self.figures_path.mkdir(exist_ok=True, parents=True)
 
-        # Have a separate folder for each configuration to store
-        # the physical oversampling meshes.
-        # naming convention: oversampling_{index}.msh
-        # store the training set, such that via {index} the
-        # parameter value can be determined
         for config in ['global']:
             p = self.grids_path / config
             p.mkdir(exist_ok=True, parents=True)
@@ -526,53 +532,3 @@ class BeamData:
             return None
         else:
             raise NotImplementedError
-
-    # def get_kernel_set(self, cell_index: int) -> tuple[int, ...]:
-    #     """return indices of rigid body modes to be used"""
-    #     assert cell_index in (0, 1, 4, 5, 8, 9)
-    #
-    #     # never remove kernel if Dirichlet (even if only component-wise)
-    #     # is present. This can destroy the condition, because
-    #     # kernel.inner(U) cannot be trusted to compute zero coefficient
-    #     # for the constrained component ...
-    #
-    #     kernel = set([0, 1, 2])
-    #     if cell_index in (0, 1):
-    #         # left: u_x is fixed for left boundary
-    #         kernel.remove(0)
-    #     # elif cell_index in (4, 5):
-    #     #     # inner, use all rigid body modes
-    #     elif cell_index in (8, 9):
-    #         # right, only trans y is constrained
-    #         # right: u_y is fixed for a single point
-    #         kernel.remove(1)
-    #     return tuple(kernel)
-
-    # def get_gamma_out(self, cell_index: Optional[int] = None) -> Callable:
-    #     unit_length = self.unit_length
-    #     y = self.height
-    #     tol = 1e-4
-    #
-    #     # NOTE
-    #     # this only defines the marker
-    #     # code needs to use df.mesh.locate_entities_boundary
-    #
-    #     if cell_index in (0, 1):
-    #         x = 3 * unit_length
-    #         start = [x, 0.0 + tol, 0.0]
-    #         end = [x, y - tol, 0.0]
-    #         gamma_out = within_range(start, end)
-    #     elif cell_index in (4, 5):
-    #         x_left = 3 * unit_length
-    #         x_right = 7 * unit_length
-    #         left = within_range([x_left, 0.0 + tol, 0.0], [x_left, y - tol, 0.0])
-    #         right = within_range([x_right, 0.0 + tol, 0.0], [x_right, y - tol, 0.0])
-    #
-    #         def gamma_out(x):
-    #             return np.logical_or(left(x), right(x))
-    #     elif cell_index in (8, 9):
-    #         x = 7 * unit_length
-    #         gamma_out = within_range([x, 0.0 + tol, 0.0], [x, y - tol, 0.0])
-    #     else:
-    #         raise NotImplementedError
-    #     return gamma_out

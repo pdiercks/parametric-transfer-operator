@@ -156,8 +156,8 @@ def discretize_subdomain_operators(example):
     # create problem to define (stiffness matrix) operator
     matparam = {
         'gdim': omega.gdim,
-        'E': example.youngs_modulus,
-        'NU': example.poisson_ratio,
+        'E': example.E,
+        'NU': example.NU,
         'plane_stress': example.plane_stress,
     }
     problem = ParaGeomLinEla(omega, V, d, matparam)
@@ -172,7 +172,7 @@ def discretize_subdomain_operators(example):
     operator = FenicsxMatrixBasedOperator(problem.form_lhs, rom.parameters, param_setter=param_setter, name='ParaGeom')
 
     # ### wrap external force as pymor operator
-    TY = -example.traction_y
+    TY = -example.traction_y * example.sigma_scale
     traction = df.fem.Constant(omega.grid, (df.default_scalar_type(0.0), df.default_scalar_type(TY)))
     # facet tags are defined in preprocessing.discretize_unit_cell
     ftags = {'bottom': 11, 'left': 12, 'right': 13, 'top': 14, 'interface': 15}
@@ -228,8 +228,8 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
     omega = RectangularDomain(domain, facet_tags=facet_tags)
     matparam = {
         'gdim': omega.gdim,
-        'E': example.youngs_modulus,
-        'NU': example.poisson_ratio,
+        'E': example.E,
+        'NU': example.NU,
         'plane_stress': example.plane_stress,
     }
     problem = ParaGeomLinEla(omega, auxiliary_problem.problem.V, trafo_disp, matparam)
@@ -268,7 +268,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
     bcs = _create_dirichlet_bcs(tuple(dirichlet_bcs))
 
     # Neumann BCs
-    TY = -example.traction_y
+    TY = -example.traction_y * example.sigma_scale
     traction = df.fem.Constant(domain, (df.default_scalar_type(0.0), df.default_scalar_type(TY)))
     problem.add_neumann_bc(neumann[0], traction)
 
@@ -377,21 +377,20 @@ if __name__ == '__main__':
     fom = discretize_fom(example, auxp, d)[0]
 
     parameter_space = auxp.parameters.space(example.mu_range)
-    mu = parameter_space.parameters.parse([0.3 * example.unit_length for _ in range(10)])
-    U = fom.solve(mu)  # dimensionless solution U, real displacement D=l_char * U
-    # with characteristic length l_char = 100. mm (unit length)
+    mu = parameter_space.parameters.parse([0.2 * example.unit_length for _ in range(10)])
+    U = fom.solve(mu)  # dimensionless solution U
+    # fext = fom.rhs.as_range_array().to_numpy()
+    # A = fom.operator.assemble(mu).matrix
+    # aj, ai, aij = A.getValuesCSR()
 
-    # D = U.copy()
-    # l_char = 100.
-    # D.scal(l_char)
-
-    # check norm of displacement field
-    # assert np.isclose(D.norm(), U.norm() * l_char)
-    # assert np.isclose(D.norm(fom.h1_0_semi_product), U.norm(fom.h1_0_semi_product) * l_char)
+    # correct value unit sqrt(Nmm) for the energy norm
+    # Unorm_ = 1.3938
+    # Unorm2_ = 1.9427
+    energy_norm = U.norm(fom.products['energy']) * example.energy_scale
 
     # check load
     total_load = np.sum(fom.rhs.as_range_array().to_numpy())  # type: ignore
-    assert np.isclose(total_load, -example.traction_y)
+    assert np.isclose(total_load, -example.traction_y * example.sigma_scale)
 
     u = df.fem.Function(auxp.problem.V)
     mesh = u.function_space.mesh
@@ -406,10 +405,11 @@ if __name__ == '__main__':
     QV = df.fem.functionspace(V.mesh, QVe)
     stress = df.fem.Function(QV, name='Cauchy')
 
+    # use scaled material to compute real stress from scaled displacement
     matparam = {
         'gdim': 2,
-        'E': example.youngs_modulus,
-        'NU': example.poisson_ratio,
+        'E': example.E / example.sigma_scale,
+        'NU': example.NU,
         'plane_stress': example.plane_stress,
     }
     parageom_physical = ParaGeomLinEla(auxp.problem.domain, auxp.problem.V, d, matparam)
@@ -427,16 +427,16 @@ if __name__ == '__main__':
     map_c = V.mesh.topology.index_map(tdim)
     num_cells = map_c.size_local + map_c.num_ghosts
     cells = np.arange(0, num_cells, dtype=np.int32)
-    f_quad = lambda x: (0.1 - 0.3) / 81 * x**2 + 0.3  # noqa
+    f_quad = lambda x: (0.3 - 0.1) / 81 * x**2 + 0.1
 
     designs = {
         'max_vol': fom.parameters.parse([0.1 for _ in range(10)]),
         'reference': fom.parameters.parse([0.2 for _ in range(10)]),
         'min_vol': fom.parameters.parse([0.3 for _ in range(10)]),
         'random': parameter_space.sample_randomly(1)[0],
-        'linear': fom.parameters.parse(np.linspace(0.3, 0.1, num=10)),
+        'linear': fom.parameters.parse(np.linspace(0.1, 0.3, num=10)),
         'quadratic': fom.parameters.parse(f_quad(np.linspace(0, 10, num=10, endpoint=False))),
-        'optimum': fom.parameters.parse([0.28793595814454276, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3]),
+        # 'optimum': fom.parameters.parse([0.28793595814454276, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3]),
     }
     for name, mu in designs.items():
         u.x.array[:] = 0.0

@@ -1,13 +1,11 @@
 """Compute projection error to assess quality of the basis."""
 
-from collections import defaultdict
-
 import numpy as np
 from dolfinx.io import XDMFFile
 from mpi4py import MPI
 from multi.domain import RectangularDomain, StructuredQuadGrid
 from multi.io import read_mesh
-from multi.projection import project_array
+from multi.projection import orthogonal_part, project_array
 from pymor.algorithms.pod import pod
 from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
@@ -35,9 +33,6 @@ def main(args):
     else:
         loglevel = 20
 
-    if args.k in (0, 1, 2):
-        raise NotImplementedError('Choose an oversampling problem without Neumann data!')
-
     logfilename = example.log_projerr(args.nreal, args.method, args.k).as_posix()
     set_defaults({'pymor.core.logger.getLogger.filename': logfilename})
     logger = getLogger('projerr', level=loglevel)
@@ -63,11 +58,31 @@ def main(args):
 
     logger.info(f'Discretizing transfer problem for k = {args.k:02} ...')
     osp_config = oversampling_config_factory(args.k)
-    transfer, _ = discretize_transfer_problem(example, struct_grid, omega, omega_in, osp_config, debug=args.debug)
+    transfer, fext = discretize_transfer_problem(example, struct_grid, omega, omega_in, osp_config, debug=args.debug)
+    require_neumann_data = bool(np.any(np.nonzero(fext.to_numpy())[1]))
+    if 0 in osp_config.cells_omega:
+        assert require_neumann_data
+    else:
+        assert not require_neumann_data
 
     # ### Generate training seed for each of the 11 oversampling problems
     parameter_space = ParameterSpace(transfer.operator.parameters, example.mu_range)
     parameter_name = 'R'
+
+    # check norm of UU and NN
+    # UU = transfer.range.empty()
+    # NN = transfer.range.empty()
+    # theta = parameter_space.sample_randomly(5)
+    # for mu in theta:
+    #     transfer.assemble_operator(mu)
+    #     R = transfer.generate_random_boundary_data(10)
+    #     U = transfer.solve(R)
+    #     UU.append(U)
+    #     U_neumann = transfer.op.apply_inverse(fext)
+    #     U_in_neumann = transfer.range.from_numpy(U_neumann.dofs(transfer._restriction))
+    #     U_orth = orthogonal_part(U_in_neumann, transfer.kernel, product=None, orthonormal=True)
+    #     NN.append(U_orth)
+    # breakpoint()
 
     myseeds_train = np.random.SeedSequence(example.training_set_seed).generate_state(11)
     ntrain = args.ntrain
@@ -91,14 +106,12 @@ def main(args):
         from parageom.hapod import adaptive_rrf_normal
 
         snapshots = transfer.range.empty()
+        neumann_snapshots = transfer.range.empty(reserve=ntrain)
         spectral_basis_sizes = list()
 
         # use most conservative estimate on tolerances Nin=1
-        epsilon_alpha = np.sqrt(1 - example.omega**2) * epsilon_star
-        epsilon_pod = np.sqrt(ntrain) * example.omega * epsilon_star
-
-        # as number of testvectors we use Nin
-        # the l2-mean error will be computed over set of testvectors
+        epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2) * epsilon_star
+        epsilon_pod = np.sqrt(Nin * ntrain) * example.omega * epsilon_star
 
         for mu, seed_seq in zip(training_set, seed_seqs_rrf):
             with new_rng(seed_seq):
@@ -106,15 +119,34 @@ def main(args):
                 rb = adaptive_rrf_normal(
                     logger,
                     transfer,
-                    error_tol=example.rrf_ttol,
-                    failure_tolerance=example.rrf_ftol,
                     num_testvecs=Nin,
                     l2_err=epsilon_alpha,
                 )
                 logger.info(f'\nSpectral Basis length: {len(rb)}.')
                 spectral_basis_sizes.append(len(rb))
                 snapshots.append(rb)
+
+            if require_neumann_data:
+                logger.info('\nSolving for additional Neumann mode ...')
+                U_neumann = transfer.op.apply_inverse(fext)
+                U_in_neumann = transfer.range.from_numpy(U_neumann.dofs(transfer._restriction))  # type: ignore
+
+                # ### Remove kernel after restriction to target subdomain
+                if transfer.kernel is not None:
+                    U_orth = orthogonal_part(
+                        U_in_neumann,
+                        transfer.kernel,
+                        product=None,
+                        orthonormal=True,
+                    )
+                else:
+                    U_orth = U_in_neumann
+                neumann_snapshots.append(U_orth)
+
         logger.info(f'Average length of spectral basis: {np.average(spectral_basis_sizes)}.')
+        if require_neumann_data:
+            logger.info(f'Number of Neumann snapshots: {len(neumann_snapshots)}.')
+            snapshots.append(neumann_snapshots)
         logger.info('Computing final POD ...')
         basis, svals = pod(snapshots, product=transfer.range_product, l2_err=epsilon_pod)
 
@@ -133,13 +165,14 @@ def main(args):
                 parameter_space,
                 training_set,
                 testing_set,
-                error_tol=example.rrf_ttol,
-                failure_tolerance=example.rrf_ftol,
-                num_testvecs=example.rrf_num_testvecs,
+                error_tol=0.01,
+                failure_tolerance=1e-15,
+                num_testvecs=1,
                 block_size=args.bs,
-                l2_err=epsilon_star,
-                compute_neumann=False,
-                fext=None,
+                num_enrichments=10,
+                radius_mu=0.01,
+                compute_neumann=require_neumann_data,
+                fext=fext,
             )
         basis = spectral_basis
     else:
@@ -152,21 +185,36 @@ def main(args):
 
     # Definition of (random) test set (μ) and test data (g)
     size_test_set = args.num_samples * args.num_testvecs
-    logger.info(f'Computing test set of size {size_test_set}...')
+    if require_neumann_data:
+        size_test_set += args.num_samples
 
     sampler_validation = qmc.LatinHypercube(dim, optimization='random-cd', seed=example.projerr_seed)
     validation_set = parameter_set(sampler_validation, args.num_samples, parameter_space, name=parameter_name)
 
-    with new_rng(example.projerr_seed // 2):
-        test_data = transfer.range.empty(reserve=size_test_set)
-        for mu in validation_set:
-            transfer.assemble_operator(mu)
-            g = transfer.generate_random_boundary_data(args.num_testvecs, 'normal')
-            test_data.append(transfer.solve(g))
+    with logger.block(f'Computing test set of size {size_test_set}...'):
+        with new_rng(example.projerr_seed // 2):
+            test_data = transfer.range.empty(reserve=size_test_set)
+            for mu in validation_set:
+                transfer.assemble_operator(mu)
+                g = transfer.generate_random_boundary_data(args.num_testvecs)
+                test_data.append(transfer.solve(g))
 
-    aerrs = defaultdict(list)
-    rerrs = defaultdict(list)
-    l2errs = defaultdict(list)
+                if require_neumann_data:
+                    logger.info('\nSolving for additional Neumann mode ...')
+                    U_neumann = transfer.op.apply_inverse(fext)
+                    U_in_neumann = transfer.range.from_numpy(U_neumann.dofs(transfer._restriction))  # type: ignore
+
+                    # ### Remove kernel after restriction to target subdomain
+                    if transfer.kernel is not None:
+                        U_orth = orthogonal_part(
+                            U_in_neumann,
+                            transfer.kernel,
+                            product=None,
+                            orthonormal=True,
+                        )
+                    else:
+                        U_orth = U_in_neumann
+                    test_data.append(U_orth)
 
     def compute_norm(U, key, value):
         if key == 'max':
@@ -177,8 +225,12 @@ def main(args):
 
     products = {transfer.range_product.name: transfer.range_product, 'euclidean': None, 'max': False}
     test_norms = {}
+    output = {}
     for k, v in products.items():
         test_norms[k] = compute_norm(test_data, k, v)
+        output[f'relerr_{k}'] = list()
+        output[f'abserr_{k}'] = list()
+        output[f'l2_err_{k}'] = list()
 
     logger.info('Computing projection error ...')
     for N in range(basis_length + 1):
@@ -198,21 +250,21 @@ def main(args):
                 rel_err = error_norm / test_norms[k]
             l2_err = np.sum(error_norm**2.0) / size_test_set
 
-            aerrs[k].append(np.max(error_norm))
-            rerrs[k].append(np.max(rel_err))
-            l2errs[k].append(l2_err)
+            output[f'abserr_{k}'].append(np.max(error_norm))
+            output[f'relerr_{k}'].append(np.max(rel_err))
+            output[f'l2_err_{k}'].append(l2_err)
 
     if args.show:
         import matplotlib.pyplot as plt
 
         plt.semilogy(
             np.arange(basis_length + 1),
-            l2errs[transfer.range_product.name],
+            output[f'l2_err_{transfer.range_product.name}'],
             label='l2-mean, ' + transfer.range_product.name,
         )
         plt.semilogy(
             np.arange(basis_length + 1),
-            aerrs[transfer.range_product.name],
+            output[f'relerr_{transfer.range_product.name}'],
             label='rel. err, ' + transfer.range_product.name,
         )
         plt.legend()
@@ -221,15 +273,7 @@ def main(args):
     if args.output is not None:
         np.savez(
             args.output,
-            rerr_h1_semi=rerrs[transfer.range_product.name],
-            rerr_euclidean=rerrs['euclidean'],
-            rerr_max=rerrs['max'],
-            aerr_h1_semi=aerrs[transfer.range_product.name],
-            aerr_euclidean=aerrs['euclidean'],
-            aerr_max=aerrs['max'],
-            l2err_h1_semi=l2errs[transfer.range_product.name],
-            l2err_euclidean=l2errs['euclidean'],
-            l2err_max=l2errs['max'],
+            **output,
             svals=svals if svals is not None else np.array([], dtype=np.float32),
         )
 
