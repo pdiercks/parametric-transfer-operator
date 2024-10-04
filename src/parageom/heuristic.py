@@ -64,7 +64,6 @@ def heuristic_range_finder(
 ):
     """Heuristic range approximation."""
     tp = transfer_problem
-    distribution = 'normal'
     sampling_options = sampling_options or {}
 
     source_product = tp.source_product
@@ -256,8 +255,6 @@ def main(args):
         assert not require_neumann_data
 
     # ### Heuristic randomized range finder
-    epsilon_star = example.epsilon_star['heuristic']
-
     logger.debug(f'{seed_seqs_rrf[0]=}')
     with new_rng(seed_seqs_rrf[0]):
         spectral_basis = heuristic_range_finder(
@@ -269,9 +266,7 @@ def main(args):
             testing_set,
             error_tol=example.rrf_ttol,
             failure_tolerance=example.rrf_ftol,
-            num_testvecs=example.rrf_num_testvecs,
-            l2_err=epsilon_star,
-            sampling_options={'scale': 1 / example.characteristic_length},
+            num_testvecs=1,
             compute_neumann=require_neumann_data,
             fext=fext,
         )

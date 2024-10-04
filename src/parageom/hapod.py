@@ -14,8 +14,6 @@ from pymor.parameters.base import ParameterSpace
 from pymor.tools.random import new_rng
 from scipy.sparse.linalg import LinearOperator, eigsh
 
-# from scipy.special import erfinv
-
 
 def adaptive_rrf_normal(
     logger,
@@ -27,7 +25,6 @@ def adaptive_rrf_normal(
 ):
     r"""Adaptive randomized range approximation of `A`."""
     tp = transfer_problem
-    distribution = 'normal'
     sampling_options = sampling_options or {}
 
     source_product = tp.source_product
@@ -149,8 +146,8 @@ def main(args):
 
     epsilon_star = example.epsilon_star['hapod']
     Nin = transfer.rhs.dofs.size
-    epsilon_alpha = np.sqrt(1 - example.omega**2.0) * epsilon_star
-    epsilon_pod = np.sqrt(ntrain) * example.omega * epsilon_star
+    epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2.0) * epsilon_star
+    epsilon_pod = np.sqrt(Nin * ntrain) * example.omega * epsilon_star
 
     for mu, seed_seq in zip(training_set, seed_seqs_rrf):
         with new_rng(seed_seq):
@@ -210,8 +207,8 @@ def main(args):
         'epsilon_alpha': epsilon_alpha,
         'epsilon_pod': epsilon_pod,
         'avg_basis_length': np.average(spectral_basis_sizes),
-        'num_snapshots': len(snapshots),  # type: ignore
-        'num_modes': len(spectral_modes),  # type: ignore
+        'num_snapshots': len(snapshots),
+        'num_modes': len(spectral_modes),
     }
     with example.hapod_info(args.nreal, args.k).open('wb') as fh:
         dump(hapod_info, fh)
