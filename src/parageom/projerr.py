@@ -69,6 +69,21 @@ def main(args):
     parameter_space = ParameterSpace(transfer.operator.parameters, example.mu_range)
     parameter_name = 'R'
 
+    # check norm of UU and NN
+    # UU = transfer.range.empty()
+    # NN = transfer.range.empty()
+    # theta = parameter_space.sample_randomly(5)
+    # for mu in theta:
+    #     transfer.assemble_operator(mu)
+    #     R = transfer.generate_random_boundary_data(10)
+    #     U = transfer.solve(R)
+    #     UU.append(U)
+    #     U_neumann = transfer.op.apply_inverse(fext)
+    #     U_in_neumann = transfer.range.from_numpy(U_neumann.dofs(transfer._restriction))
+    #     U_orth = orthogonal_part(U_in_neumann, transfer.kernel, product=None, orthonormal=True)
+    #     NN.append(U_orth)
+    # breakpoint()
+
     myseeds_train = np.random.SeedSequence(example.training_set_seed).generate_state(11)
     ntrain = args.ntrain
     dim = example.parameter_dim[args.k]
@@ -86,7 +101,6 @@ def main(args):
     Nin = transfer.rhs.dofs.size
     basis = None
     svals = None
-    sampling_options = {'scale': 0.01}
 
     if args.method == 'hapod':
         from parageom.hapod import adaptive_rrf_normal
@@ -105,11 +119,8 @@ def main(args):
                 rb = adaptive_rrf_normal(
                     logger,
                     transfer,
-                    error_tol=example.rrf_ttol,
-                    failure_tolerance=example.rrf_ftol,
                     num_testvecs=Nin,
                     l2_err=epsilon_alpha,
-                    sampling_options=sampling_options,
                 )
                 logger.info(f'\nSpectral Basis length: {len(rb)}.')
                 spectral_basis_sizes.append(len(rb))
@@ -160,8 +171,6 @@ def main(args):
                 block_size=args.bs,
                 num_enrichments=10,
                 radius_mu=0.01,
-                # l2_err=epsilon_star,
-                sampling_options=sampling_options,
                 compute_neumann=require_neumann_data,
                 fext=fext,
             )
@@ -187,7 +196,7 @@ def main(args):
             test_data = transfer.range.empty(reserve=size_test_set)
             for mu in validation_set:
                 transfer.assemble_operator(mu)
-                g = transfer.generate_random_boundary_data(args.num_testvecs, 'normal', options=sampling_options)
+                g = transfer.generate_random_boundary_data(args.num_testvecs)
                 test_data.append(transfer.solve(g))
 
                 if require_neumann_data:

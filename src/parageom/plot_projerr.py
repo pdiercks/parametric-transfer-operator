@@ -32,7 +32,7 @@ def main(cli):
                 ax.semilogy(np.arange(e.size), e, marker=marker, markevery=5, color=color, label=label)
         ax.legend(loc='best')  # type: ignore
         ax.set_xlabel('Number of basis functions')
-        ax.set_ylabel(r'$\ell^2$-mean projection error')
+        ax.set_ylabel('Projection error')
 
 
 if __name__ == '__main__':

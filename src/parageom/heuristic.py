@@ -58,7 +58,6 @@ def heuristic_range_finder(
     num_enrichments: int = 5,
     radius_mu: float = 0.05,
     lambda_min=None,
-    l2_err: float = 0.0,
     sampling_options=None,
     compute_neumann=True,
     fext=None,
@@ -104,7 +103,7 @@ def heuristic_range_finder(
     M_n = tp.range.empty(reserve=num_testvecs)  # global test set for neumann modes
     for mu in testing_set:
         tp.assemble_operator(mu)
-        R = tp.generate_random_boundary_data(count=num_testvecs, distribution=distribution, options=sampling_options)
+        R = tp.generate_random_boundary_data(num_testvecs)
         M_s.append(tp.solve(R))
         if compute_neumann:
             R_neumann = tp.op.apply_inverse(fext)
@@ -146,7 +145,7 @@ def heuristic_range_finder(
         tp.assemble_operator(mu)
 
         # add mode for spectral basis
-        v = tp.generate_random_boundary_data(block_size, distribution, options=sampling_options)
+        v = tp.generate_random_boundary_data(block_size)
         B.append(tp.solve(v))
 
         add_neumann = maxnorms[-1] > testlimit
@@ -169,10 +168,9 @@ def heuristic_range_finder(
         num_iter += 1
         logger.debug(f'{num_iter=}\t{maxnorms=}')
 
-    reason = 'maxnorm' if np.all(maxnorms < testlimit) else 'l2err'
     logger.info(f'Had to compute {num_neumann} neumann modes.')
     logger.info(f'Had to enrich training set {enriched} times by {num_enrichments}.')
-    logger.info(f'Finished heuristic range approx. in {num_iter} iterations ({reason=}).')
+    logger.info(f'Finished heuristic range approx. in {num_iter} iterations.')
 
     return B
 

@@ -182,14 +182,13 @@ def task_hrrf():
 def task_projerr():
     """ParaGeom: Compute projection error."""
     source = SRC / 'projerr.py'
-    k = 5  # use this oversampling problem
     # check sensitivity wrt mu rather than uncertainty in g
     num_samples = 100
     num_testvecs = 1
     ntrain = {'heuristic': 50, 'hapod': 300}
     ntest = {'heuristic': 300, 'hapod': None}
 
-    def create_action_projerr(nreal, method, ntrain, output, ntest=None, debug=False):
+    def create_action_projerr(nreal, method, k, ntrain, output, ntest=None, debug=False):
         action = f'python3 {source} {nreal} {method} {k} {ntrain}'
         action += f' {num_samples} {num_testvecs}'
         action += f' --output {output}'
@@ -200,40 +199,43 @@ def task_projerr():
         return action
 
     for nreal in range(example.num_real):
-        for method in example.methods:
-            deps = [source]
-            deps.append(example.path_omega_coarse(k))
-            deps.extend(with_h5(example.path_omega(k)))
-            deps.extend(with_h5(example.path_omega_in(k)))
-            targets = []
-            targets.append(example.projerr(nreal, method, k))
-            targets.append(example.log_projerr(nreal, method, k))
-            yield {
-                'name': ':'.join([str(nreal), method, str(k)]),
-                'file_dep': deps,
-                'actions': [create_action_projerr(nreal, method, ntrain[method], targets[0], ntest=ntest[method])],
-                'targets': targets,
-                'clean': True,
-            }
+        for k in (0, 5):
+            for method in example.methods:
+                deps = [source]
+                deps.append(example.path_omega_coarse(k))
+                deps.extend(with_h5(example.path_omega(k)))
+                deps.extend(with_h5(example.path_omega_in(k)))
+                targets = []
+                targets.append(example.projerr(nreal, method, k))
+                targets.append(example.log_projerr(nreal, method, k))
+                yield {
+                    'name': ':'.join([str(nreal), method, str(k)]),
+                    'file_dep': deps,
+                    'actions': [
+                        create_action_projerr(nreal, method, k, ntrain[method], targets[0], ntest=ntest[method])
+                    ],
+                    'targets': targets,
+                    'clean': True,
+                }
 
 
 def task_fig_projerr():
     """ParaGeom: Plot projection error."""
     source = SRC / 'plot_projerr.py'
-    k = 5
     for nreal in range(example.num_real):
-        deps = [source]
-        for method in example.methods:
-            deps.append(example.projerr(nreal, method, k))
-        targets = []
-        targets.append(example.fig_projerr(k))
-        yield {
-            'name': ':'.join([str(nreal), str(k)]),
-            'file_dep': deps,
-            'actions': ['python3 {} {} {} %(targets)s'.format(source, nreal, k)],
-            'targets': targets,
-            'clean': True,
-        }
+        for k in (0, 5):
+            deps = [source]
+            for method in example.methods:
+                deps.append(example.projerr(nreal, method, k))
+            targets = []
+            targets.append(example.fig_projerr(k))
+            yield {
+                'name': ':'.join([str(nreal), str(k)]),
+                'file_dep': deps,
+                'actions': ['python3 {} {} {} %(targets)s'.format(source, nreal, k)],
+                'targets': targets,
+                'clean': True,
+            }
 
 
 def task_gfem():
