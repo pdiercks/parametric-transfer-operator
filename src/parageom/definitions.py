@@ -1,5 +1,7 @@
 """ParaGeom example definitions."""
 
+import typing
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -32,8 +34,10 @@ class BeamData:
         youngs_modulus: The Young's modulus (reference value) of the material.
         plane_stress: If True, use plane stress assumption.
         traction_y: Value for y-component of traction vector.
+        neumann_tag: Tag for the Neumann boundary.
         parameters: Dict of dict mapping parameter name to parameter dimension.
         methods: Methods used for basis construction.
+        mdeim_rtol: Relative tolerance for the MDEIM approximation.
         debug: Run in debug mode.
 
     """
@@ -51,6 +55,7 @@ class BeamData:
     youngs_modulus: float = 30e3  # [MPa]
     plane_stress: bool = True
     traction_y: float = 0.0375  # [MPa]
+    neumann_tag: int = 194
     parameter_name: str = 'R'
     parameter_dim: tuple[int, ...] = (2, 3, 4, 4, 4, 4, 4, 4, 4, 3, 2)
     parameters: dict = field(
@@ -60,10 +65,13 @@ class BeamData:
         }
     )
     methods: tuple[str, ...] = ('hapod', 'heuristic')
-    neumann_rtol: float = 1e-8  # hrrf pod extension
-    neumann_tag: int = 194
     mdeim_rtol: float = 1e-5
     debug: bool = False
+
+    # task parameters
+    validate_rom: dict[str, typing.Union[int, list[int]]] = field(
+        default_factory=lambda: {'ntest': 200, 'num_modes': list(range(20, 81, 20))}
+    )
 
     def __post_init__(self):
         """Creates directory structure and dependent attributes."""
@@ -256,6 +264,7 @@ class BeamData:
         file = SRC / 'realizations.npy'
         if not file.exists():
             self._generate_realizations(file)
+        # TODO generate realizations if existing nreal < self.num_real
         return file
 
     def _generate_realizations(self, outpath: Path) -> None:
@@ -416,19 +425,17 @@ class BeamData:
 
 
 @dataclass
-class RomValidation:
-    """Input Parameters for ROM validation.
+class PreProcessing:
+    """Data for preprocessing.
 
     Args:
-        ntest: Size of the validation set.
-        num_modes: Number of modes to use.
-        seed: Random seed for the validation set.
+        unit_length: Dimensionless unit length.
+        geom_deg: Degree of geometry interpolation.
 
     """
 
-    ntest: int = 200
-    num_modes: list[int] = list(range(20, 81, 20))
-    seed: int = 241690
+    unit_length: float = 1.0
+    geom_deg: int = 2
 
 
 @dataclass
