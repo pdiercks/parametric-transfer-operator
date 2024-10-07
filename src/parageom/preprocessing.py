@@ -64,7 +64,7 @@ def create_structured_coarse_grid_v2(example, coarse_grid, active_cells, output:
 
     xmax = xmin + a * num_cells
     ymin = 0.0
-    ymax = 1.0
+    ymax = 1.0 * a
     create_rectangle(xmin, xmax, ymin, ymax, num_cells=[num_cells, 1], recombine=True, out_file=output)
 
 
@@ -72,18 +72,6 @@ def create_structured_coarse_grid(example, typus: str, output: str):
     a = example.unit_length
 
     match typus:
-        case 'target':
-            num_cells = (2, 1)
-            xmin = 0.0
-        case 'left':
-            num_cells = (3, 1)
-            xmin = 0.0
-        case 'right':
-            num_cells = (3, 1)
-            xmin = 7 * a
-        case 'inner':
-            num_cells = (4, 1)
-            xmin = 3 * a
         case 'global':
             num_cells = (example.nx, example.ny)
             xmin = 0.0
@@ -148,7 +136,7 @@ def create_fine_scale_grid_v2(example, coarse_grid, active_cells, output: str):
 def create_fine_scale_grid(example, typus: str, output: str):
     """Create parent domain for `config`."""
     coarse_grid_msh = example.coarse_grid(typus).as_posix()
-    coarse_domain = gmshio.read_from_msh(coarse_grid_msh, MPI.COMM_WORLD, gdim=2)[0]
+    coarse_domain = gmshio.read_from_msh(coarse_grid_msh, MPI.COMM_WORLD, gdim=example.gdim)[0]
     coarse_grid = StructuredQuadGrid(coarse_domain)
     num_cells = coarse_grid.num_cells
 
