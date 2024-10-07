@@ -18,6 +18,7 @@ from pymor.bindings.fenicsx import (
 )
 from pymor.models.basic import StationaryModel
 from pymor.operators.constructions import ConstantOperator, LincombOperator, VectorFunctional, VectorOperator
+from pymor.parameters.base import Parameters
 from pymor.parameters.functionals import GenericParameterFunctional
 from pymor.vectorarrays.numpy import NumpyVectorSpace
 
@@ -281,7 +282,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
         auxiliary_problem.solve(trafo_disp, mu)
         trafo_disp.x.scatter_forward()
 
-    params = example.parameters['global']
+    params = Parameters({example.parameter_name: example.nx * example.ny})
     coeffs = problem.form_lhs.coefficients()  # type: ignore
     assert len(coeffs) == 1  # type: ignore
     operator = FenicsxMatrixBasedOperator(
@@ -364,13 +365,13 @@ if __name__ == '__main__':
     coarse_grid = StructuredQuadGrid(*read_mesh(coarse_grid_path, MPI.COMM_WORLD, kwargs={'gdim': example.gdim}))
     parent_domain_path = example.parent_domain('global')
     omega_gl = RectangularDomain(*read_mesh(parent_domain_path, MPI.COMM_WORLD, kwargs={'gdim': example.gdim}))
-    degree = example.geom_deg
+    degree = example.preproc.geom_deg
     interface_tags = [i for i in range(15, 25)]  # FIXME better define in Example data class
     auxp = discretize_auxiliary_problem(
         example,
         omega_gl,
         interface_tags,
-        example.parameters['global'],
+        Parameters({example.parameter_name: example.nx * example.ny}),
         coarse_grid=coarse_grid,
     )
     d = df.fem.Function(auxp.problem.V, name='d_trafo')

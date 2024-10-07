@@ -13,6 +13,7 @@ from pymor.core.defaults import set_defaults
 from pymor.core.logger import getLogger
 from pymor.models.basic import StationaryModel
 from pymor.operators.constructions import ConstantOperator, LincombOperator, VectorFunctional
+from pymor.parameters.base import Parameters
 from pymor.parameters.functionals import GenericParameterFunctional
 from pymor.tools.random import new_rng
 from pymor.vectorarrays.numpy import NumpyVectorSpace
@@ -97,7 +98,7 @@ def main(args):
     coarse_domain = read_mesh(coarse_grid_path, MPI.COMM_WORLD, cell_tags=None, kwargs={'gdim': example.gdim})[0]
     struct_grid = StructuredQuadGrid(coarse_domain)
     dofmap = GFEMDofMap(struct_grid)
-    params = example.parameters['global']
+    params = fom.parameters
     num_modes = args.num_modes
 
     rom = None
@@ -255,7 +256,7 @@ def build_fom(example, ω=0.5):
         example,
         omega_gl,
         interface_tags,
-        example.parameters['global'],
+        Parameters({example.parameter_name: example.nx * example.ny}),
         coarse_grid=coarse_grid,
     )
     trafo_disp = df.fem.Function(auxiliary_problem.problem.V, name='d_μ_fom')

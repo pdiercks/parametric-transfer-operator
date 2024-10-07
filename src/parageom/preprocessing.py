@@ -19,13 +19,13 @@ from parageom.locmor import OversamplingConfig
 
 
 def discretize_unit_cell(
-    unit_length, mu, num_cells: int, output: str, gmsh_options: typing.Optional[dict] = None
+    unit_length: float, radius: float, num_cells: int, output: str, gmsh_options: typing.Optional[dict] = None
 ) -> None:
     """Discretizes square domain with circular void.
 
     Args:
         unit_length: Unit length of the unit cell.
-        mu: parameter value, i.e. radius of the void.
+        radius: Radius of the void.
         num_cells: Number of cells per edge of the unit cell.
         output: Write .msh file.
         gmsh_options: Options for Gmsh.
@@ -35,7 +35,6 @@ def discretize_unit_cell(
     xmax = unit_length
     ymin = 0.0
     ymax = unit_length
-    radius = mu.to_numpy().item()
 
     create_voided_rectangle(
         xmin,
