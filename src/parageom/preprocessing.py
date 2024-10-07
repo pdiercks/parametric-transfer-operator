@@ -208,7 +208,6 @@ def discretize_oversampling_domains(
         osp_config: Configuration of this transfer problem.
 
     """
-
     cells_omega = osp_config.cells_omega
     cells_omega_in = osp_config.cells_omega_in
 
