@@ -56,6 +56,8 @@ class HRRF:
         rrf_ttol: Target tolerance.
         rrf_ftol: Failure tolerance.
         rrf_nt: Number of random normal test vectors.
+        num_enrichments: Number of samples per enrichment in adaptive LHS.
+        radius_mu: Radius in parameter space for the adaptive LHS.
 
     """
 
@@ -64,6 +66,8 @@ class HRRF:
     rrf_ttol: float = 0.01
     rrf_ftol: float = 1e-15
     rrf_nt: int = 1
+    num_enrichments: int = 10
+    radius_mu: float = 0.01
 
     def ntest(self, dim: int):
         """Size of the testing set.
@@ -115,15 +119,22 @@ class ProjErr:
 
     Args:
         seed_test: Random seed for the test set.
-        eps: Bound for HAPOD.
+        seed_train: Random seed for the training.
+        hapod_eps: Bound for HAPOD.
+        hapod_omega: Trade-off factor for HAPOD.
+        hrrf_tol: Bound for HRRF.
 
     """
 
-    # Run projection error study with same parameters
-    # as in HRRF and HAPOD or define others?
+    # Note
+    # for comparability set hapod_training_set=hrrf_testing_set
+    # see src/parageom/projerr.py
 
+    seed_train: int = 456729121
     seed_test: int = 923719053
-    eps: float = 0.001
+    hapod_eps: float = 0.001  # scale=0.1
+    hapod_omega: float = 0.5
+    hrrf_tol: float = 0.01
 
 
 @dataclass
@@ -351,8 +362,8 @@ class BeamData:
     # @property
     # def fig_rom_opt(self) -> Path:
     #     return self.figures_path / "fig_rom_opt.pdf"
-    def fig_projerr(self, k: int) -> Path:
-        return self.figures_path / f'fig_projerr_{k:02}.pdf'
+    def fig_projerr(self, k: int, scale: float = 0.1) -> Path:
+        return self.figures_path / f'fig_projerr_{k:02}_scale_{scale}.pdf'
 
     def fig_rom_error(self, method: str, ei: bool) -> Path:
         if ei:
@@ -377,8 +388,8 @@ class BeamData:
     def log_basis_construction(self, nr: int, method: str, k: int) -> Path:
         return self.logs_path(nr, method) / f'basis_construction_{k:02}.log'
 
-    def log_projerr(self, nr: int, method: str, k: int) -> Path:
-        return self.logs_path(nr, method) / f'projerr_{k}.log'
+    def log_projerr(self, nr: int, method: str, k: int, scale: float = 0.1) -> Path:
+        return self.logs_path(nr, method) / f'projerr_{k}_scale_{scale}.log'
 
     def log_gfem(self, nr: int, cell: int, method='hapod') -> Path:
         return self.logs_path(nr, method) / f'gfem_{cell:02}.log'
@@ -431,9 +442,9 @@ class BeamData:
         dir = self.method_folder(nr, 'heuristic')
         return dir / f'neumann_svals_{k:02}.npy'
 
-    def projection_error(self, nr: int, method: str, k: int) -> Path:
+    def projection_error(self, nr: int, method: str, k: int, scale: float = 0.1) -> Path:
         dir = self.method_folder(nr, method)
-        return dir / f'projerr_{k}.npz'
+        return dir / f'projerr_{k}_scale_{scale}.npz'
 
     def path_omega(self, k: int) -> Path:
         return self.grids_path / f'omega_{k:02}.xdmf'

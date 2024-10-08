@@ -33,7 +33,7 @@ def main(args):
     else:
         loglevel = 20
 
-    logfilename = example.log_projerr(args.nreal, args.method, args.k).as_posix()
+    logfilename = example.log_projerr(args.nreal, args.method, args.k, args.scale).as_posix()
     set_defaults({'pymor.core.logger.getLogger.filename': logfilename})
     logger = getLogger('projerr', level=loglevel)
 
@@ -84,8 +84,8 @@ def main(args):
     #     NN.append(U_orth)
     # breakpoint()
 
-    myseeds_train = np.random.SeedSequence(example.training_set_seed).generate_state(11)
-    ntrain = args.ntrain
+    myseeds_train = np.random.SeedSequence(example.projerr.seed_train).generate_state(11)
+    ntrain = args.N
     dim = example.parameter_dim[args.k]
     sampler_train = qmc.LatinHypercube(dim, optimization='random-cd', seed=myseeds_train[args.k])
     training_set = parameter_set(sampler_train, ntrain, parameter_space, name=parameter_name)
@@ -97,10 +97,11 @@ def main(args):
 
     # ### Read basis and wrap as pymor object
     logger.info(f'Computing spectral basis with method {args.method} ...')
-    epsilon_star = example.epsilon_star_projerr
+    epsilon_star = 0.01 * args.scale
     Nin = transfer.rhs.dofs.size
     basis = None
     svals = None
+    sampling_options = {'scale': args.scale}
 
     if args.method == 'hapod':
         from parageom.hapod import adaptive_rrf_normal
@@ -110,17 +111,14 @@ def main(args):
         spectral_basis_sizes = list()
 
         # use most conservative estimate on tolerances Nin=1
-        epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2) * epsilon_star
-        epsilon_pod = np.sqrt(Nin * ntrain) * example.omega * epsilon_star
+        epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.projerr.hapod_omega**2) * epsilon_star
+        epsilon_pod = np.sqrt(Nin * ntrain) * example.projerr.hapod_omega * epsilon_star
 
         for mu, seed_seq in zip(training_set, seed_seqs_rrf):
             with new_rng(seed_seq):
                 transfer.assemble_operator(mu)
                 rb = adaptive_rrf_normal(
-                    logger,
-                    transfer,
-                    num_testvecs=Nin,
-                    l2_err=epsilon_alpha,
+                    logger, transfer, num_testvecs=Nin, l2_err=epsilon_alpha, sampling_options=sampling_options
                 )
                 logger.info(f'\nSpectral Basis length: {len(rb)}.')
                 spectral_basis_sizes.append(len(rb))
@@ -147,15 +145,25 @@ def main(args):
         if require_neumann_data:
             logger.info(f'Number of Neumann snapshots: {len(neumann_snapshots)}.')
             snapshots.append(neumann_snapshots)
+
+        logger.info('Subtracting ensemble mean ...')
+        ensemble_mean = sum(snapshots)
+        ensemble_mean.scal(1 / len(snapshots))
+        snapshots.axpy(-1.0, ensemble_mean)
+
         logger.info('Computing final POD ...')
         basis, svals = pod(snapshots, product=transfer.range_product, l2_err=epsilon_pod)
 
-    elif args.method == 'heuristic':
+    elif args.method == 'hrrf':
         from parageom.heuristic import heuristic_range_finder
 
-        myseeds_test = np.random.SeedSequence(example.testing_set_seed).generate_state(11)
-        sampler_test = qmc.LatinHypercube(dim, optimization='random-cd', seed=myseeds_test[args.k])
-        testing_set = parameter_set(sampler_test, args.ntest, parameter_space, name=parameter_name)
+        # the training set used for training in the HAPOD
+        # should be the same as the testing set in HRRF
+        testing_set = training_set
+
+        myseeds_hapod_train = np.random.SeedSequence(example.hrrf.seed_train).generate_state(11)
+        sampler_test = qmc.LatinHypercube(dim, optimization='random-cd', seed=myseeds_hapod_train[args.k])
+        hapod_training_set = parameter_set(sampler_test, args.ntrain_hrrf, parameter_space, name=parameter_name)
 
         with new_rng(seed_seqs_rrf[0]):
             spectral_basis = heuristic_range_finder(
@@ -163,14 +171,14 @@ def main(args):
                 transfer,
                 sampler_train,
                 parameter_space,
-                training_set,
+                hapod_training_set,
                 testing_set,
-                error_tol=0.01,
-                failure_tolerance=1e-15,
-                num_testvecs=1,
+                error_tol=example.hrrf.rrf_ttol,
+                num_testvecs=example.hrrf.rrf_nt,
                 block_size=args.bs,
-                num_enrichments=10,
-                radius_mu=0.01,
+                num_enrichments=example.hrrf.num_enrichments,
+                radius_mu=example.hrrf.radius_mu,
+                sampling_options=sampling_options,
                 compute_neumann=require_neumann_data,
                 fext=fext,
             )
@@ -188,19 +196,18 @@ def main(args):
     if require_neumann_data:
         size_test_set += args.num_samples
 
-    sampler_validation = qmc.LatinHypercube(dim, optimization='random-cd', seed=example.projerr_seed)
+    sampler_validation = qmc.LatinHypercube(dim, optimization='random-cd', seed=example.projerr.seed_test)
     validation_set = parameter_set(sampler_validation, args.num_samples, parameter_space, name=parameter_name)
 
     with logger.block(f'Computing test set of size {size_test_set}...'):
-        with new_rng(example.projerr_seed // 2):
+        with new_rng(example.projerr.seed_test // 2):
             test_data = transfer.range.empty(reserve=size_test_set)
             for mu in validation_set:
                 transfer.assemble_operator(mu)
-                g = transfer.generate_random_boundary_data(args.num_testvecs)
+                g = transfer.generate_random_boundary_data(args.num_testvecs, 'normal', sampling_options)
                 test_data.append(transfer.solve(g))
 
                 if require_neumann_data:
-                    logger.info('\nSolving for additional Neumann mode ...')
                     U_neumann = transfer.op.apply_inverse(fext)
                     U_in_neumann = transfer.range.from_numpy(U_neumann.dofs(transfer._restriction))  # type: ignore
 
@@ -287,9 +294,11 @@ if __name__ == '__main__':
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument('nreal', type=int, help='The n-th realization.')
-    parser.add_argument('method', type=str, help='Method used for basis construction.')
+    parser.add_argument('method', type=str, help='Method used for basis construction.', choices=('hapod', 'hrrf'))
     parser.add_argument('k', type=int, help='Use the k-th oversampling problem.')
-    parser.add_argument('ntrain', type=int, help='Number of parameter samples in the training set.')
+    parser.add_argument(
+        'N', type=int, help='Number of parameter samples in the training set (hapod), testing set (hrrf) respectively.'
+    )
     parser.add_argument('num_samples', type=int, help='Number of parameters used to define the validation set.')
     parser.add_argument('num_testvecs', type=int, help='Number of test vectors used to define the validation set.')
     parser.add_argument(
@@ -300,7 +309,10 @@ if __name__ == '__main__':
     parser.add_argument(
         '--bs', type=int, help='Number of random samples per iteration in HRRF (block size).', default=1
     )
-    parser.add_argument('--ntest', type=int, help='Nmuber of parameter sapmles in the testing set (HRRF).')
+    parser.add_argument(
+        '--ntrain_hrrf', type=int, help='Nmuber of initial parameter samples in the training set (HRRF).'
+    )
+    parser.add_argument('--scale', type=float, help='Value for scale in normal distribution.', default=0.1)
     parser.add_argument('--debug', action='store_true', help='Run in debug mode.')
     parser.add_argument('--show', action='store_true', help='Show projection error plot.')
     args = parser.parse_args(sys.argv[1:])

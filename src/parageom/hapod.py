@@ -54,15 +54,14 @@ def adaptive_rrf_normal(
         )
         lambda_min = eigsh(L, sigma=0, which='LM', return_eigenvectors=False, k=1, OPinv=Linv)[0]
 
-    R = tp.generate_random_boundary_data(num_testvecs)
+    R = tp.generate_random_boundary_data(num_testvecs, 'normal', sampling_options)
     M = tp.solve(R)
     B = tp.range.empty()
     l2 = np.inf
 
     while l2 > l2_err**2.0:
         basis_length = len(B)
-        v = tp.generate_random_boundary_data(1)
-
+        v = tp.generate_random_boundary_data(1, 'normal', sampling_options)
         B.append(tp.solve(v))
         gram_schmidt(B, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
         M -= B.lincomb(B.inner(M, range_product).T)
@@ -149,14 +148,12 @@ def main(args):
     epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2.0) * epsilon_star
     epsilon_pod = np.sqrt(Nin * ntrain) * example.omega * epsilon_star
 
+    sampling_options = {'scale': 0.1}
     for mu, seed_seq in zip(training_set, seed_seqs_rrf):
         with new_rng(seed_seq):
             transfer.assemble_operator(mu)
             basis = adaptive_rrf_normal(
-                logger,
-                transfer,
-                num_testvecs=Nin,
-                l2_err=epsilon_alpha,
+                logger, transfer, num_testvecs=Nin, l2_err=epsilon_alpha, sampling_options=sampling_options
             )
             logger.info(f'\nSpectral Basis length: {len(basis)}.')
             spectral_basis_sizes.append(len(basis))
@@ -183,6 +180,11 @@ def main(args):
     if len(neumann_snapshots) > 0:  # type: ignore
         logger.info('Appending Neumann snapshots to global snapshot set.')
         snapshots.append(neumann_snapshots)  # type: ignore
+
+    logger.info('Subtracting ensemble mean ...')
+    ensemble_mean = sum(snapshots)
+    ensemble_mean.scal(1 / len(snapshots))
+    snapshots.axpy(-1.0, ensemble_mean)
 
     logger.info('Computing final POD')
     spectral_modes, spectral_svals = pod(snapshots, product=transfer.range_product, l2_err=epsilon_pod)  # type: ignore

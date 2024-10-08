@@ -777,14 +777,14 @@ def discretize_transfer_problem(
     cells_omega = osp_config.cells_omega
 
     # ### Function Spaces
-    V = df.fem.functionspace(omega.grid, ('P', example.geom_deg, (example.gdim,)))
+    V = df.fem.functionspace(omega.grid, ('P', example.fe_deg, (example.gdim,)))
     V_in = df.fem.functionspace(omega_in.grid, V.ufl_element())
     source_V_in = FenicsxVectorSpace(V_in)
 
     # ### Auxiliary problem defined on oversampling domain Omega
     # locate interfaces for definition of auxiliary problem
     left_most_cell = np.amin(cells_omega)
-    unit_length = example.unit_length
+    unit_length = example.preproc.unit_length
     x_min = float(left_most_cell * unit_length)
 
     interface_locators = []
@@ -795,7 +795,7 @@ def discretize_transfer_problem(
     if debug:
         for marker in interface_locators:
             entities = df.mesh.locate_entities(V.mesh, V.mesh.topology.dim - 1, marker)
-            assert entities.size == example.num_intervals
+            assert entities.size == example.preproc.num_intervals
 
     aux_tags = list(range(15, 15 + cells_omega.size))
     assert len(aux_tags) == cells_omega.size
@@ -875,7 +875,7 @@ def discretize_transfer_problem(
 
     # ### Discretize right hand side - DirichletLift
     entities_gamma_out = df.mesh.locate_entities_boundary(V.mesh, V.mesh.topology.dim - 1, osp_config.gamma_out)
-    expected_num_facets_gamma_out = (example.num_intervals - 2, 2 * (example.num_intervals - 2))
+    expected_num_facets_gamma_out = (example.preproc.num_intervals - 2, 2 * (example.preproc.num_intervals - 2))
     assert entities_gamma_out.size in expected_num_facets_gamma_out
     rhs = DirichletLift(operator.range, operator.compiled_form, entities_gamma_out)  # type: ignore
 
@@ -933,7 +933,7 @@ def discretize_transfer_problem(
 
     if osp_config.gamma_n is not None:
         top_tag = example.neumann_tag
-        assert omega.facet_tags.find(top_tag).size == example.num_intervals * 1  # top
+        assert omega.facet_tags.find(top_tag).size == example.preproc.num_intervals * 1  # top
         dA = ufl.Measure('ds', domain=omega.grid, subdomain_data=omega.facet_tags)
         t_y = -example.traction_y * example.sigma_scale
         traction = df.fem.Constant(
