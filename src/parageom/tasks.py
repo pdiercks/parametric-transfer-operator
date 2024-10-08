@@ -210,7 +210,7 @@ def task_projerr():
                 for scale in amplitudes:
                     targets = []
                     targets.append(example.projection_error(nreal, method, k, scale))
-                    # targets.append(example.log_projerr(nreal, method, k, scale))
+                    targets.append(example.log_projerr(nreal, method, k, scale))
                     yield {
                         'name': ':'.join([str(nreal), method, str(k), str(scale)]),
                         'file_dep': deps,

@@ -97,7 +97,7 @@ def main(args):
 
     # ### Read basis and wrap as pymor object
     logger.info(f'Computing spectral basis with method {args.method} ...')
-    epsilon_star = 0.01 * args.scale
+    epsilon_star = 0.01 * args.scale / example.energy_scale
     Nin = transfer.rhs.dofs.size
     basis = None
     svals = None
@@ -173,7 +173,7 @@ def main(args):
                 parameter_space,
                 hapod_training_set,
                 testing_set,
-                error_tol=example.hrrf.rrf_ttol,
+                error_tol=example.hrrf.rrf_ttol / example.energy_scale,
                 num_testvecs=example.hrrf.rrf_nt,
                 block_size=args.bs,
                 num_enrichments=example.hrrf.num_enrichments,
@@ -225,12 +225,11 @@ def main(args):
 
     def compute_norm(U, key, value):
         if key == 'max':
-            return U.amax()[1]
+            return U.amax()[1] * example.characteristic_displacement
         else:
-            assert key in (transfer.range_product.name, 'euclidean')
-            return U.norm(value)
+            return U.norm(value) * example.energy_scale
 
-    products = {transfer.range_product.name: transfer.range_product, 'euclidean': None, 'max': False}
+    products = {transfer.range_product.name: transfer.range_product, 'max': False}
     test_norms = {}
     output = {}
     for k, v in products.items():
