@@ -51,9 +51,9 @@ def discretize_unit_cell(
     )
 
 
-def create_structured_coarse_grid_v2(example, coarse_grid, active_cells, output: str):
+def create_structured_coarse_grid_v2(example: BeamData, coarse_grid, active_cells, output: str):
     """Create a coarse grid partition of active cells of the global domain `coarse_grid`."""
-    a = example.unit_length
+    a = example.preproc.unit_length
     num_cells = active_cells.size
 
     left_most_cell = np.amin(active_cells)
@@ -67,8 +67,8 @@ def create_structured_coarse_grid_v2(example, coarse_grid, active_cells, output:
     create_rectangle(xmin, xmax, ymin, ymax, num_cells=[num_cells, 1], recombine=True, out_file=output)
 
 
-def create_structured_coarse_grid(example, typus: str, output: str):
-    a = example.unit_length
+def create_structured_coarse_grid(example: BeamData, typus: str, output: str):
+    a = example.preproc.unit_length
 
     match typus:
         case 'global':
@@ -83,7 +83,7 @@ def create_structured_coarse_grid(example, typus: str, output: str):
     create_rectangle(xmin, xmax, ymin, ymax, num_cells=num_cells, recombine=True, out_file=output)
 
 
-def create_fine_scale_grid_v2(example, coarse_grid, active_cells, output: str):
+def create_fine_scale_grid_v2(example: BeamData, coarse_grid, active_cells, output: str):
     """Create fine grid discretization for `active_cells` of `coarse_grid`."""
     num_cells = active_cells.size
 
@@ -97,11 +97,11 @@ def create_fine_scale_grid_v2(example, coarse_grid, active_cells, output: str):
         tag += 1
 
     offset = {2: 0, 1: 0}
-    UNIT_LENGTH = example.unit_length
+    UNIT_LENGTH = example.preproc.unit_length
     for k, cell in enumerate(active_cells):
         subdomains.append(tempfile.NamedTemporaryFile(suffix='.msh'))
         to_be_merged.append(subdomains[k].name)
-        gmsh_options = {'Mesh.ElementOrder': example.geom_deg, 'General.Verbosity': 0}
+        gmsh_options = {'Mesh.ElementOrder': example.preproc.geom_deg, 'General.Verbosity': 0}
 
         cell_vertices = coarse_grid.get_entities(0, cell)
         lower_left = cell_vertices[:1]
@@ -118,7 +118,7 @@ def create_fine_scale_grid_v2(example, coarse_grid, active_cells, output: str):
             ymax,
             z=zc,
             radius=radius,
-            num_cells=example.num_intervals,
+            num_cells=example.preproc.num_intervals,
             recombine=True,
             cell_tags={'matrix': 1},
             facet_tags=facet_tags[k],
@@ -132,7 +132,7 @@ def create_fine_scale_grid_v2(example, coarse_grid, active_cells, output: str):
         tmp.close()
 
 
-def create_fine_scale_grid(example, typus: str, output: str):
+def create_fine_scale_grid(example: BeamData, typus: str, output: str):
     """Create parent domain for `config`."""
     coarse_grid_msh = example.coarse_grid(typus).as_posix()
     coarse_domain = gmshio.read_from_msh(coarse_grid_msh, MPI.COMM_WORLD, gdim=example.gdim)[0]
@@ -149,11 +149,11 @@ def create_fine_scale_grid(example, typus: str, output: str):
         tag += 1
 
     offset = {2: 0, 1: 0}
-    UNIT_LENGTH = example.unit_length
+    UNIT_LENGTH = example.preproc.unit_length
     for cell in range(num_cells):
         subdomains.append(tempfile.NamedTemporaryFile(suffix='.msh'))
         to_be_merged.append(subdomains[cell].name)
-        gmsh_options = {'Mesh.ElementOrder': example.geom_deg}
+        gmsh_options = {'Mesh.ElementOrder': example.preproc.geom_deg}
 
         cell_vertices = coarse_grid.get_entities(0, cell)
         lower_left = cell_vertices[:1]
@@ -170,7 +170,7 @@ def create_fine_scale_grid(example, typus: str, output: str):
             ymax,
             z=zc,
             radius=radius,
-            num_cells=example.num_intervals,
+            num_cells=example.preproc.num_intervals,
             recombine=True,
             cell_tags={'matrix': 1},
             facet_tags=facet_tags[cell],
@@ -238,11 +238,11 @@ def discretize_oversampling_domains(
     # this will add tags for "top" boundary
     omega.facet_tags = create_meshtags(omega.grid, omega.tdim - 1, facet_tag_definitions, tags=omega.facet_tags)[0]
 
-    assert omega.facet_tags.find(11).size == example.num_intervals * cells_omega.size  # bottom
-    assert omega.facet_tags.find(12).size == example.num_intervals * 1  # left
-    assert omega.facet_tags.find(13).size == example.num_intervals * 1  # right
+    assert omega.facet_tags.find(11).size == example.preproc.num_intervals * cells_omega.size  # bottom
+    assert omega.facet_tags.find(12).size == example.preproc.num_intervals * 1  # left
+    assert omega.facet_tags.find(13).size == example.preproc.num_intervals * 1  # right
     for itag in range(15, 15 + cells_omega.size):
-        assert omega.facet_tags.find(itag).size == example.num_intervals * 4  # void
+        assert omega.facet_tags.find(itag).size == example.preproc.num_intervals * 4  # void
 
     path_omega = example.path_omega(args.k)
     with XDMFFile(MPI.COMM_WORLD, path_omega.as_posix(), 'w') as xdmf:
