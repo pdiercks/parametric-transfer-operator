@@ -26,7 +26,6 @@ from pymor.operators.constructions import LincombOperator, VectorOperator
 from pymor.operators.interface import Operator
 from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.parameters.base import Parameters
-from pymor.tools.random import get_rng
 from pymor.vectorarrays.interface import VectorArray
 from pymor.vectorarrays.numpy import NumpyVectorSpace
 from scipy.sparse import coo_array, csr_array
@@ -601,31 +600,20 @@ class ParametricTransferProblem(LogMixin):
         self.range = range_space
         self._restriction = make_mapping(self.range.V, self.source.V, padding=padding, check=True)  # type: ignore
 
-    def generate_random_boundary_data(self, count: int) -> npt.NDArray:
-        """Generates random normal vectors of shape (count, num_dofs_Γ_out).
+    def generate_random_boundary_data(
+        self, count: int, distribution: str, options: Optional[dict[str, Any]] = None
+    ) -> npt.NDArray:
+        """Generates random vectors of shape (count, num_dofs_Γ_out).
 
         Args:
             count: Number of random vectors.
+            distribution: The distribution used for sampling.
+            options: Arguments passed to sampling method of random number generator.
 
         """
-
-        def draw_samples(shape):
-            rng = get_rng()
-            mu, sigma = 0.0, 1.0
-            x = rng.normal(mu, sigma, shape)
-
-            a = -0.2
-            b = 0.2
-            xmin = -3
-            xmax = 3
-
-            x_clipped = np.clip(x, xmin, xmax)
-            x_scaled = ((b - a) / (xmax - xmin)) * (x_clipped - xmin) + a
-
-            return x_scaled
-
         num_dofs = self.rhs.dofs.size
-        values = draw_samples((count, num_dofs))
+        options = options or {}
+        values = create_random_values((count, num_dofs), distribution, **options)
 
         return values
 
