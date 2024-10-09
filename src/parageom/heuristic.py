@@ -140,17 +140,8 @@ def heuristic_range_finder(
     return B
 
 
-def parameter_set(sampler, num_samples, ps, name='R'):
-    l_bounds = ps.ranges[name][:1] * ps.parameters[name]
-    u_bounds = ps.ranges[name][1:] * ps.parameters[name]
-    samples = qmc.scale(sampler.random(num_samples), l_bounds, u_bounds)
-    s = []
-    for x in samples:
-        s.append(ps.parameters.parse(x))
-    return s
-
-
 def main(args):
+    from parageom.lhs import parameter_set
     from parageom.locmor import discretize_transfer_problem, oversampling_config_factory
     from parageom.tasks import example
 
@@ -237,6 +228,7 @@ def main(args):
         assert not require_neumann_data
 
     # ### Heuristic randomized range finder
+    sampling_options = {'scale': example.g_scale}
     logger.debug(f'{seed_seqs_rrf[0]=}')
     with new_rng(seed_seqs_rrf[0]):
         spectral_basis = heuristic_range_finder(
@@ -246,8 +238,12 @@ def main(args):
             parameter_space,
             training_set,
             testing_set,
-            error_tol=example.hrrf.rrf_ttol,
-            num_testvecs=1,
+            error_tol=example.hrrf.rrf_ttol / example.energy_scale,
+            num_testvecs=example.hrrf.rrf_nt,
+            block_size=1,
+            num_enrichments=example.hrrf.num_enrichments,
+            radius_mu=example.hrrf.radius_mu,
+            sampling_options=sampling_options,
             compute_neumann=require_neumann_data,
             fext=fext,
         )

@@ -138,6 +138,26 @@ class ProjErr:
 
 
 @dataclass
+class Optimization:
+    """Input Parameters for optimization problem.
+
+    Args:
+        nreal: The realization to use.
+        omega: Weigthing factor for mass and compliance in the objective functional.
+        method: The method used for basis construction.
+        num_modes: Size of local basis.
+        minimizer: The minimization algorithm (scipy) to use.
+
+    """
+
+    nreal: int = 0
+    omega: float = 0.2
+    method: str = 'hrrf'
+    num_modes: int = 60
+    minimizer: str = 'SLSQP'
+
+
+@dataclass
 class BeamData:
     """Holds example specific parameters and manages filepaths.
 
@@ -157,6 +177,7 @@ class BeamData:
         neumann_tag: Tag for the Neumann boundary.
         parameters: Dict of dict mapping parameter name to parameter dimension.
         methods: Methods used for basis construction.
+        g_scale: Scale (Amplitude) of random boundary conditions.
         mdeim_rtol: Relative tolerance for the MDEIM approximation.
         debug: Run in debug mode.
 
@@ -178,6 +199,7 @@ class BeamData:
     parameter_name: str = 'R'
     parameter_dim: tuple[int, ...] = (2, 3, 4, 4, 4, 4, 4, 4, 4, 3, 2)
     methods: tuple[str, ...] = ('hapod', 'hrrf')
+    g_scale: float = 0.1
     mdeim_rtol: float = 1e-5
     debug: bool = False
 
@@ -188,6 +210,7 @@ class BeamData:
     hapod = HAPOD()
     projerr = ProjErr()
     rom_validation = RomValidation()
+    opt = Optimization()
 
     def __post_init__(self):
         """Creates directory structure and dependent attributes."""
@@ -403,7 +426,7 @@ class BeamData:
 
     @property
     def log_optimization(self) -> Path:
-        return self.logs_path(0, 'hapod') / 'optimization.log'
+        return self.logs_path(self.opt.nreal, self.opt.method) / 'optimization.log'
 
     def hapod_singular_values(self, nr: int, k: int) -> Path:
         """Singular values of final POD for k-th transfer problem."""
@@ -424,7 +447,7 @@ class BeamData:
 
     def heuristic_modes_xdmf(self, nr: int, k: int) -> Path:
         """Modes computed by heuristic range finder."""
-        dir = self.method_folder(nr, 'heuristic') / 'modes'
+        dir = self.method_folder(nr, 'hrrf') / 'modes'
         return dir / f'modes_{k:02}.xdmf'
 
     def hapod_modes_npy(self, nr: int, k: int) -> Path:
@@ -434,12 +457,12 @@ class BeamData:
 
     def heuristic_modes_npy(self, nr: int, k: int) -> Path:
         """Modes for k-th transfer problem."""
-        dir = self.method_folder(nr, 'heuristic') / 'modes'
+        dir = self.method_folder(nr, 'hrrf') / 'modes'
         return dir / f'modes_{k:02}.npy'
 
     def heuristic_neumann_svals(self, nr: int, k: int) -> Path:
         """Singular values of POD of neumann snapshots."""
-        dir = self.method_folder(nr, 'heuristic')
+        dir = self.method_folder(nr, 'hrrf')
         return dir / f'neumann_svals_{k:02}.npy'
 
     def projection_error(self, nr: int, method: str, k: int, scale: float = 0.1) -> Path:

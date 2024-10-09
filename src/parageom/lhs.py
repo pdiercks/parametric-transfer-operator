@@ -3,6 +3,7 @@
 import numpy as np
 from pyDOE3 import lhs
 from pymor.parameters.base import Mu, ParameterSpace
+from scipy.stats import qmc
 
 
 def scale_range(samples: np.ndarray, ranges: np.ndarray):
@@ -51,3 +52,13 @@ if __name__ == '__main__':
 
     plt.plot(samples[:, 0], samples[:, 1], 'o')
     plt.show()
+
+
+def parameter_set(sampler, num_samples, ps, name='R'):
+    l_bounds = ps.ranges[name][:1] * ps.parameters[name]
+    u_bounds = ps.ranges[name][1:] * ps.parameters[name]
+    samples = qmc.scale(sampler.random(num_samples), l_bounds, u_bounds)
+    s = []
+    for x in samples:
+        s.append(ps.parameters.parse(x))
+    return s

@@ -1,9 +1,10 @@
-"""empirical interpolation module"""
+"""Empirical interpolation module."""
 
 from typing import Optional
 
 import numpy as np
 from scipy.sparse import csr_array
+from scipy.stats import qmc
 
 
 def vec(petsc_mat):
@@ -43,11 +44,13 @@ def interpolate_subdomain_operator(
         atol: Absolute tolerance for the POD with DEIM.
         rtol: Relative tolerance for the POD with DEIM.
         method: POD method (choices: method_of_snapshots, qr_svd).
+
     """
-    from pymor.vectorarrays.numpy import NumpyVectorSpace
-    from pymor.operators.numpy import NumpyMatrixOperator
     from pymor.algorithms.ei import deim
-    from parageom.lhs import sample_lhs
+    from pymor.operators.numpy import NumpyMatrixOperator
+    from pymor.vectorarrays.numpy import NumpyVectorSpace
+
+    from parageom.lhs import parameter_set
 
     parameter_space = operator.parameters.space(example.mu_range)
     parameter_name = example.parameter_name
@@ -56,9 +59,9 @@ def interpolate_subdomain_operator(
     elif design == 'random':
         training_set = parameter_space.sample_randomly(ntrain)
     elif design == 'lhs':
-        training_set = sample_lhs(
-            parameter_space, name=parameter_name, samples=ntrain, criterion='center', random_state=25525298
-        )
+        pdim = operator.parameters.dim
+        sampler = qmc.LatinHypercube(pdim, optimization='random-cd', seed=25525298)
+        training_set = parameter_set(sampler, ntrain, parameter_space, name=parameter_name)
     else:
         raise NotImplementedError
 
@@ -116,13 +119,14 @@ def interpolate_subdomain_operator(
 
 
 if __name__ == '__main__':
-    from parageom.tasks import example
-    from parageom.fom import discretize_subdomain_operators
+    from pymor.operators.constructions import LincombOperator
     from scipy.linalg import solve
     from scipy.sparse.linalg import norm
-    from pymor.operators.constructions import LincombOperator
 
-    operator, _ = discretize_subdomain_operators(example)
+    from parageom.fom import discretize_subdomain_operators
+    from parageom.tasks import example
+
+    operator = discretize_subdomain_operators(example)[0]
     cb, interpmat, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(
         example, operator, design='uniform', ntrain=501, modes=None, atol=0.0, rtol=1e-12
     )

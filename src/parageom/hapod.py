@@ -13,6 +13,7 @@ from pymor.operators.interface import Operator
 from pymor.parameters.base import ParameterSpace
 from pymor.tools.random import new_rng
 from scipy.sparse.linalg import LinearOperator, eigsh
+from scipy.stats import qmc
 
 
 def adaptive_rrf_normal(
@@ -75,7 +76,7 @@ def adaptive_rrf_normal(
 
 
 def main(args):
-    from parageom.lhs import sample_lhs
+    from parageom.lhs import parameter_set
     from parageom.locmor import discretize_transfer_problem, oversampling_config_factory
     from parageom.tasks import example
 
@@ -112,18 +113,13 @@ def main(args):
     transfer, fext = discretize_transfer_problem(example, struct_grid, omega, omega_in, osp_config, debug=args.debug)
 
     # ### Generate training seed for each of the 11 oversampling problems
-    myseeds = np.random.SeedSequence(example.training_set_seed).generate_state(11)
-
+    myseeds = np.random.SeedSequence(example.hapod.seed_train).generate_state(11)
+    pdim = example.parameter_dim[args.k]
+    sampler_train = qmc.LatinHypercube(pdim, optimization='random-cd', seed=myseeds[args.k])
     parameter_space = ParameterSpace(transfer.operator.parameters, example.mu_range)
     parameter_name = 'R'
-    ntrain = example.ntrain('hapod', args.k)
-    training_set = sample_lhs(
-        parameter_space,
-        name=parameter_name,
-        samples=ntrain,
-        criterion='center',
-        random_state=myseeds[args.k],
-    )
+    ntrain = example.hapod.ntrain(pdim)
+    training_set = parameter_set(sampler_train, ntrain, parameter_space, name=parameter_name)
     logger.info('Starting range approximation of transfer operators' f' for training set of size {len(training_set)}.')
 
     # ### Generate random seed for each specific mu in the training set
@@ -143,12 +139,12 @@ def main(args):
     neumann_snapshots = transfer.range.empty(reserve=len(training_set))
     spectral_basis_sizes = list()
 
-    epsilon_star = example.epsilon_star['hapod']
+    epsilon_star = example.hapod.eps / example.energy_scale
     Nin = transfer.rhs.dofs.size
-    epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.omega**2.0) * epsilon_star
-    epsilon_pod = np.sqrt(Nin * ntrain) * example.omega * epsilon_star
+    epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.hapod.omega**2.0) * epsilon_star
+    epsilon_pod = np.sqrt(Nin * ntrain) * example.hapod.omega * epsilon_star
 
-    sampling_options = {'scale': 0.1}
+    sampling_options = {'scale': example.g_scale}
     for mu, seed_seq in zip(training_set, seed_seqs_rrf):
         with new_rng(seed_seq):
             transfer.assemble_operator(mu)

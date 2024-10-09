@@ -1,11 +1,10 @@
 import pathlib
 from time import perf_counter
 
-# import basix
+import basix
 import dolfinx as df
 import numpy as np
-
-# import ufl
+import ufl
 from mpi4py import MPI
 from multi.domain import RectangularDomain, StructuredQuadGrid
 from multi.io import read_mesh
@@ -117,7 +116,6 @@ def main(args):
             ω=args.omega,
             nreal=args.nreal,
             method=args.method,
-            distribution='normal',
             use_ei=args.ei,
         )
         logger.info(f'Took {perf_counter()-tic} to build ROM.')
@@ -134,7 +132,6 @@ def main(args):
             ω=args.omega,
             nreal=args.nreal,
             method=args.method,
-            distribution='normal',
             use_ei=args.ei,
         )
 
@@ -268,7 +265,7 @@ def build_fom(example, ω=0.5):
     return fom, parageom
 
 
-def build_rom(example, dofmap, params, num_modes, ω=0.5, nreal=0, method='hapod', distribution='normal', use_ei=False):
+def build_rom(example, dofmap, params, num_modes, ω=0.5, nreal=0, method='hapod', use_ei=False):
     from pymor.models.basic import StationaryModel
     from pymor.operators.constructions import VectorOperator
 
@@ -284,10 +281,8 @@ def build_rom(example, dofmap, params, num_modes, ω=0.5, nreal=0, method='hapod
     local_bases = []
     max_dofs_per_vert = []
     for cell in range(num_coarse_grid_cells):
-        local_bases.append(np.load(example.local_basis_npy(nreal, cell, method=method, distr=distribution)))
-        max_dofs_per_vert.append(
-            np.load(example.local_basis_dofs_per_vert(nreal, cell, method=method, distr=distribution))
-        )
+        local_bases.append(np.load(example.local_basis_npy(nreal, cell, method=method)))
+        max_dofs_per_vert.append(np.load(example.local_basis_dofs_per_vert(nreal, cell, method=method)))
 
     # ### Maximum number of modes per vertex
     max_dofs_per_vert = np.array(max_dofs_per_vert)
@@ -387,9 +382,7 @@ if __name__ == '__main__':
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument('nreal', type=int, help='The nreal-th realization of the local bases.')
-    parser.add_argument(
-        'method', type=str, help='The method used to construct local bases.', choices=('hapod', 'heuristic')
-    )
+    parser.add_argument('method', type=str, help='The method used to construct local bases.', choices=('hapod', 'hrrf'))
     parser.add_argument('num_params', type=int, help='Size of the validation set.')
     parser.add_argument('num_modes', type=int, help='Number of modes per vertex of ROM.')
     parser.add_argument('--ei', action='store_true', help='Use EI.')

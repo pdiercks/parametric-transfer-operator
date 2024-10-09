@@ -14,17 +14,8 @@ from pymor.tools.random import new_rng
 from scipy.stats import qmc
 
 
-def parameter_set(sampler, num_samples, ps, name='R'):
-    l_bounds = ps.ranges[name][:1] * ps.parameters[name]
-    u_bounds = ps.ranges[name][1:] * ps.parameters[name]
-    samples = qmc.scale(sampler.random(num_samples), l_bounds, u_bounds)
-    s = []
-    for x in samples:
-        s.append(ps.parameters.parse(x))
-    return s
-
-
 def main(args):
+    from parageom.lhs import parameter_set
     from parageom.locmor import discretize_transfer_problem, oversampling_config_factory
     from parageom.tasks import example
 

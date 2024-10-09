@@ -165,7 +165,7 @@ def task_hrrf():
             deps.extend(with_h5(example.path_omega(k)))
             deps.extend(with_h5(example.path_omega_in(k)))
             targets = []
-            targets.append(example.log_basis_construction(nreal, 'heuristic', k))
+            targets.append(example.log_basis_construction(nreal, 'hrrf', k))
             targets.append(example.heuristic_modes_npy(nreal, k))
             if example.debug:
                 targets.extend(with_h5(example.heuristic_modes_xdmf(nreal, k)))
@@ -321,7 +321,7 @@ def task_validate_rom():
                 for key, value in with_ei.items():
                     targets = []
                     targets.append(example.rom_error_u(nreal, num_modes, method=method, ei=value))
-                    # targets.append(example.rom_error_s(nreal, num_modes, method=method, ei=value))
+                    targets.append(example.rom_error_s(nreal, num_modes, method=method, ei=value))
                     targets.append(example.log_validate_rom(nreal, num_modes, method=method, ei=value))
                     if value:
                         options['--ei'] = ''
@@ -353,7 +353,7 @@ def task_fig_rom_error():
             deps = [source]
             for num_modes in number_of_modes:
                 deps.append(example.rom_error_u(nreal, num_modes, method=method, ei=ei))
-                # deps.append(example.rom_error_s(nreal, num_modes, method=method, ei=ei))
+                deps.append(example.rom_error_s(nreal, num_modes, method=method, ei=ei))
             targets = [example.fig_rom_error(method, ei=ei)]
             yield {
                 'name': ':'.join([method, with_ei[ei]]),
@@ -364,35 +364,34 @@ def task_fig_rom_error():
             }
 
 
-# def task_optimization():
-#     """ParaGeom: Determine optimal design."""
-#     source = SRC / 'optimization.py'
-#
-#     num_modes = 100
-#     method = 'hapod'  # TODO add heuristic --> adjust log, targets
-#     minimizer = 'SLSQP'
-#     # TODO add dataclass for optimization task
-#     omega = example.omega
-#
-#     nreal = 0  # do optimization only for single realization
-#     deps = [SRC / 'optimization.py']
-#     deps.append(example.coarse_grid('global'))
-#     deps.append(example.parent_domain('global'))
-#     deps.append(example.parent_unit_cell)
-#     for cell in range(example.nx * example.ny):
-#         deps.append(example.local_basis_npy(nreal, cell))
-#         deps.append(example.local_basis_dofs_per_vert(nreal, cell))
-#     targets = [example.fom_minimization_data, example.rom_minimization_data, example.log_optimization]
-#     return {
-#         'file_dep': deps,
-#         'actions': [
-#             'python3 {} {} {} --minimizer {} --omega {} --ei'.format(
-#                 source.as_posix(), num_modes, method, minimizer, omega
-#             )
-#         ],
-#         'targets': targets,
-#         'clean': True,
-#     }
+def task_optimization():
+    """ParaGeom: Determine optimal design."""
+    source = SRC / 'optimization.py'
+
+    nreal = example.opt.nreal
+    omega = example.opt.omega
+    num_modes = example.opt.num_modes
+    method = example.opt.method
+    minimizer = example.opt.minimizer
+
+    deps = [source]
+    deps.append(example.coarse_grid('global'))
+    deps.append(example.parent_domain('global'))
+    deps.append(example.parent_unit_cell)
+    for cell in range(example.nx * example.ny):
+        deps.append(example.local_basis_npy(nreal, cell, method=method))
+        deps.append(example.local_basis_dofs_per_vert(nreal, cell, method=method))
+    targets = [example.fom_minimization_data, example.rom_minimization_data, example.log_optimization]
+    return {
+        'file_dep': deps,
+        'actions': [
+            'python3 {} {} {} --minimizer {} --omega {} --ei'.format(
+                source.as_posix(), num_modes, method, minimizer, omega
+            )
+        ],
+        'targets': targets,
+        'clean': True,
+    }
 
 
 # def task_pp_stress():

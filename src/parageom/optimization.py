@@ -119,7 +119,6 @@ def main(args):
     unit_cell_domain = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, kwargs={'gdim': example.gdim})[0]
     V_i = df.fem.functionspace(unit_cell_domain, ('P', example.fe_deg, (example.gdim,)))
     u_local = df.fem.Function(V_i, name='u_i')
-    # d_local = df.fem.Function(V_i, name='d_i')
 
     # ### Build localized ROM
     coarse_grid_path = example.coarse_grid('global')
@@ -186,11 +185,10 @@ def main(args):
     stress_ufl_fom_vector = ufl.as_vector([suf[0, 0], suf[1, 1], suf[2, 2], suf[0, 1]])
     stress_expr_fom = df.fem.Expression(stress_ufl_fom_vector, q_points)
 
-    # FIXME: use individual instance of ParaGeom for ROM
     rommat = {
         'gdim': parageom_fom.domain.gdim,
-        'E': example.youngs_modulus,
-        'NU': example.poisson_ratio,
+        'E': example.E,
+        'NU': example.NU,
         'plane_stress': example.plane_stress,
     }
     parageom_rom = ParaGeomLinEla(parageom_fom.domain, V, d_rom, rommat)
@@ -247,7 +245,7 @@ def main(args):
 
     # ### Solve optimization problem using FOM
     num_subdomains = example.nx * example.ny
-    initial_guess = fom.parameters.parse([0.1 for _ in range(num_subdomains)])
+    initial_guess = fom.parameters.parse([0.1 * example.preproc.unit_length for _ in range(num_subdomains)])
     parameter_space = fom.parameters.space(example.mu_range)
     mu_range = parameter_space.ranges['R']
 
@@ -263,6 +261,7 @@ def main(args):
     opt_fom_result = solve_optimization_problem(
         logger,
         args,
+        example,
         initial_guess,
         bounds,
         evaluate_constraint,
@@ -281,6 +280,7 @@ def main(args):
     opt_rom_result = solve_optimization_problem(
         logger,
         args,
+        example,
         initial_guess,
         bounds,
         evaluate_constraint,
@@ -305,46 +305,27 @@ def main(args):
     report(logger, fom.name, opt_fom_result, fom.parameters.parse, fom_minimization_data)
     report(logger, rom.name, opt_rom_result, fom.parameters.parse, rom_minimization_data, reference_mu=mu_ref)
 
-    # TODO: what data should be shown in the paper?
+    if args.show:
+        import matplotlib.pyplot as plt
 
-    # for k, data in enumerate([fom_minimization_data, rom_minimization_data]):
-    #     jvalues = data["evaluations"]
-    #     mus = data["evaluation_points"]
-    #     price = get_prices(mus)
-    #     compl = np.array(jvalues) - np.array(price)
-    #     iters = np.arange(data["num_evals"])
-    #
-    #     data["prices"] = price
-    #     data["compliance"] = compl
-    #     data["iterations"] = iters
+        fig = plt.figure(constrained_layout=True)
+        axes = fig.subplots(nrows=2, ncols=1, sharex=True)
 
-    # if args.show:
-    #     import matplotlib.pyplot as plt
-    #
-    #     fig = plt.figure(constrained_layout=True)
-    #     axes = fig.subplots(nrows=2, ncols=1, sharex=True)
-    #
-    #     fig.suptitle("Minimization of the objective functional J")
-    #     for k, data in enumerate([fom_minimization_data, rom_minimization_data]):
-    #         iters = data["iterations"]
-    #         price = data["prices"]
-    #         compl = data["compliance"]
-    #         jvalues = data["evaluations"]
-    #
-    #         axes[k].plot(iters, price, "b-", label="price P")  # type: ignore
-    #         axes[k].plot(iters, compl, "r-", label="compliance C")  # type: ignore
-    #         axes[k].plot(iters, jvalues, "k-", label="J = C + P")  # type: ignore
-    #
-    #         axes[k].set_ylabel("QoI evaluations")  # type: ignore
-    #         axes[k].set_xlabel("Number of iterations")  # type: ignore
-    #
-    #         title = "Optimization using FOM"
-    #         if k == 1:
-    #             title = "Optimization using ROM"
-    #         axes[k].set_title(title)  # type: ignore
-    #     axes[1].legend(loc="best")  # type: ignore
-    #
-    #     plt.show()
+        fig.suptitle('Minimization of the objective functional J')
+        for k, data in enumerate([fom_minimization_data, rom_minimization_data]):
+            iters = data['iterations']
+            jvalues = data['evaluations']
+
+            axes[k].plot(iters, jvalues, 'k-', label='J = (1-ω)M + ωC')
+            axes[k].set_ylabel('QoI evaluations')
+            axes[k].set_xlabel('Number of iterations')
+
+            title = 'Optimization using FOM'
+            if k == 1:
+                title = 'Optimization using ROM'
+            axes[k].set_title(title)
+        axes[1].legend(loc='best')
+        plt.show()
 
     # ### Write outputs
     fom_minimization_data['method'] = args.minimizer
@@ -403,7 +384,16 @@ def report(logger, model_name, result, parse, data, reference_mu=None):
 
 
 def solve_optimization_problem(
-    logger, cli, initial_guess, bounds, compute_stress, wrapped_model, stress, minimization_data, gradient=False
+    logger,
+    cli,
+    example,
+    initial_guess,
+    bounds,
+    compute_stress,
+    wrapped_model,
+    stress,
+    minimization_data,
+    gradient=False,
 ):
     """Solve optimization problem."""
     from functools import partial
@@ -411,7 +401,8 @@ def solve_optimization_problem(
 
     # ### Lower & upper bounds for principal Cauchy stress
     # see https://doi.org/10.1016/j.compstruc.2019.106104
-    upper_bound = 2.2  # [MPa]
+    # upper_bound = 2.2  # [MPa]
+    upper_bound = 2.2 * example.sigma_scale  # scaled upper bound
     confidence = cli.confidence
     model = wrapped_model.model
 
