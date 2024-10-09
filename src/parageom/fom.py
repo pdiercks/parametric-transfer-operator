@@ -439,7 +439,6 @@ if __name__ == '__main__':
         'random': parameter_space.sample_randomly(1)[0],
         'linear': fom.parameters.parse(np.linspace(0.1, 0.3, num=10)),
         'quadratic': fom.parameters.parse(f_quad(np.linspace(0, 10, num=10, endpoint=False))),
-        # 'optimum': fom.parameters.parse([0.28793595814454276, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3]),
     }
     for name, mu in designs.items():
         u.x.array[:] = 0.0
