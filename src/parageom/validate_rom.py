@@ -34,7 +34,7 @@ def main(args):
     logger = getLogger(stem, level=loglevel)
 
     # ### FOM
-    fom, _ = build_fom(example)
+    fom, parageom_fom = build_fom(example)
     V = fom.solution_space.V
 
     # ### Global function for displacment
@@ -42,51 +42,55 @@ def main(args):
     d_fom = df.fem.Function(V, name='ufom')
 
     # ### Quadrature space for stress
-    # basix_celltype = getattr(basix.CellType, V.mesh.topology.cell_type.name)
-    # q_degree = 2
-    # q_points, _ = basix.make_quadrature(basix_celltype, q_degree)
-    # qve = basix.ufl.quadrature_element(basix_celltype, value_shape=(4,), scheme='default', degree=q_degree)
-    # QV = df.fem.functionspace(V.mesh, qve)
+    basix_celltype = getattr(basix.CellType, V.mesh.topology.cell_type.name)
+    q_degree = 2
+    q_points, _ = basix.make_quadrature(basix_celltype, q_degree)
+    qve = basix.ufl.quadrature_element(basix_celltype, value_shape=(4,), scheme='default', degree=q_degree)
+    QV = df.fem.functionspace(V.mesh, qve)
 
-    # stress_fom = df.fem.Function(QV)
-    # stress_rom = df.fem.Function(QV)
+    stress_fom = df.fem.Function(QV)
+    stress_rom = df.fem.Function(QV)
 
     # ### UFL representation and Expression of stress
-    # suf = parageom_fom.weighted_stress(d_fom)
-    # stress_ufl_fom_vector = ufl.as_vector([suf[0, 0], suf[1, 1], suf[2, 2], suf[0, 1]])
-    # stress_expr_fom = df.fem.Expression(stress_ufl_fom_vector, q_points)
+    suf = parageom_fom.weighted_stress(d_fom)
+    stress_ufl_fom_vector = ufl.as_vector([suf[0, 0], suf[1, 1], suf[2, 2], suf[0, 1]])
+    stress_expr_fom = df.fem.Expression(stress_ufl_fom_vector, q_points)
 
-    # sur = parageom_fom.weighted_stress(d_rom)
-    # stress_ufl_rom_vector = ufl.as_vector([sur[0, 0], sur[1, 1], sur[2, 2], sur[0, 1]])
-    # stress_expr_rom = df.fem.Expression(stress_ufl_rom_vector, q_points)
+    sur = parageom_fom.weighted_stress(d_rom)
+    stress_ufl_rom_vector = ufl.as_vector([sur[0, 0], sur[1, 1], sur[2, 2], sur[0, 1]])
+    stress_expr_rom = df.fem.Expression(stress_ufl_rom_vector, q_points)
 
-    # tdim = V.mesh.topology.dim
-    # map_c = V.mesh.topology.index_map(tdim)
-    # num_cells = map_c.size_local + map_c.num_ghosts
-    # cells = np.arange(0, num_cells, dtype=np.int32)
+    tdim = V.mesh.topology.dim
+    map_c = V.mesh.topology.index_map(tdim)
+    num_cells = map_c.size_local + map_c.num_ghosts
+    cells = np.arange(0, num_cells, dtype=np.int32)
 
-    # def compute_principal_components(f):
-    #     values = f.reshape(cells.size, 4, 4)
-    #     fxx = values[:, :, 0]
-    #     fyy = values[:, :, 1]
-    #     fxy = values[:, :, 3]
-    #     fmin = (fxx + fyy) / 2 - np.sqrt(((fxx - fyy) / 2) ** 2 + fxy**2)
-    #     fmax = (fxx + fyy) / 2 + np.sqrt(((fxx - fyy) / 2) ** 2 + fxy**2)
-    #     return fmin, fmax
+    def compute_principal_components(f):
+        values = f.reshape(cells.size, 4, 4)
+        fxx = values[:, :, 0]
+        fyy = values[:, :, 1]
+        fxy = values[:, :, 3]
+        fmin = (fxx + fyy) / 2 - np.sqrt(((fxx - fyy) / 2) ** 2 + fxy**2)
+        fmax = (fxx + fyy) / 2 + np.sqrt(((fxx - fyy) / 2) ** 2 + fxy**2)
+        return fmin, fmax
 
     # TODO: add stress plots in other postproc script?
 
     # ### Quadrature space for principal stress
-    # qs = basix.ufl.quadrature_element(basix_celltype, value_shape=(2,), # type: ignore
-    #                                   scheme="default", degree=q_degree)
-    # Q = df.fem.functionspace(V.mesh, qs)
-    # p_stress_fom = df.fem.Function(Q)
-    # p_stress_rom = df.fem.Function(Q)
+    qs = basix.ufl.quadrature_element(
+        basix_celltype,
+        value_shape=(2,),  # type: ignore
+        scheme='default',
+        degree=q_degree,
+    )
+    Q = df.fem.functionspace(V.mesh, qs)
+    p_stress_fom = df.fem.Function(Q)
+    p_stress_rom = df.fem.Function(Q)
 
     # ### Lagrange space for stress output
-    # W = df.fem.functionspace(V.mesh, ("P", 2, (2,))) # output space: linear Lagrange elements
-    # proj_stress_fom = df.fem.Function(W)
-    # proj_stress_rom = df.fem.Function(W)
+    W = df.fem.functionspace(V.mesh, ('P', example.fe_deg, (2,)))  # output space for stress
+    proj_stress_fom = df.fem.Function(W)
+    proj_stress_rom = df.fem.Function(W)
 
     # ### Function for displacement on unit cell (for reconstruction)
     unit_cell_domain = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, kwargs={'gdim': example.gdim})[0]
@@ -135,26 +139,25 @@ def main(args):
         )
 
     P = params.space(example.mu_range)
-    with new_rng(example.validation_set_seed):
+    with new_rng(example.rom_validation.seed):
         validation_set = P.sample_randomly(args.num_params)
 
     fom_sols = fom.solution_space.empty()
     rom_sols = fom.solution_space.empty()
 
-    # def compute_stress_error_norms(fom, rom):
-    #     fom_norm = np.linalg.norm(fom)
-    #     abs_err = np.abs(fom - rom)
-    #     rel_err = abs_err / fom_norm
-    #     max_rel_err = np.max(rel_err)  # pointwise
-    #     rel_err_norm = np.linalg.norm(abs_err) / fom_norm  # global
-    #     return {
-    #         'max_rel_err': max_rel_err,
-    #         'rel_err_norm': rel_err_norm,
-    #     }
+    def compute_stress_error_norms(fom, rom):
+        fom_norm = np.linalg.norm(fom)
+        abs_err = np.abs(fom - rom)
+        rel_err = abs_err / fom_norm
+        max_rel_err = np.max(rel_err)  # pointwise
+        rel_err_norm = np.linalg.norm(abs_err) / fom_norm  # global
+        return {
+            'max_rel_err': max_rel_err,
+            'rel_err_norm': rel_err_norm,
+        }
 
-    # max_rel_err_stress = []
+    max_rel_err_stress = []
     energy_product = fom.products['energy']
-
     kappa = np.empty(len(validation_set), dtype=np.float64) if args.condition else None
 
     for i_mu, mu in enumerate(validation_set):
@@ -188,14 +191,14 @@ def main(args):
             else:
                 kappa[i_mu] = np.linalg.cond(A.matrix)
 
-        # stress_expr_rom.eval(V.mesh, entities=cells, values=stress_rom.x.array.reshape(cells.size, -1))
-        # s_rom = compute_principal_components(stress_rom.x.array.reshape(cells.size, -1))
-        #
-        # stress_expr_fom.eval(V.mesh, entities=cells, values=stress_fom.x.array.reshape(cells.size, -1))
-        # s_fom = compute_principal_components(stress_fom.x.array.reshape(cells.size, -1))
-        #
-        # first_principal = compute_stress_error_norms(s_fom[1], s_rom[1])
-        # max_rel_err_stress.append(first_principal['max_rel_err'])
+        stress_expr_rom.eval(V.mesh, entities=cells, values=stress_rom.x.array.reshape(cells.size, -1))
+        s_rom = compute_principal_components(stress_rom.x.array.reshape(cells.size, -1))
+
+        stress_expr_fom.eval(V.mesh, entities=cells, values=stress_fom.x.array.reshape(cells.size, -1))
+        s_fom = compute_principal_components(stress_fom.x.array.reshape(cells.size, -1))
+
+        first_principal = compute_stress_error_norms(s_fom[1], s_rom[1])
+        max_rel_err_stress.append(first_principal['max_rel_err'])
 
     # displacement error in energy norm
     u_errors = fom_sols - rom_sols
@@ -224,21 +227,22 @@ def main(args):
           max = {np.max(nodal_uerr)}
           avg = {np.average(nodal_uerr)}
 
+    Stress
+          min (max) rel err = {np.min(max_rel_err_stress)}
+          max (max) rel err = {np.max(max_rel_err_stress)}
+          avg (max) rel err = {np.average(max_rel_err_stress)}
+          Worst mu = {np.argmax(max_rel_err_stress)}
     """)
-    # Stress
-    #       min (max) rel err = {np.min(max_rel_err_stress)}
-    #       max (max) rel err = {np.max(max_rel_err_stress)}
-    #       avg (max) rel err = {np.average(max_rel_err_stress)}
-    #       Worst mu = {np.argmax(max_rel_err_stress)}
 
     # ### Write targets
     output_u = example.rom_error_u(args.nreal, num_modes, method=args.method, ei=args.ei).as_posix()
     np.savez(output_u, relerr=errn, nodal_err=nodal_uerr)
 
-    # output_s = example.rom_error_s(args.nreal, num_modes, method=args.method, ei=args.ei).as_posix()
-    # np.savez(output_s, relerr=max_rel_err_stress)
+    output_s = example.rom_error_s(args.nreal, num_modes, method=args.method, ei=args.ei).as_posix()
+    np.savez(output_s, relerr=max_rel_err_stress)
 
     if args.condition:
+        assert kappa is not None
         output_k = example.rom_condition(args.nreal, args.num_modes, method=args.method, ei=args.ei)
         np.save(output_k, kappa)
 
