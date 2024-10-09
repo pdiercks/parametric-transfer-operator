@@ -277,7 +277,7 @@ def discretize_auxiliary_problem(
         coarse_grid: Optional provide coarse grid for `GlobalAuxiliaryProblem`.
 
     """
-    degree = example.geom_deg
+    degree = example.preproc.geom_deg
     gdim = example.gdim
 
     # linear elasticity problem

@@ -326,7 +326,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
 
     # ### Output definition
     # solve FOM for initial mu --> max Volume
-    initial_mu = params.parse([0.1 for _ in range(example.nx)])
+    initial_mu = params.parse([0.1 * example.preproc.unit_length for _ in range(example.nx)])
     vol_ref = compute_volume(initial_mu)
     U_ref = operator.apply_inverse(rhs.as_range_array(), mu=initial_mu)
 
@@ -375,19 +375,20 @@ if __name__ == '__main__':
         coarse_grid=coarse_grid,
     )
     d = df.fem.Function(auxp.problem.V, name='d_trafo')
-    fom = discretize_fom(example, auxp, d)[0]
+    fom, parageom = discretize_fom(example, auxp, d)
 
     parameter_space = auxp.parameters.space(example.mu_range)
-    mu = parameter_space.parameters.parse([0.2 * example.unit_length for _ in range(10)])
+    mu = parameter_space.parameters.parse([0.2 * example.preproc.unit_length for _ in range(10)])
     U = fom.solve(mu)  # dimensionless solution U
     # fext = fom.rhs.as_range_array().to_numpy()
     # A = fom.operator.assemble(mu).matrix
     # aj, ai, aij = A.getValuesCSR()
 
     # correct value unit sqrt(Nmm) for the energy norm
-    # Unorm_ = 1.3938
-    # Unorm2_ = 1.9427
+    # Unorm_ = 1.39380169
+    # Unorm2_ = 1.9427...
     energy_norm = U.norm(fom.products['energy']) * example.energy_scale
+    assert np.isclose(energy_norm, 1.3938017)
 
     # check load
     total_load = np.sum(fom.rhs.as_range_array().to_numpy())  # type: ignore
@@ -406,14 +407,14 @@ if __name__ == '__main__':
     QV = df.fem.functionspace(V.mesh, QVe)
     stress = df.fem.Function(QV, name='Cauchy')
 
-    # use scaled material to compute real stress from scaled displacement
-    matparam = {
-        'gdim': 2,
-        'E': example.E / example.sigma_scale,
-        'NU': example.NU,
-        'plane_stress': example.plane_stress,
-    }
-    parageom_physical = ParaGeomLinEla(auxp.problem.domain, auxp.problem.V, d, matparam)
+    # NOTE
+    # the stress limit is 2.2 MPa
+    # in the model we compute the dimensionless stress
+    # (instead of computing the dimensional stress)
+    # thus we simply scale the limit
+    stress_limit = 2.2
+    scaled_limit = 2.2 * example.sigma_scale
+    print(f'{scaled_limit=}')
 
     # scalar quadrature space
     qs = basix.ufl.quadrature_element(basix_celltype, value_shape=(2,), scheme='default', degree=q_degree)
@@ -421,7 +422,8 @@ if __name__ == '__main__':
     sigma_q = df.fem.Function(Q, name='sp')
     W = df.fem.functionspace(
         V.mesh, ('P', 2, (2,))
-    )  # target space, linear Lagrange elements, store both s1 and s2 as components
+    )  # target space, quadratic Lagrange elements, store both s1 and s2 as components
+    # with xdmf have to use same degree as geometry interpolation
     sigma_p = df.fem.Function(W, name='sp')
 
     tdim = V.mesh.topology.dim
@@ -447,7 +449,7 @@ if __name__ == '__main__':
         U = fom.solve(mu)
         # fom.visualize(U, filename=f"output/{name}_u.xdmf")
         u.x.array[:] = U.to_numpy().flatten()
-        s1, s2 = principal_stress_2d(u, parageom_physical, q_degree, cells, stress.x.array.reshape(cells.size, -1))
+        s1, s2 = principal_stress_2d(u, parageom, q_degree, cells, stress.x.array.reshape(cells.size, -1))
 
         print(f'{name=}')
         print(f'{s1.flatten().min()} <= s1 <= {s1.flatten().max()}')

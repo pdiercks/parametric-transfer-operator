@@ -466,7 +466,7 @@ class BeamData:
 
         """
         x = domain.geometry.x
-        a = self.unit_length
+        a = self.preproc.unit_length
         xmin = np.amin(x, axis=0)
         xmax = np.amax(x, axis=0)
 
