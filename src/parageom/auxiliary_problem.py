@@ -277,7 +277,7 @@ def discretize_auxiliary_problem(
         coarse_grid: Optional provide coarse grid for `GlobalAuxiliaryProblem`.
 
     """
-    degree = example.geom_deg
+    degree = example.preproc.geom_deg
     gdim = example.gdim
 
     # linear elasticity problem
@@ -426,7 +426,7 @@ class ParaCircle(ParametricDirichletLift):
 def discretize_auxiliary_model(example: BeamData, omega: Domain):
     """Build FOM of the auxiliary problem on the unit cell."""
     # define linear elastic problem
-    degree = example.geom_deg
+    degree = example.preproc.geom_deg
     gdim = example.gdim
     emod = df.fem.Constant(omega.grid, df.default_scalar_type(1.0))
     nu = df.fem.Constant(omega.grid, df.default_scalar_type(0.25))

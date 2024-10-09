@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import numpy as np
 from dolfinx.io import XDMFFile  # type: ignore
 from mpi4py import MPI
@@ -13,8 +11,6 @@ from pymor.core.logger import getLogger
 from pymor.operators.interface import Operator
 from pymor.parameters.base import ParameterSpace
 from pymor.tools.random import new_rng
-from scipy.sparse.linalg import LinearOperator, eigsh
-from scipy.special import erfinv
 from scipy.stats import qmc
 
 
@@ -52,81 +48,51 @@ def heuristic_range_finder(
     training_set,
     testing_set,
     error_tol: float = 1e-4,
-    failure_tolerance: float = 1e-15,
     num_testvecs: int = 20,
     block_size: int = 1,
     num_enrichments: int = 5,
     radius_mu: float = 0.05,
-    lambda_min=None,
     sampling_options=None,
-    compute_neumann=True,
+    compute_neumann=False,
     fext=None,
 ):
     """Heuristic range approximation."""
     tp = transfer_problem
     sampling_options = sampling_options or {}
 
-    source_product = tp.source_product
     range_product = tp.range_product
-    assert source_product is None or isinstance(source_product, Operator)
     assert range_product is None or isinstance(range_product, Operator)
-
-    if source_product is None:
-        lambda_min = 1
-    elif lambda_min is None:
-
-        def mv(v):
-            return source_product.apply(source_product.source.from_numpy(v)).to_numpy()  # type: ignore
-
-        def mvinv(v):
-            return source_product.apply_inverse(
-                source_product.range.from_numpy(v)  # type: ignore
-            ).to_numpy()
-
-        L = LinearOperator(
-            (source_product.source.dim, source_product.range.dim),  # type: ignore
-            matvec=mv,  # type: ignore
-        )
-        Linv = LinearOperator(
-            (source_product.range.dim, source_product.source.dim),  # type: ignore
-            matvec=mvinv,  # type: ignore
-        )
-        lambda_min = eigsh(L, sigma=0, which='LM', return_eigenvectors=False, k=1, OPinv=Linv)[0]
 
     logger.debug(f'Computing test set of size {len(testing_set) * num_testvecs} for spectral modes.')
     if compute_neumann:
         logger.debug(f'Computing test set of size {len(testing_set)} for neumann modes.')
         assert fext is not None
 
+    # testvector sets
     M_s = tp.range.empty(reserve=len(testing_set) * num_testvecs)
-    M_n = tp.range.empty(reserve=num_testvecs)  # global test set for neumann modes
+    M_n = tp.range.empty(reserve=len(testing_set))
     for mu in testing_set:
         tp.assemble_operator(mu)
-        R = tp.generate_random_boundary_data(num_testvecs)
+        R = tp.generate_random_boundary_data(num_testvecs, 'normal', sampling_options)
         M_s.append(tp.solve(R))
         if compute_neumann:
             R_neumann = tp.op.apply_inverse(fext)
             R_in_neumann = tp.range.from_numpy(R_neumann.dofs(tp._restriction))
             M_n.append(orthogonal_part(R_in_neumann, tp.kernel, product=None, orthonormal=True))
 
-    # ### Compute non-parametric testlimit
-    num_source_dofs = tp.rhs.dofs.size
-    testfail = failure_tolerance / min(num_source_dofs, tp.range.dim)
-    testlimit = np.sqrt(2.0 * lambda_min) * erfinv(testfail ** (1.0 / len(M_s))) * error_tol
-    logger.info(f'{lambda_min=}')
-    logger.info(f'{testlimit=}')
+    # initial maxnorm of testvectors
+    maxnorms0_s = M_s.norm(range_product)
+    maxnorms0_n = None
+    maxnorm = np.array([np.inf], dtype=np.float64)
+    if compute_neumann:
+        maxnorms0_n = M_n.norm(range_product)
+        maxnorm = np.append(maxnorm, np.inf)
 
     B = tp.range.empty()
-    maxnorms = None
-    if compute_neumann:
-        maxnorms = np.array([np.inf, np.inf], dtype=np.float64)
-    else:
-        maxnorms = np.array([np.inf], dtype=np.float64)
-
     num_iter = 0
     num_neumann = 0
     enriched = 0
-    while np.any(maxnorms > testlimit):
+    while np.any(maxnorm > error_tol):
         basis_length = len(B)
         ntrain = len(training_set)
         if num_iter > ntrain - 1:
@@ -144,10 +110,10 @@ def heuristic_range_finder(
         tp.assemble_operator(mu)
 
         # add mode for spectral basis
-        v = tp.generate_random_boundary_data(block_size)
+        v = tp.generate_random_boundary_data(block_size, 'normal', sampling_options)
         B.append(tp.solve(v))
 
-        add_neumann = maxnorms[-1] > testlimit
+        add_neumann = maxnorm[-1] > error_tol
         if compute_neumann and add_neumann:
             U_neumann = tp.op.apply_inverse(fext)
             U_in_neumann = tp.range.from_numpy(U_neumann.dofs(tp._restriction))
@@ -158,14 +124,14 @@ def heuristic_range_finder(
         gram_schmidt(B, range_product, atol=0, rtol=0, offset=basis_length, copy=False)
 
         M_s -= B.lincomb(B.inner(M_s, range_product).T)
-        maxnorms[0] = np.max(M_s.norm(range_product))
+        maxnorm[0] = np.max(M_s.norm(range_product) / maxnorms0_s)
 
         if compute_neumann and add_neumann:
             M_n -= B.lincomb(B.inner(M_n, range_product).T)
-            maxnorms[-1] = np.max(M_n.norm(range_product))
+            maxnorm[-1] = np.max(M_n.norm(range_product) / maxnorms0_n)
 
         num_iter += 1
-        logger.debug(f'{num_iter=}\t{maxnorms=}')
+        logger.debug(f'{num_iter=}\t{maxnorm=}')
 
     logger.info(f'Had to compute {num_neumann} neumann modes.')
     logger.info(f'Had to enrich training set {enriched} times by {num_enrichments}.')
@@ -174,17 +140,8 @@ def heuristic_range_finder(
     return B
 
 
-def parameter_set(sampler, num_samples, ps, name='R'):
-    l_bounds = ps.ranges[name][:1] * ps.parameters[name]
-    u_bounds = ps.ranges[name][1:] * ps.parameters[name]
-    samples = qmc.scale(sampler.random(num_samples), l_bounds, u_bounds)
-    s = []
-    for x in samples:
-        s.append(ps.parameters.parse(x))
-    return s
-
-
 def main(args):
+    from parageom.lhs import parameter_set
     from parageom.locmor import discretize_transfer_problem, oversampling_config_factory
     from parageom.tasks import example
 
@@ -193,7 +150,7 @@ def main(args):
     else:
         loglevel = 20
 
-    method = Path(__file__).stem  # heuristic
+    method = 'hrrf'
     logfilename = example.log_basis_construction(args.nreal, method, args.k).as_posix()
     set_defaults({'pymor.core.logger.getLogger.filename': logfilename})
     logger = getLogger(method, level=loglevel)
@@ -225,16 +182,32 @@ def main(args):
     parameter_space = ParameterSpace(transfer.operator.parameters, example.mu_range)
     parameter_name = 'R'
 
-    myseeds_train = np.random.SeedSequence(example.training_set_seed).generate_state(11)
-    ntrain = example.ntrain('heuristic', args.k)
+    myseeds_train = np.random.SeedSequence(example.hrrf.seed_train).generate_state(11)
     dim = example.parameter_dim[args.k]
+    ntrain = example.hrrf.ntrain(dim)
     sampler_train = qmc.LatinHypercube(dim, optimization='random-cd', seed=myseeds_train[args.k])
     training_set = parameter_set(sampler_train, ntrain, parameter_space, name=parameter_name)
 
+    # debug
+    # check norm of u
+    # UU = transfer.range.empty()
+    # NN = transfer.range.empty()
+    # for mu in training_set[:10]:
+    #     transfer.assemble_operator(mu)
+    #     R = transfer.generate_random_boundary_data(1, 'normal', {'scale': 0.1})
+    #     U = transfer.solve(R)
+    #     UU.append(U)
+    #
+    #     U_neumann = transfer.op.apply_inverse(fext)
+    #     U_in_neumann = transfer.range.from_numpy(U_neumann.dofs(transfer._restriction))
+    #     U_orth = orthogonal_part(U_in_neumann, transfer.kernel, product=None, orthonormal=True)
+    #     NN.append(U_orth)
+    # breakpoint()
+
     # do the same for testing set
-    myseeds_test = np.random.SeedSequence(example.testing_set_seed).generate_state(11)
+    myseeds_test = np.random.SeedSequence(example.hrrf.seed_test).generate_state(11)
     sampler_test = qmc.LatinHypercube(dim, optimization='random-cd', seed=myseeds_test[args.k])
-    ntest = example.ntest('heuristic', args.k)
+    ntest = example.hrrf.ntest(dim)
     testing_set = parameter_set(sampler_test, ntest, parameter_space, name=parameter_name)
 
     logger.info(
@@ -255,6 +228,7 @@ def main(args):
         assert not require_neumann_data
 
     # ### Heuristic randomized range finder
+    sampling_options = {'scale': example.g_scale}
     logger.debug(f'{seed_seqs_rrf[0]=}')
     with new_rng(seed_seqs_rrf[0]):
         spectral_basis = heuristic_range_finder(
@@ -264,9 +238,12 @@ def main(args):
             parameter_space,
             training_set,
             testing_set,
-            error_tol=example.rrf_ttol,
-            failure_tolerance=example.rrf_ftol,
-            num_testvecs=1,
+            error_tol=example.hrrf.rrf_ttol / example.energy_scale,
+            num_testvecs=example.hrrf.rrf_nt,
+            block_size=1,
+            num_enrichments=example.hrrf.num_enrichments,
+            radius_mu=example.hrrf.radius_mu,
+            sampling_options=sampling_options,
             compute_neumann=require_neumann_data,
             fext=fext,
         )
@@ -279,7 +256,7 @@ def main(args):
 
     logger.info(f'Final basis length (k={args.k:02}): {basis_length}.')
 
-    if logger.level == 10:  # DEBUG
+    if args.debug:
         viz = FenicsxVisualizer(spectral_basis.space)
         viz.visualize(spectral_basis, filename=example.heuristic_modes_xdmf(args.nreal, args.k))
     np.save(

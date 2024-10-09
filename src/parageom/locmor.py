@@ -26,7 +26,6 @@ from pymor.operators.constructions import LincombOperator, VectorOperator
 from pymor.operators.interface import Operator
 from pymor.operators.numpy import NumpyMatrixOperator
 from pymor.parameters.base import Parameters
-from pymor.tools.random import get_rng
 from pymor.vectorarrays.interface import VectorArray
 from pymor.vectorarrays.numpy import NumpyVectorSpace
 from scipy.sparse import coo_array, csr_array
@@ -601,31 +600,20 @@ class ParametricTransferProblem(LogMixin):
         self.range = range_space
         self._restriction = make_mapping(self.range.V, self.source.V, padding=padding, check=True)  # type: ignore
 
-    def generate_random_boundary_data(self, count: int) -> npt.NDArray:
-        """Generates random normal vectors of shape (count, num_dofs_Γ_out).
+    def generate_random_boundary_data(
+        self, count: int, distribution: str, options: Optional[dict[str, Any]] = None
+    ) -> npt.NDArray:
+        """Generates random vectors of shape (count, num_dofs_Γ_out).
 
         Args:
             count: Number of random vectors.
+            distribution: The distribution used for sampling.
+            options: Arguments passed to sampling method of random number generator.
 
         """
-
-        def draw_samples(shape):
-            rng = get_rng()
-            mu, sigma = 0.0, 1.0
-            x = rng.normal(mu, sigma, shape)
-
-            a = -0.2
-            b = 0.2
-            xmin = -3
-            xmax = 3
-
-            x_clipped = np.clip(x, xmin, xmax)
-            x_scaled = ((b - a) / (xmax - xmin)) * (x_clipped - xmin) + a
-
-            return x_scaled
-
         num_dofs = self.rhs.dofs.size
-        values = draw_samples((count, num_dofs))
+        options = options or {}
+        values = create_random_values((count, num_dofs), distribution, **options)
 
         return values
 
@@ -789,14 +777,14 @@ def discretize_transfer_problem(
     cells_omega = osp_config.cells_omega
 
     # ### Function Spaces
-    V = df.fem.functionspace(omega.grid, ('P', example.geom_deg, (example.gdim,)))
+    V = df.fem.functionspace(omega.grid, ('P', example.fe_deg, (example.gdim,)))
     V_in = df.fem.functionspace(omega_in.grid, V.ufl_element())
     source_V_in = FenicsxVectorSpace(V_in)
 
     # ### Auxiliary problem defined on oversampling domain Omega
     # locate interfaces for definition of auxiliary problem
     left_most_cell = np.amin(cells_omega)
-    unit_length = example.unit_length
+    unit_length = example.preproc.unit_length
     x_min = float(left_most_cell * unit_length)
 
     interface_locators = []
@@ -807,7 +795,7 @@ def discretize_transfer_problem(
     if debug:
         for marker in interface_locators:
             entities = df.mesh.locate_entities(V.mesh, V.mesh.topology.dim - 1, marker)
-            assert entities.size == example.num_intervals
+            assert entities.size == example.preproc.num_intervals
 
     aux_tags = list(range(15, 15 + cells_omega.size))
     assert len(aux_tags) == cells_omega.size
@@ -887,7 +875,7 @@ def discretize_transfer_problem(
 
     # ### Discretize right hand side - DirichletLift
     entities_gamma_out = df.mesh.locate_entities_boundary(V.mesh, V.mesh.topology.dim - 1, osp_config.gamma_out)
-    expected_num_facets_gamma_out = (example.num_intervals - 2, 2 * (example.num_intervals - 2))
+    expected_num_facets_gamma_out = (example.preproc.num_intervals - 2, 2 * (example.preproc.num_intervals - 2))
     assert entities_gamma_out.size in expected_num_facets_gamma_out
     rhs = DirichletLift(operator.range, operator.compiled_form, entities_gamma_out)  # type: ignore
 
@@ -945,7 +933,7 @@ def discretize_transfer_problem(
 
     if osp_config.gamma_n is not None:
         top_tag = example.neumann_tag
-        assert omega.facet_tags.find(top_tag).size == example.num_intervals * 1  # top
+        assert omega.facet_tags.find(top_tag).size == example.preproc.num_intervals * 1  # top
         dA = ufl.Measure('ds', domain=omega.grid, subdomain_data=omega.facet_tags)
         t_y = -example.traction_y * example.sigma_scale
         traction = df.fem.Constant(

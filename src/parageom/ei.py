@@ -1,27 +1,38 @@
-"""empirical interpolation module"""
+"""Empirical interpolation module."""
 
 from typing import Optional
 
 import numpy as np
 from scipy.sparse import csr_array
+from scipy.stats import qmc
 
 
 def vec(petsc_mat):
     return petsc_mat.getValuesCSR()[2]
 
+
 def vec2mat(A: csr_array):
     # map from j = 2r + c to row and col
     rowscols = []
-    nrows, _ = A.shape # A sparse matrix
+    nrows, _ = A.shape  # A sparse matrix
     for r in range(nrows):
-        cols = A.indices[A.indptr[r]:A.indptr[r+1]]
+        cols = A.indices[A.indptr[r] : A.indptr[r + 1]]
         for c in cols:
             rowscols.append((r, c))
-    mapping = np.vstack(rowscols) # maps from j = 0, ..., nz-1 to (row, col)
+    mapping = np.vstack(rowscols)  # maps from j = 0, ..., nz-1 to (row, col)
     return mapping
 
 
-def interpolate_subdomain_operator(example, operator, design: str="lhs", ntrain: int=101, modes: Optional[int] = None, atol: Optional[float] = None, rtol: Optional[float] = None, method: Optional[str] = "method_of_snapshots"):
+def interpolate_subdomain_operator(
+    example,
+    operator,
+    design: str = 'lhs',
+    ntrain: int = 101,
+    modes: Optional[int] = None,
+    atol: Optional[float] = None,
+    rtol: Optional[float] = None,
+    method: Optional[str] = 'method_of_snapshots',
+):
     """EI of subdomain operator.
 
     Args:
@@ -33,25 +44,24 @@ def interpolate_subdomain_operator(example, operator, design: str="lhs", ntrain:
         atol: Absolute tolerance for the POD with DEIM.
         rtol: Relative tolerance for the POD with DEIM.
         method: POD method (choices: method_of_snapshots, qr_svd).
+
     """
-    from pymor.vectorarrays.numpy import NumpyVectorSpace
-    from pymor.operators.numpy import NumpyMatrixOperator
     from pymor.algorithms.ei import deim
-    from parageom.lhs import sample_lhs
+    from pymor.operators.numpy import NumpyMatrixOperator
+    from pymor.vectorarrays.numpy import NumpyVectorSpace
+
+    from parageom.lhs import parameter_set
 
     parameter_space = operator.parameters.space(example.mu_range)
-    parameter_name = list(example.parameters["subdomain"].keys())[0]
-    if design == "uniform":
+    parameter_name = example.parameter_name
+    if design == 'uniform':
         training_set = parameter_space.sample_uniformly(ntrain)
-    elif design == "random":
+    elif design == 'random':
         training_set = parameter_space.sample_randomly(ntrain)
-    elif design == "lhs":
-        training_set = sample_lhs(
-                parameter_space,
-                name=parameter_name,
-                samples=ntrain,
-                criterion="center",
-                random_state=25525298)
+    elif design == 'lhs':
+        pdim = operator.parameters.dim
+        sampler = qmc.LatinHypercube(pdim, optimization='random-cd', seed=25525298)
+        training_set = parameter_set(sampler, ntrain, parameter_space, name=parameter_name)
     else:
         raise NotImplementedError
 
@@ -59,18 +69,22 @@ def interpolate_subdomain_operator(example, operator, design: str="lhs", ntrain:
     mu_0 = training_set[0]
     K = csr_array(operator.assemble(mu=mu_0).matrix.getValuesCSR()[::-1])
     index_map = vec2mat(K)
-    
+
     # ### snapshots
     vec_source = NumpyVectorSpace(K.nnz)
-    snapshots = [K.data, ]
+    snapshots = [
+        K.data,
+    ]
     for mu in training_set[1:]:
         matop = operator.assemble(mu)
         snapshots.append(vec(matop.matrix))
     Λ = vec_source.make_array(snapshots)
 
     # ### DEIM
-    pod_options = {"method": method}
-    interpolation_dofs, collateral_basis, deim_data = deim(Λ, modes=modes, pod=True, atol=atol, rtol=rtol, product=None, pod_options=pod_options)
+    pod_options = {'method': method}
+    interpolation_dofs, collateral_basis, deim_data = deim(
+        Λ, modes=modes, pod=True, atol=atol, rtol=rtol, product=None, pod_options=pod_options
+    )
 
     # ### outputs/targets
     # reorder idofs and collateral basis
@@ -104,15 +118,18 @@ def interpolate_subdomain_operator(example, operator, design: str="lhs", ntrain:
     return mops, interpolation_matrix, idofs, magic_dofs, deim_data
 
 
-if __name__ == "__main__":
-    from parageom.tasks import example
-    from parageom.fom import discretize_subdomain_operators
+if __name__ == '__main__':
+    from pymor.operators.constructions import LincombOperator
     from scipy.linalg import solve
     from scipy.sparse.linalg import norm
-    from pymor.operators.constructions import LincombOperator
 
-    operator, _ = discretize_subdomain_operators(example)
-    cb, interpmat, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(example, operator, design="uniform", ntrain=501, modes=None, atol=0., rtol=1e-12)
+    from parageom.fom import discretize_subdomain_operators
+    from parageom.tasks import example
+
+    operator = discretize_subdomain_operators(example)[0]
+    cb, interpmat, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(
+        example, operator, design='uniform', ntrain=501, modes=None, atol=0.0, rtol=1e-12
+    )
     m_dofs, m_inv = np.unique(magic_dofs, return_inverse=True)
     r_op, source_dofs = operator.restricted(m_dofs)
     range_dofs = r_op.restricted_range_dofs[m_inv].reshape(magic_dofs.shape)
@@ -140,8 +157,8 @@ if __name__ == "__main__":
         # ### Reference matrix
         kref = csr_array(operator.assemble(mu).matrix.getValuesCSR()[::-1])
 
-        abserr.append(norm(kref - K, ord="fro"))
-        relerr.append(norm(kref - K, ord="fro") / norm(kref, ord="fro"))
+        abserr.append(norm(kref - K, ord='fro'))
+        relerr.append(norm(kref - K, ord='fro') / norm(kref, ord='fro'))
 
-    print(f"Max absolute error in Frobenious norm:\t{np.max(abserr)}")
-    print(f"Max relative error in Frobenious norm:\t{np.max(relerr)}")
+    print(f'Max absolute error in Frobenious norm:\t{np.max(abserr)}')
+    print(f'Max relative error in Frobenious norm:\t{np.max(relerr)}')

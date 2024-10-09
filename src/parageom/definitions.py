@@ -1,17 +1,160 @@
 """ParaGeom example definitions."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
-import dolfinx as df
 import numpy as np
+from dolfinx import default_scalar_type
+from dolfinx.mesh import Mesh
 from multi.boundary import plane_at, point_at, within_range
-from pymor.parameters.base import Parameters
 
 ROOT = Path(__file__).parents[2]
 WORK = ROOT / 'work'
 SRC = Path(__file__).parent
+
+
+@dataclass
+class RomValidation:
+    """Input Parameters for ROM validation.
+
+    Args:
+        ntest: Size of the validation set.
+        num_modes: Number of modes to use.
+        seed: Random seed for the validation set.
+
+    """
+
+    ntest: int = 200
+    num_modes: tuple[int, ...] = tuple(range(20, 81, 20))
+    seed: int = 241690
+
+
+@dataclass
+class PreProcessing:
+    """Data for preprocessing.
+
+    Args:
+        unit_length: Dimensionless unit length.
+        geom_deg: Degree of geometry interpolation.
+        num_intervals: Number of line elements per edge of the unit cell.
+
+    """
+
+    unit_length: float = 1.0
+    geom_deg: int = 2
+    num_intervals: int = 12
+
+
+@dataclass
+class HRRF:
+    """Input Parameters for HRRF.
+
+    Args:
+        seed_train: Random seed for training set.
+        seed_test: Random seed for testing set.
+        rrf_ttol: Target tolerance.
+        rrf_ftol: Failure tolerance.
+        rrf_nt: Number of random normal test vectors.
+        num_enrichments: Number of samples per enrichment in adaptive LHS.
+        radius_mu: Radius in parameter space for the adaptive LHS.
+
+    """
+
+    seed_train: int = 767667058
+    seed_test: int = 545445836
+    rrf_ttol: float = 0.01
+    rrf_ftol: float = 1e-15
+    rrf_nt: int = 1
+    num_enrichments: int = 10
+    radius_mu: float = 0.01
+
+    def ntest(self, dim: int):
+        """Size of the testing set.
+
+        Args:
+            dim: Dimension of the parameter space.
+
+        """
+        return dim * 50
+
+    def ntrain(self, dim: int):
+        """Size of the training set.
+
+        Args:
+            dim: Dimension of the parameter space.
+
+        """
+        return dim * 30
+
+
+@dataclass
+class HAPOD:
+    """Input Parameters for HAPOD.
+
+    Args:
+        seed_train: Random seed for training set.
+        eps: Bound l2-mean approx. error by this value.
+        omega: Trade-off factor.
+
+    """
+
+    seed_train: int = 212854936
+    eps: float = 0.001
+    omega: float = 0.5
+
+    def ntrain(self, dim: int):
+        """Size of the training set.
+
+        Args:
+            dim: Dimension of the parameter space.
+
+        """
+        return dim * 50
+
+
+@dataclass
+class ProjErr:
+    """Input Parameters for projection error study.
+
+    Args:
+        seed_test: Random seed for the test set.
+        seed_train: Random seed for the training.
+        hapod_eps: Bound for HAPOD.
+        hapod_omega: Trade-off factor for HAPOD.
+        hrrf_tol: Bound for HRRF.
+
+    """
+
+    # Note
+    # for comparability set hapod_training_set=hrrf_testing_set
+    # see src/parageom/projerr.py
+
+    seed_train: int = 456729121
+    seed_test: int = 923719053
+    hapod_eps: float = 0.001  # scale=0.1
+    hapod_omega: float = 0.5
+    hrrf_tol: float = 0.01
+
+
+@dataclass
+class Optimization:
+    """Input Parameters for optimization problem.
+
+    Args:
+        nreal: The realization to use.
+        omega: Weigthing factor for mass and compliance in the objective functional.
+        method: The method used for basis construction.
+        num_modes: Size of local basis.
+        minimizer: The minimization algorithm (scipy) to use.
+
+    """
+
+    nreal: int = 0
+    omega: float = 0.2
+    method: str = 'hrrf'
+    num_modes: int = 60
+    minimizer: str = 'SLSQP'
 
 
 @dataclass
@@ -21,27 +164,21 @@ class BeamData:
     Args:
         name: The name of the example.
         gdim: The geometric dimension of the problem.
-        l_char: Characteristic length chosen to be the unit cell (subdomain) length.
-        unit_length: Dimensionless unit length used to define computational domain(s).
+        characteristic_length: Scaling factor for coordinates.
+        characteristic_displacement: Scaling factor for displacement field.
+        unit_length: Unit length of the lattice unit cell.
         nx: Number of coarse grid cells (subdomains) in x.
         ny: Number of coarse grid cells (subdomains) in y.
-        geom_deg: Degree for geometry interpolation.
-        fe_deg: FE degree.
+        fe_deg: Degree of FE field interpolation.
         poisson_ratio: The poisson ratio of the material.
         youngs_modulus: The Young's modulus (reference value) of the material.
-        mu_range: The value range of each parameter component.
-        mu_bar: Reference parameter value (Radius of parent domain).
-        training_set_seed: Seed to generate seeds for training sets for each configuration (HAPOD, HRRF).
-        testing_set_seed: Seed to generate seeds for testing sets for each configuration (HRRF).
-        validation_set_seed: Seeding for the validation set (run_locrom.py).
-        projerr_seed: Seeding for the testing set to compute the projection error.
-        parameters: Dict of dict mapping parameter name to parameter dimension for each configuration etc.
-        distributions: The distributions used in the randomized range finder.
+        plane_stress: If True, use plane stress assumption.
+        traction_y: Value for y-component of traction vector.
+        neumann_tag: Tag for the Neumann boundary.
+        parameters: Dict of dict mapping parameter name to parameter dimension.
         methods: Methods used for basis construction.
-        range_product: The inner product to use (rrf, projection error).
-        rrf_ttol: Target tolerance range finder.
-        rrf_ftol: Failure tolerance range finder.
-        rrf_num_testvecs: Number of testvectors range finder.
+        g_scale: Scale (Amplitude) of random boundary conditions.
+        mdeim_rtol: Relative tolerance for the MDEIM approximation.
         debug: Run in debug mode.
 
     """
@@ -50,57 +187,38 @@ class BeamData:
     gdim: int = 2
     characteristic_length = 100.0  # [mm]
     characteristic_displacement = 0.1  # [mm]
-    unit_length: float = 1.0  # dimensionless unit length
+    unit_length: float = 100.0  # [mm]
     nx: int = 10
     ny: int = 1
-    geom_deg: int = 2
     fe_deg: int = 2
     poisson_ratio: float = 0.2
     youngs_modulus: float = 30e3  # [MPa]
     plane_stress: bool = True
     traction_y: float = 0.0375  # [MPa]
-    # TODO extent this for all k -> use list or array
+    neumann_tag: int = 194
     parameter_name: str = 'R'
     parameter_dim: tuple[int, ...] = (2, 3, 4, 4, 4, 4, 4, 4, 4, 3, 2)
-    parameters: dict = field(
-        default_factory=lambda: {
-            'subdomain': Parameters({'R': 1}),
-            'global': Parameters({'R': 10}),
-            'left': Parameters({'R': 3}),
-            'right': Parameters({'R': 3}),
-            'inner': Parameters({'R': 4}),
-        }
-    )
-    training_set_seed: int = 767667058
-    testing_set_seed: int = 545445836
-    validation_set_seed: int = 241690
-    projerr_seed: int = 923719053
-    distributions: tuple[str, ...] = ('normal',)
-    methods: tuple[str, ...] = ('hapod', 'heuristic')
-    epsilon_star: dict = field(
-        default_factory=lambda: {
-            'heuristic': 0.001,
-            'hapod': 0.001,
-        }
-    )
-    epsilon_star_projerr: float = 0.001
-    omega: float = 0.5  # ω related to HAPOD (not output functional)
-    rrf_ttol: float = 0.01
-    rrf_ftol: float = 1e-15
-    rrf_num_testvecs: int = 20
-    neumann_rtol: float = 1e-8  # hrrf pod extension
-    neumann_tag: int = 194
+    methods: tuple[str, ...] = ('hapod', 'hrrf')
+    g_scale: float = 0.1
     mdeim_rtol: float = 1e-5
     debug: bool = False
-    validate_rom: dict = field(default_factory=lambda: {'num_params': 200, 'num_modes': list(range(20, 81, 20))})
+
+    # task parameters
+    a = unit_length / characteristic_length
+    preproc = PreProcessing(unit_length=a, geom_deg=fe_deg)
+    hrrf = HRRF()
+    hapod = HAPOD()
+    projerr = ProjErr()
+    rom_validation = RomValidation()
+    opt = Optimization()
 
     def __post_init__(self):
         """Creates directory structure and dependent attributes."""
-        a = self.unit_length
+        a = self.preproc.unit_length
         self.length: float = a * self.nx
         self.height: float = a * self.ny
-        self.mu_range: tuple[float, float] = (0.1 * a, 0.3 * a)  # [mm]
-        self.mu_bar: float = 0.2 * a  # [mm]
+        self.mu_range: tuple[float, float] = (0.1 * a, 0.3 * a)
+        self.mu_bar: float = 0.2 * a
         E = self.youngs_modulus
         NU = self.poisson_ratio
         self.λ = E * NU / (1 + NU) / (1 - 2 * NU)
@@ -127,10 +245,8 @@ class BeamData:
 
         if self.debug:
             self.num_real = 1
-            self.num_intervals = 12
         else:
             self.num_real = 20
-            self.num_intervals = 20
 
         for nr in range(self.num_real):
             self.real_folder(nr).mkdir(exist_ok=True, parents=True)
@@ -139,7 +255,7 @@ class BeamData:
                 self.logs_path(nr, name).mkdir(exist_ok=True, parents=True)
                 self.bases_path(nr, name).mkdir(exist_ok=True, parents=True)
             (self.method_folder(nr, 'hapod') / 'pod_modes').mkdir(exist_ok=True, parents=True)
-            (self.method_folder(nr, 'heuristic') / 'modes').mkdir(exist_ok=True, parents=True)
+            (self.method_folder(nr, 'hrrf') / 'modes').mkdir(exist_ok=True, parents=True)
 
     @property
     def plotting_style(self) -> Path:
@@ -170,20 +286,15 @@ class BeamData:
     def logs_path(self, nr: int, name: str) -> Path:
         return self.method_folder(nr, name) / 'logs'
 
-    def bases_path(self, nr: int, name: str, distr: str = 'normal') -> Path:
+    def bases_path(self, nr: int, method: str) -> Path:
         """Return Path to bases folder.
 
         Args:
             nr: realization index.
-            name: name of the training strategy / method.
-            distr: distribution.
+            method: name of the training strategy / method.
 
         """
-        return self.method_folder(nr, name) / f'bases/{distr}'
-
-    def training_set(self, config: str) -> Path:
-        """Write training set as numpy array."""
-        return self.grids_path / config / 'training_set.out'
+        return self.method_folder(nr, method) / 'bases'
 
     def coarse_grid(self, config: str) -> Path:
         """Global coarse grid."""
@@ -213,65 +324,14 @@ class BeamData:
             case _:
                 return 'quad'
 
-    def archetype_to_cell(self, atype: int) -> int:
-        atc = {0: 0, 1: 1, 2: 4, 3: 8, 4: 9}
-        return atc[atype]
-
-    def config_to_cell(self, config: str) -> int:
-        """Maps config to global cell index."""
-        map = {'inner': 4, 'left': 0, 'right': 9}
-        return map[config]
-
-    def config_to_target_cell(self, config: str) -> int:
-        """Maps config to cell index of target subdomain."""
-        map = {'inner': 1, 'left': 0, 'right': 1}
-        return map[config]
-
-    def ntrain(self, method: str, k: int) -> int:
-        """Define size of training set for k-th transfer problem."""
-        if method == 'hapod':
-            if k in (0, 10):
-                return 100
-            elif k in (1, 9):
-                return 150
-            else:
-                return 200
-        elif method == 'heuristic':
-            if k in (0, 10):
-                return 30
-            elif k in (1, 9):
-                return 40
-            else:
-                return 50
-        else:
-            raise NotImplementedError
-
-    def ntest(self, method: str, k: int) -> int:
-        if method == 'heuristic':
-            if k in (0, 10):
-                return 100
-            elif k in (1, 9):
-                return 150
-            else:
-                return 200
-        else:
-            raise NotImplementedError
-
-    def cell_to_config(self, cell: int) -> str:
-        """Maps global cell index to config."""
-        assert cell in list(range(self.nx * self.ny))
-        map = {0: 'left', 9: 'right'}
-        config = map.get(cell, 'inner')
-        return config
-
-    def local_basis_npy(self, nr: int, cell: int, method='hapod', distr='normal') -> Path:
+    def local_basis_npy(self, nr: int, cell: int, method='hapod') -> Path:
         """Final basis for loc rom assembly."""
-        dir = self.bases_path(nr, method, distr)
+        dir = self.bases_path(nr, method)
         return dir / f'basis_{cell:02}.npy'
 
-    def local_basis_dofs_per_vert(self, nr: int, cell: int, method='hapod', distr='normal') -> Path:
+    def local_basis_dofs_per_vert(self, nr: int, cell: int, method='hapod') -> Path:
         """Dofs per vertex for each cell."""
-        dir = self.bases_path(nr, method, distr)
+        dir = self.bases_path(nr, method)
         return dir / f'dofs_per_vert_{cell:02}.npy'
 
     def rom_error_u(self, nreal: int, num_modes: int, method='hapod', ei=False) -> Path:
@@ -325,8 +385,8 @@ class BeamData:
     # @property
     # def fig_rom_opt(self) -> Path:
     #     return self.figures_path / "fig_rom_opt.pdf"
-    def fig_projerr(self, k: int) -> Path:
-        return self.figures_path / f'fig_projerr_{k:02}.pdf'
+    def fig_projerr(self, k: int, scale: float = 0.1) -> Path:
+        return self.figures_path / f'fig_projerr_{k:02}_scale_{scale}.pdf'
 
     def fig_rom_error(self, method: str, ei: bool) -> Path:
         if ei:
@@ -340,6 +400,7 @@ class BeamData:
         file = SRC / 'realizations.npy'
         if not file.exists():
             self._generate_realizations(file)
+        # TODO generate realizations if existing nreal < self.num_real
         return file
 
     def _generate_realizations(self, outpath: Path) -> None:
@@ -350,29 +411,22 @@ class BeamData:
     def log_basis_construction(self, nr: int, method: str, k: int) -> Path:
         return self.logs_path(nr, method) / f'basis_construction_{k:02}.log'
 
-    def log_projerr(self, nr: int, method: str, k: int) -> Path:
-        return self.logs_path(nr, method) / f'projerr_{k}.log'
+    def log_projerr(self, nr: int, method: str, k: int, scale: float = 0.1) -> Path:
+        return self.logs_path(nr, method) / f'projerr_{k}_scale_{scale}.log'
 
     def log_gfem(self, nr: int, cell: int, method='hapod') -> Path:
         return self.logs_path(nr, method) / f'gfem_{cell:02}.log'
 
-    def log_run_locrom(self, nr: int, method: str, distr: str, ei: bool = False) -> Path:
+    def log_validate_rom(self, nr: int, modes: int, method='hapod', ei=True) -> Path:
         dir = self.logs_path(nr, method)
         if ei:
-            return dir / f'run_locrom_ei_{distr}.log'
+            return dir / f'validate_rom_{modes}_with_ei.log'
         else:
-            return dir / f'run_locrom_{distr}.log'
-
-    def log_validate_rom(self, nr: int, modes: int, method='hapod', distr='normal', ei=True) -> Path:
-        dir = self.logs_path(nr, method)
-        if ei:
-            return dir / f'validate_rom_{modes}_{distr}_with_ei.log'
-        else:
-            return dir / f'validate_rom_{modes}_{distr}.log'
+            return dir / f'validate_rom_{modes}.log'
 
     @property
     def log_optimization(self) -> Path:
-        return self.logs_path(0, 'hapod') / 'optimization.log'
+        return self.logs_path(self.opt.nreal, self.opt.method) / 'optimization.log'
 
     def hapod_singular_values(self, nr: int, k: int) -> Path:
         """Singular values of final POD for k-th transfer problem."""
@@ -393,7 +447,7 @@ class BeamData:
 
     def heuristic_modes_xdmf(self, nr: int, k: int) -> Path:
         """Modes computed by heuristic range finder."""
-        dir = self.method_folder(nr, 'heuristic') / 'modes'
+        dir = self.method_folder(nr, 'hrrf') / 'modes'
         return dir / f'modes_{k:02}.xdmf'
 
     def hapod_modes_npy(self, nr: int, k: int) -> Path:
@@ -403,17 +457,17 @@ class BeamData:
 
     def heuristic_modes_npy(self, nr: int, k: int) -> Path:
         """Modes for k-th transfer problem."""
-        dir = self.method_folder(nr, 'heuristic') / 'modes'
+        dir = self.method_folder(nr, 'hrrf') / 'modes'
         return dir / f'modes_{k:02}.npy'
 
     def heuristic_neumann_svals(self, nr: int, k: int) -> Path:
         """Singular values of POD of neumann snapshots."""
-        dir = self.method_folder(nr, 'heuristic')
+        dir = self.method_folder(nr, 'hrrf')
         return dir / f'neumann_svals_{k:02}.npy'
 
-    def projerr(self, nr: int, method: str, k: int) -> Path:
+    def projection_error(self, nr: int, method: str, k: int, scale: float = 0.1) -> Path:
         dir = self.method_folder(nr, method)
-        return dir / f'projerr_{k}.npz'
+        return dir / f'projerr_{k}_scale_{scale}.npz'
 
     def path_omega(self, k: int) -> Path:
         return self.grids_path / f'omega_{k:02}.xdmf'
@@ -424,42 +478,7 @@ class BeamData:
     def path_omega_in(self, k: int) -> Path:
         return self.grids_path / f'omega_in_{k:02}.xdmf'
 
-    def config_to_omega_in(self, config: str, local=True) -> list[int]:
-        """Maps config to cell local index/indices of oversampling domain that correspond to omega in."""
-        global_indices = {'left': [0, 1], 'right': [8, 9], 'inner': [4, 5]}
-        local_indices = {'left': [0, 1], 'right': [1, 2], 'inner': [1, 2]}
-        if local:
-            return local_indices[config]
-        else:
-            return global_indices[config]
-
-    # FIXME: not needed for GFEM, but I may use edge functions as well.
-    @property
-    def cell_sets(self):
-        """Returns cell sets for definition of edge basis configuration."""
-        # the order is important
-        # this way e.g. cell 1 will load modes for the left edge
-        # from basis generated for cell 1 (config inner)
-        cell_sets = {
-            'inner': set([1, 2, 3, 4, 5, 6, 7, 8]),
-            'left': set([0]),
-            'right': set([9]),
-        }
-        return cell_sets
-
-    @property
-    # FIXME: is this used anywhere?
-    def cell_sets_oversampling(self):
-        """Returns cell sets that define oversampling domains."""
-        # see preprocessing.py
-        cells = {
-            'inner': set([3, 4, 5, 6]),
-            'left': set([0, 1]),
-            'right': set([8, 9]),
-        }
-        return cells
-
-    def boundaries(self, domain: df.mesh.Mesh):
+    def boundaries(self, domain: Mesh):
         """Returns boundaries (Dirichlet, Neumann) of the global domain.
 
         Args:
@@ -470,7 +489,7 @@ class BeamData:
 
         """
         x = domain.geometry.x
-        a = self.unit_length
+        a = self.preproc.unit_length
         xmin = np.amin(x, axis=0)
         xmax = np.amax(x, axis=0)
 
@@ -486,7 +505,7 @@ class BeamData:
             ),
         }
 
-    def get_dirichlet(self, domain: df.mesh.Mesh, config: str) -> Optional[list[dict]]:
+    def get_dirichlet(self, domain: Mesh, config: str) -> Optional[list[dict]]:
         # NOTE
         # this only defines markers using `within_range`
         # code needs to use df.mesh.locate_entities_boundary
@@ -495,7 +514,7 @@ class BeamData:
         _, right = boundaries['support_right']
 
         bcs = []
-        zero = df.default_scalar_type(0.0)
+        zero = default_scalar_type(0.0)
 
         if config == 'left':
             fix_ux = {
@@ -520,7 +539,7 @@ class BeamData:
         else:
             raise NotImplementedError
 
-    def get_neumann(self, domain: df.mesh.Mesh, config: str) -> Optional[tuple[int, Callable]]:
+    def get_neumann(self, domain: Mesh, config: str) -> Optional[tuple[int, Callable]]:
         boundaries = self.boundaries(domain)
         tag, marker = boundaries['support_top']
 
@@ -532,3 +551,8 @@ class BeamData:
             return None
         else:
             raise NotImplementedError
+
+
+if __name__ == '__main__':
+    parageom = BeamData(name='test-beamdata')
+    breakpoint()

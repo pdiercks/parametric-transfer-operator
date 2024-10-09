@@ -4,12 +4,28 @@ from typing import Union
 
 import numpy as np
 import numpy.typing as npt
-from multi.domain import StructuredQuadGrid
 from multi.dofmap import QuadrilateralDofLayout
+from multi.domain import StructuredQuadGrid
+
+
+def get_max_dofs_per_vert(example, num_cells: int, nreal: int, method: str):
+    local_bases = []
+    max_dofs_per_vert = []
+    for cell in range(num_cells):
+        local_bases.append(np.load(example.local_basis_npy(nreal, cell, method=method)))
+        max_dofs_per_vert.append(np.load(example.local_basis_dofs_per_vert(nreal, cell, method=method)))
+
+    max_dofs_per_vert = np.array(max_dofs_per_vert)
+    assert max_dofs_per_vert.shape == (num_cells, 4)
+    return max_dofs_per_vert
 
 
 class GFEMDofMap(object):
     def __init__(self, grid: StructuredQuadGrid):
+        """Initialize DofMap for GFEM.
+
+        Note that quadrilateral cells are assumed.
+        """
         self.grid = grid
         self.dof_layout = QuadrilateralDofLayout()
 
@@ -27,7 +43,6 @@ class GFEMDofMap(object):
             dofs_per_vert: Number of DOFs per vertex.
 
         """
-
         num_cells = self.num_cells
         layout = self.dof_layout
         dofs_per_edge = 0
@@ -63,23 +78,21 @@ class GFEMDofMap(object):
     @property
     def num_dofs(self) -> int:
         """Returns total number of DOFs."""
-        if not hasattr(self, "_n_dofs"):
-            raise AttributeError("You need to distribute DoFs first")
+        if not hasattr(self, '_n_dofs'):
+            raise AttributeError('You need to distribute DoFs first')
         return self._n_dofs
 
     def entity_dofs(self, entity: int) -> list[int]:
         """Return all dofs for entity `entity`."""
-
-        if not hasattr(self, "_dmap"):
-            raise AttributeError("You need to distribute DoFs first")
+        if not hasattr(self, '_dmap'):
+            raise AttributeError('You need to distribute DoFs first')
 
         return self._dmap[entity]
 
     def cell_dofs(self, cell_index: int) -> list[int]:
         """Returns DOFs for given cell."""
-
-        if not hasattr(self, "_dmap"):
-            raise AttributeError("You need to distribute DoFs first")
+        if not hasattr(self, '_dmap'):
+            raise AttributeError('You need to distribute DoFs first')
 
         num_cells = self.num_cells
         assert cell_index in np.arange(num_cells)
@@ -140,31 +153,36 @@ def parageom_dof_distribution_factory(n: int, nmax: dict[str, int]) -> npt.NDArr
     ni = ndofs.get('inner')
     nr = ndofs.get('right')
 
-    dofs_per_vert = np.array([
-        [nl, nl, nl, nl],
-        [nl, ni, nl, ni],
-        [ni, ni, ni, ni],
-        [ni, ni, ni, ni],
-        [ni, ni, ni, ni],
-        [ni, ni, ni, ni],
-        [ni, ni, ni, ni],
-        [ni, ni, ni, ni],
-        [ni, nr, ni, nr],
-        [nr, nr, nr, nr]], dtype=np.int32)
+    dofs_per_vert = np.array(
+        [
+            [nl, nl, nl, nl],
+            [nl, ni, nl, ni],
+            [ni, ni, ni, ni],
+            [ni, ni, ni, ni],
+            [ni, ni, ni, ni],
+            [ni, ni, ni, ni],
+            [ni, ni, ni, ni],
+            [ni, ni, ni, ni],
+            [ni, nr, ni, nr],
+            [nr, nr, nr, nr],
+        ],
+        dtype=np.int32,
+    )
     return dofs_per_vert
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     import pathlib
     import tempfile
-    from multi.preprocessing import create_rectangle
-    from multi.io import read_mesh
+
     from mpi4py import MPI
+    from multi.io import read_mesh
+    from multi.preprocessing import create_rectangle
 
     gdim = 2
-    with tempfile.NamedTemporaryFile(suffix=".msh") as tf:
-        create_rectangle(0., 10., 0., 1., num_cells=(10, 1), recombine=True, out_file=tf.name)
-        domain = read_mesh(pathlib.Path(tf.name), MPI.COMM_WORLD, kwargs={"gdim": gdim})[0]
+    with tempfile.NamedTemporaryFile(suffix='.msh') as tf:
+        create_rectangle(0.0, 10.0, 0.0, 1.0, num_cells=(10, 1), recombine=True, out_file=tf.name)
+        domain = read_mesh(pathlib.Path(tf.name), MPI.COMM_WORLD, kwargs={'gdim': gdim})[0]
     quadgrid = StructuredQuadGrid(domain)
     dofmap = GFEMDofMap(quadgrid)
 
@@ -180,19 +198,23 @@ if __name__ == "__main__":
 
     # heterogeneous dofmap
     nl, ni, nr = 3, 5, 4
-    dofs_per_vert = np.array([
-        [nl, nl, nl, nl],
-        [nl, ni, nl, ni],
-        [ni, ni, ni, ni],
-        [ni, ni, ni, ni],
-        [ni, ni, ni, ni],
-        [ni, ni, ni, ni],
-        [ni, ni, ni, ni],
-        [ni, ni, ni, ni],
-        [ni, nr, ni, nr],
-        [nr, nr, nr, nr]], dtype=np.int32)
+    dofs_per_vert = np.array(
+        [
+            [nl, nl, nl, nl],
+            [nl, ni, nl, ni],
+            [ni, ni, ni, ni],
+            [ni, ni, ni, ni],
+            [ni, ni, ni, ni],
+            [ni, ni, ni, ni],
+            [ni, ni, ni, ni],
+            [ni, ni, ni, ni],
+            [ni, nr, ni, nr],
+            [nr, nr, nr, nr],
+        ],
+        dtype=np.int32,
+    )
     dofmap.distribute_dofs(dofs_per_vert)
-    assert np.isclose(dofmap.num_dofs, 4 * nl + 4 * nr + (dofmap.num_vertices-8) * ni)
+    assert np.isclose(dofmap.num_dofs, 4 * nl + 4 * nr + (dofmap.num_vertices - 8) * ni)
     assert np.isclose(len(dofmap.entity_dofs(0)), nl)
     assert np.isclose(len(dofmap.entity_dofs(5)), ni)
 
@@ -201,17 +223,14 @@ if __name__ == "__main__":
     dofmap.distribute_dofs(active_dofs)
 
     modes_cell_1 = max_dofs_per_vert[1]
-    basis_1 = np.repeat(np.array([
-        [1, 1, 1, 1],
-        [2, 2, 2, 2],
-        [3, 3, 3, 3],
-        [4, 4, 4, 4]]), repeats=[3, 5, 3, 5], axis=0)
+    basis_1 = np.repeat(
+        np.array([[1, 1, 1, 1], [2, 2, 2, 2], [3, 3, 3, 3], [4, 4, 4, 4]]), repeats=[3, 5, 3, 5], axis=0
+    )
     selection = select_modes(basis_1, active_dofs[1], max_dofs_per_vert[1])
-    assert np.allclose(np.repeat(np.array([
-        [1, 1, 1, 1],
-        [2, 2, 2, 2],
-        [3, 3, 3, 3],
-        [4, 4, 4, 4]]), repeats=[2, 2, 2, 2], axis=0), selection)
+    assert np.allclose(
+        np.repeat(np.array([[1, 1, 1, 1], [2, 2, 2, 2], [3, 3, 3, 3], [4, 4, 4, 4]]), repeats=[2, 2, 2, 2], axis=0),
+        selection,
+    )
 
     dofs_per_vert = 3
     dd = parageom_dof_distribution_factory(dofs_per_vert, {'left': 3, 'inner': 5, 'right': 4})

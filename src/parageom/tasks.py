@@ -48,11 +48,10 @@ def task_parent_unit_cell():
     from parageom.preprocessing import discretize_unit_cell
 
     def create_parent_unit_cell(targets):
-        unit_length = example.unit_length
-        mu_bar = example.parameters['subdomain'].parse([example.mu_bar])
-        num_cells = example.num_intervals
-        options = {'Mesh.ElementOrder': example.geom_deg}
-        discretize_unit_cell(unit_length, mu_bar, num_cells, targets[0], options)
+        unit_length = example.preproc.unit_length
+        num_cells = example.preproc.num_intervals
+        options = {'Mesh.ElementOrder': example.preproc.geom_deg}
+        discretize_unit_cell(unit_length, example.mu_bar, num_cells, targets[0], options)
 
     return {
         'file_dep': [SRC / 'preprocessing.py'],
@@ -166,7 +165,7 @@ def task_hrrf():
             deps.extend(with_h5(example.path_omega(k)))
             deps.extend(with_h5(example.path_omega_in(k)))
             targets = []
-            targets.append(example.log_basis_construction(nreal, 'heuristic', k))
+            targets.append(example.log_basis_construction(nreal, 'hrrf', k))
             targets.append(example.heuristic_modes_npy(nreal, k))
             if example.debug:
                 targets.extend(with_h5(example.heuristic_modes_xdmf(nreal, k)))
@@ -185,15 +184,18 @@ def task_projerr():
     # check sensitivity wrt mu rather than uncertainty in g
     num_samples = 100
     num_testvecs = 1
-    ntrain = {'heuristic': 50, 'hapod': 300}
-    ntest = {'heuristic': 300, 'hapod': None}
+    N = 200
+    ntrain_hrrf = {'hrrf': 50, 'hapod': None}
+    amplitudes = [1.0, 0.1, 0.01]
 
-    def create_action_projerr(nreal, method, k, ntrain, output, ntest=None, debug=False):
+    def create_action_projerr(nreal, method, k, ntrain, output, ntrain_hrrf=None, scale=None, debug=False):
         action = f'python3 {source} {nreal} {method} {k} {ntrain}'
         action += f' {num_samples} {num_testvecs}'
         action += f' --output {output}'
-        if ntest is not None:
-            action += f' --ntest {ntest}'
+        if ntrain_hrrf is not None:
+            action += f' --ntrain_hrrf {ntrain_hrrf}'
+        if scale is not None:
+            action += f' --scale {scale}'
         if debug:
             action += ' --debug'
         return action
@@ -205,37 +207,42 @@ def task_projerr():
                 deps.append(example.path_omega_coarse(k))
                 deps.extend(with_h5(example.path_omega(k)))
                 deps.extend(with_h5(example.path_omega_in(k)))
-                targets = []
-                targets.append(example.projerr(nreal, method, k))
-                targets.append(example.log_projerr(nreal, method, k))
-                yield {
-                    'name': ':'.join([str(nreal), method, str(k)]),
-                    'file_dep': deps,
-                    'actions': [
-                        create_action_projerr(nreal, method, k, ntrain[method], targets[0], ntest=ntest[method])
-                    ],
-                    'targets': targets,
-                    'clean': True,
-                }
+                for scale in amplitudes:
+                    targets = []
+                    targets.append(example.projection_error(nreal, method, k, scale))
+                    targets.append(example.log_projerr(nreal, method, k, scale))
+                    yield {
+                        'name': ':'.join([str(nreal), method, str(k), str(scale)]),
+                        'file_dep': deps,
+                        'actions': [
+                            create_action_projerr(
+                                nreal, method, k, N, targets[0], ntrain_hrrf=ntrain_hrrf[method], scale=scale
+                            )
+                        ],
+                        'targets': targets,
+                        'clean': True,
+                    }
 
 
 def task_fig_projerr():
     """ParaGeom: Plot projection error."""
     source = SRC / 'plot_projerr.py'
+    amplitudes = [1.0, 0.1, 0.01]
     for nreal in range(example.num_real):
         for k in (0, 5):
             deps = [source]
-            for method in example.methods:
-                deps.append(example.projerr(nreal, method, k))
-            targets = []
-            targets.append(example.fig_projerr(k))
-            yield {
-                'name': ':'.join([str(nreal), str(k)]),
-                'file_dep': deps,
-                'actions': ['python3 {} {} {} %(targets)s'.format(source, nreal, k)],
-                'targets': targets,
-                'clean': True,
-            }
+            for scale in amplitudes:
+                for method in example.methods:
+                    deps.append(example.projection_error(nreal, method, k, scale))
+                targets = []
+                targets.append(example.fig_projerr(k, scale))
+                yield {
+                    'name': ':'.join([str(nreal), str(k), str(scale)]),
+                    'file_dep': deps,
+                    'actions': ['python3 {} {} {} {} %(targets)s'.format(source, nreal, k, scale)],
+                    'targets': targets,
+                    'clean': True,
+                }
 
 
 def task_gfem():
@@ -293,8 +300,8 @@ def task_validate_rom():
         return [action]
 
     source = SRC / 'validate_rom.py'
-    num_params = example.validate_rom['num_params']
-    number_of_modes = example.validate_rom['num_modes']
+    num_params = example.rom_validation.ntest
+    number_of_modes = example.rom_validation.num_modes
     with_ei = {'ei': True}
     # with_ei = {'no_ei': False, 'ei': True}
     num_cells = example.nx * example.ny
@@ -314,7 +321,7 @@ def task_validate_rom():
                 for key, value in with_ei.items():
                     targets = []
                     targets.append(example.rom_error_u(nreal, num_modes, method=method, ei=value))
-                    # targets.append(example.rom_error_s(nreal, num_modes, method=method, ei=value))
+                    targets.append(example.rom_error_s(nreal, num_modes, method=method, ei=value))
                     targets.append(example.log_validate_rom(nreal, num_modes, method=method, ei=value))
                     if value:
                         options['--ei'] = ''
@@ -331,7 +338,7 @@ def task_fig_rom_error():
     """ParaGeom: Plot ROM error."""
     source = SRC / 'plot_romerr.py'
     nreal = 0  # TODO compute mean over all realizations ...
-    number_of_modes = example.validate_rom['num_modes']
+    number_of_modes = example.rom_validation.num_modes
 
     def create_action(method, output, ei=False):
         action = f'python3 {source} {nreal} {method} {output}'
@@ -346,7 +353,7 @@ def task_fig_rom_error():
             deps = [source]
             for num_modes in number_of_modes:
                 deps.append(example.rom_error_u(nreal, num_modes, method=method, ei=ei))
-                # deps.append(example.rom_error_s(nreal, num_modes, method=method, ei=ei))
+                deps.append(example.rom_error_s(nreal, num_modes, method=method, ei=ei))
             targets = [example.fig_rom_error(method, ei=ei)]
             yield {
                 'name': ':'.join([method, with_ei[ei]]),
@@ -361,19 +368,19 @@ def task_optimization():
     """ParaGeom: Determine optimal design."""
     source = SRC / 'optimization.py'
 
-    num_modes = 100
-    method = 'hapod'  # TODO add heuristic --> adjust log, targets
-    minimizer = 'SLSQP'
-    omega = example.omega
+    nreal = example.opt.nreal
+    omega = example.opt.omega
+    num_modes = example.opt.num_modes
+    method = example.opt.method
+    minimizer = example.opt.minimizer
 
-    nreal = 0  # do optimization only for single realization
-    deps = [SRC / 'optimization.py']
+    deps = [source]
     deps.append(example.coarse_grid('global'))
     deps.append(example.parent_domain('global'))
     deps.append(example.parent_unit_cell)
     for cell in range(example.nx * example.ny):
-        deps.append(example.local_basis_npy(nreal, cell))
-        deps.append(example.local_basis_dofs_per_vert(nreal, cell))
+        deps.append(example.local_basis_npy(nreal, cell, method=method))
+        deps.append(example.local_basis_dofs_per_vert(nreal, cell, method=method))
     targets = [example.fom_minimization_data, example.rom_minimization_data, example.log_optimization]
     return {
         'file_dep': deps,
