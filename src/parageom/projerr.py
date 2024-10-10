@@ -222,12 +222,15 @@ def main(args):
 
     products = {transfer.range_product.name: transfer.range_product, 'max': False}
     test_norms = {}
+    error_types = ['relerr', 'abserr']
+    numpy_funs = {'min': np.min, 'max': np.max, 'avg': np.average}
     output = {}
-    for k, v in products.items():
-        test_norms[k] = compute_norm(test_data, k, v)
-        output[f'relerr_{k}'] = list()
-        output[f'abserr_{k}'] = list()
-        output[f'l2_err_{k}'] = list()
+    for product_name, product in products.items():
+        test_norms[product_name] = compute_norm(test_data, product_name, product)
+        output[f'l2_err_{product_name}'] = list()
+        for etype in error_types:
+            for fun in numpy_funs.keys():
+                output[f'{fun}_{etype}_{product_name}'] = list()
 
     logger.info('Computing projection error ...')
     for N in range(basis_length + 1):
@@ -247,9 +250,10 @@ def main(args):
                 rel_err = error_norm / test_norms[k]
             l2_err = np.sum(error_norm**2.0) / size_test_set
 
-            output[f'abserr_{k}'].append(np.max(error_norm))
-            output[f'relerr_{k}'].append(np.max(rel_err))
             output[f'l2_err_{k}'].append(l2_err)
+            for key, fun in numpy_funs.items():
+                output[f'{key}_abserr_{k}'].append(fun(error_norm))
+                output[f'{key}_relerr_{k}'].append(fun(rel_err))
 
     if args.show:
         import matplotlib.pyplot as plt
@@ -261,7 +265,7 @@ def main(args):
         )
         plt.semilogy(
             np.arange(basis_length + 1),
-            output[f'relerr_{transfer.range_product.name}'],
+            output[f'max_relerr_{transfer.range_product.name}'],
             label='rel. err, ' + transfer.range_product.name,
         )
         plt.legend()

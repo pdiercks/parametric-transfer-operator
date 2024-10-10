@@ -14,30 +14,36 @@ def main(cli):
     styles = [example.plotting_style.as_posix()]
     with PlottingContext(args, styles) as fig:
         ax = fig.subplots()
-        for method in example.methods:
-            if np.isclose(cli.scale, 1.0):
-                infile = example.projection_error(cli.nreal, method, cli.k, 1)
-            else:
-                infile = example.projection_error(cli.nreal, method, cli.k, cli.scale)
-            data = np.load(infile)
-            for key in ['l2_err_energy', 'relerr_energy']:
-                e = data[key]
-                if method == 'hrrf':
-                    label = 'HRRF'
-                    color = blue
-                elif method == 'hapod':
-                    label = 'RRF+POD'
-                    color = red
-                if key == 'l2_err_energy':
-                    marker = 'x'
-                elif key == 'relerr_energy':
-                    marker = 'o'
-                ax.semilogy(np.arange(e.size), e, marker=marker, markevery=5, color=color, label=label)
+
+        def add_relerr_plot(data, color, label):
+            modes = np.arange(data['min_relerr_energy'].size)
+            min = data['min_relerr_energy']
+            max = data['max_relerr_energy']
+            avg = data['avg_relerr_energy']
+            ax.semilogy(modes, avg, color=color, linestyle='dashed', marker='.', markevery=5)
+            ax.semilogy(modes, max, color=color, linestyle='solid', marker='o', markevery=5, label=label)
+            ax.fill_between(modes, min, max, alpha=0.2, color=color)
+
+        infile_hapod = example.projection_error(cli.nreal, 'hapod', cli.k, cli.scale)
+        infile_hrrf = example.projection_error(cli.nreal, 'hrrf', cli.k, cli.scale)
+        data_hapod = np.load(infile_hapod)
+        data_hrrf = np.load(infile_hrrf)
+
+        # l2-mean error in energy norm
+        l2_hapod = data_hapod['l2_err_energy']
+        l2_hrrf = data_hrrf['l2_err_energy']
+        ax.semilogy(np.arange(l2_hapod.size), l2_hapod, marker='x', markevery=5, color=red, label='RRF+POD')
+        ax.semilogy(np.arange(l2_hrrf.size), l2_hrrf, marker='x', markevery=5, color=blue, label='HRRF')
+
+        # relative error in energy norm (min, avg, max)
+        add_relerr_plot(data_hapod, red, 'RRF+POD')
+        add_relerr_plot(data_hrrf, blue, 'HRRF')
+
         ax.set_xlabel('Number of basis functions')
         ax.set_ylabel('Projection error')
 
-        ax.set_ylim(1e-12, 5.0)
-        yticks = [1e-12, 1e-11, 1e-10, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1]
+        ax.set_ylim(1e-8, 5.0)
+        yticks = [1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1]
         ax.set_yticks(yticks)
 
         ax.legend(loc='best')

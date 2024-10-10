@@ -76,7 +76,7 @@ class HRRF:
             dim: Dimension of the parameter space.
 
         """
-        return dim * 50
+        return dim * 100
 
     def ntrain(self, dim: int):
         """Size of the training set.
@@ -110,7 +110,7 @@ class HAPOD:
             dim: Dimension of the parameter space.
 
         """
-        return dim * 50
+        return dim * 100
 
 
 @dataclass

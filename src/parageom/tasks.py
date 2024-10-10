@@ -184,9 +184,9 @@ def task_projerr():
     # check sensitivity wrt mu rather than uncertainty in g
     num_samples = 100
     num_testvecs = 1
-    N = 200
+    N = 400
     ntrain_hrrf = {'hrrf': 50, 'hapod': None}
-    amplitudes = [1.0, 0.1, 0.01]
+    amplitudes = [example.g_scale]
 
     def create_action_projerr(nreal, method, k, ntrain, output, ntrain_hrrf=None, scale=None, debug=False):
         action = f'python3 {source} {nreal} {method} {k} {ntrain}'
@@ -227,7 +227,7 @@ def task_projerr():
 def task_fig_projerr():
     """ParaGeom: Plot projection error."""
     source = SRC / 'plot_projerr.py'
-    amplitudes = [1.0, 0.1, 0.01]
+    amplitudes = [example.g_scale]
     for nreal in range(example.num_real):
         for k in (0, 5):
             deps = [source]
