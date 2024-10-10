@@ -76,20 +76,20 @@ def main(args):
     # TODO: add stress plots in other postproc script?
 
     # ### Quadrature space for principal stress
-    qs = basix.ufl.quadrature_element(
-        basix_celltype,
-        value_shape=(2,),  # type: ignore
-        scheme='default',
-        degree=q_degree,
-    )
-    Q = df.fem.functionspace(V.mesh, qs)
-    p_stress_fom = df.fem.Function(Q)
-    p_stress_rom = df.fem.Function(Q)
+    # qs = basix.ufl.quadrature_element(
+    #     basix_celltype,
+    #     value_shape=(2,),  # type: ignore
+    #     scheme='default',
+    #     degree=q_degree,
+    # )
+    # Q = df.fem.functionspace(V.mesh, qs)
+    # p_stress_fom = df.fem.Function(Q)
+    # p_stress_rom = df.fem.Function(Q)
 
     # ### Lagrange space for stress output
-    W = df.fem.functionspace(V.mesh, ('P', example.fe_deg, (2,)))  # output space for stress
-    proj_stress_fom = df.fem.Function(W)
-    proj_stress_rom = df.fem.Function(W)
+    # W = df.fem.functionspace(V.mesh, ('P', example.fe_deg, (2,)))  # output space for stress
+    # proj_stress_fom = df.fem.Function(W)
+    # proj_stress_rom = df.fem.Function(W)
 
     # ### Function for displacement on unit cell (for reconstruction)
     unit_cell_domain = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, kwargs={'gdim': example.gdim})[0]
