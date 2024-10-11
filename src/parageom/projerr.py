@@ -184,15 +184,18 @@ def main(args):
 
     # Definition of (random) test set (μ) and test data (g)
     size_test_set = args.num_samples * args.num_testvecs
-    if require_neumann_data:
-        size_test_set += args.num_samples
+    # if require_neumann_data:
+    #     size_test_set += args.num_samples
 
     sampler_validation = qmc.LatinHypercube(dim, optimization='random-cd', seed=example.projerr.seed_test)
     validation_set = parameter_set(sampler_validation, args.num_samples, parameter_space, name=parameter_name)
 
+    # ### test data / validation set
+    test_data = transfer.range.empty(reserve=size_test_set)
+    test_data_neumann = transfer.range.empty(reserve=args.num_samples)
+
     with logger.block(f'Computing test set of size {size_test_set}...'):
         with new_rng(example.projerr.seed_test // 2):
-            test_data = transfer.range.empty(reserve=size_test_set)
             for mu in validation_set:
                 transfer.assemble_operator(mu)
                 g = transfer.generate_random_boundary_data(args.num_testvecs, 'normal', sampling_options)
@@ -212,7 +215,7 @@ def main(args):
                         )
                     else:
                         U_orth = U_in_neumann
-                    test_data.append(U_orth)
+                    test_data_neumann.append(U_orth)
 
     def compute_norm(U, key, value):
         if key == 'max':
@@ -222,15 +225,20 @@ def main(args):
 
     products = {transfer.range_product.name: transfer.range_product, 'max': False}
     test_norms = {}
+    test_norms_neumann = {}
     error_types = ['relerr', 'abserr']
     numpy_funs = {'min': np.min, 'max': np.max, 'avg': np.average}
     output = {}
+    outneumann = {}
     for product_name, product in products.items():
         test_norms[product_name] = compute_norm(test_data, product_name, product)
+        test_norms_neumann[product_name] = compute_norm(test_data_neumann, product_name, product)
         output[f'l2_err_{product_name}'] = list()
+        outneumann[f'l2_err_{product_name}'] = list()
         for etype in error_types:
             for fun in numpy_funs.keys():
                 output[f'{fun}_{etype}_{product_name}'] = list()
+                outneumann[f'{fun}_{etype}_{product_name}'] = list()
 
     logger.info('Computing projection error ...')
     for N in range(basis_length + 1):
@@ -254,6 +262,33 @@ def main(args):
             for key, fun in numpy_funs.items():
                 output[f'{key}_abserr_{k}'].append(fun(error_norm))
                 output[f'{key}_relerr_{k}'].append(fun(rel_err))
+
+    if require_neumann_data:
+        logger.info('Computing projection error Neumann ...')
+        for N in range(basis_length + 1):
+            U_proj = project_array(
+                test_data_neumann,
+                basis[:N],
+                product=transfer.range_product,
+                orthonormal=orthonormal,
+            )
+            error = test_data_neumann - U_proj
+            for k, v in products.items():
+                error_norm = compute_norm(error, k, v)
+                if np.all(error_norm == 0.0):
+                    # ensure to return 0 here even when the norm of U is zero
+                    rel_err = error_norm
+                else:
+                    rel_err = error_norm / test_norms_neumann[k]
+                l2_err = np.sum(error_norm**2.0) / size_test_set
+
+                outneumann[f'l2_err_{k}'].append(l2_err)
+                for key, fun in numpy_funs.items():
+                    outneumann[f'{key}_abserr_{k}'].append(fun(error_norm))
+                    outneumann[f'{key}_relerr_{k}'].append(fun(rel_err))
+        # append data to output
+        for key, value in outneumann.items():
+            output[f'neumann_{key}'] = value
 
     if args.show:
         import matplotlib.pyplot as plt
