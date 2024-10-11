@@ -22,12 +22,14 @@ class RomValidation:
         ntest: Size of the validation set.
         num_modes: Number of modes to use.
         seed: Random seed for the validation set.
+        fields: Fields for which error is computed.
 
     """
 
     ntest: int = 200
     num_modes: tuple[int, ...] = tuple(range(20, 81, 20))
     seed: int = 241690
+    fields: tuple[str, str] = ('u', 's')
 
 
 @dataclass
@@ -118,6 +120,7 @@ class ProjErr:
     """Input Parameters for projection error study.
 
     Args:
+        configs: Which transfer problems to consider.
         seed_test: Random seed for the test set.
         seed_train: Random seed for the training.
         hapod_eps: Bound for HAPOD.
@@ -130,6 +133,7 @@ class ProjErr:
     # for comparability set hapod_training_set=hrrf_testing_set
     # see src/parageom/projerr.py
 
+    configs: tuple[int, ...] = (0, 5)
     seed_train: int = 456729121
     seed_test: int = 923719053
     hapod_eps: float = 0.001  # scale=0.1
@@ -212,8 +216,7 @@ class BeamData:
     rom_validation = RomValidation()
     opt = Optimization()
 
-    def __post_init__(self):
-        """Creates directory structure and dependent attributes."""
+    def _scaling(self):
         a = self.preproc.unit_length
         self.length: float = a * self.nx
         self.height: float = a * self.ny
@@ -230,32 +233,32 @@ class BeamData:
         self.sigma_scale = self.characteristic_length / (self.characteristic_mu * self.characteristic_displacement)
         self.energy_scale = self.characteristic_displacement * np.sqrt(self.characteristic_mu)
 
-        self.grids_path.mkdir(exist_ok=True, parents=True)
-        self.figures_path.mkdir(exist_ok=True, parents=True)
+    def _make_tree(self):
+        # tree
+        # work/{self.name} (run folder)
+        #                 /grids
+        #                 /method
+        #                        /realization_{n}
+        self.grids.mkdir(exist_ok=True, parents=True)
+        self.auxiliary.mkdir(exist_ok=True, parents=True)
+        self.figures.mkdir(exist_ok=True, parents=True)
+        for method in self.methods:
+            for n in range(self.num_real):
+                self.logs(method, n).mkdir(exist_ok=True, parents=True)
+                self.gfembases(method, n).mkdir(exist_ok=True, parents=True)
+                self.modes(method, n).mkdir(exist_ok=True, parents=True)
+                self.projection(method, n).mkdir(exist_ok=True, parents=True)
+                self.validation(method, n).mkdir(exist_ok=True, parents=True)
+                self.optimization(method, n).mkdir(exist_ok=True, parents=True)
 
-        for config in ['global']:
-            p = self.grids_path / config
-            p.mkdir(exist_ok=True, parents=True)
-
-        # NOTE realizations
-        # We need to compute several realizations since we are using a randomized method.
-        # To be able to compare the different ROMs (sets of basis functions), the training
-        # set should be the same for all realizations. Therefore, the same physical meshes
-        # are used for each realization.
-
+    def __post_init__(self):
+        """Creates directory structure and dependent attributes."""
         if self.debug:
             self.num_real = 1
         else:
             self.num_real = 20
-
-        for nr in range(self.num_real):
-            self.real_folder(nr).mkdir(exist_ok=True, parents=True)
-            for name in self.methods:
-                # self.method_folder(nr, name).mkdir(exist_ok=True, parents=True)
-                self.logs_path(nr, name).mkdir(exist_ok=True, parents=True)
-                self.bases_path(nr, name).mkdir(exist_ok=True, parents=True)
-            (self.method_folder(nr, 'hapod') / 'pod_modes').mkdir(exist_ok=True, parents=True)
-            (self.method_folder(nr, 'hrrf') / 'modes').mkdir(exist_ok=True, parents=True)
+        self._scaling()
+        self._make_tree()
 
     @property
     def plotting_style(self) -> Path:
@@ -263,7 +266,7 @@ class BeamData:
         return ROOT / 'src/proceedings.mplstyle'
 
     @property
-    def figures_path(self) -> Path:
+    def figures(self) -> Path:
         return ROOT / 'figures' / f'{self.name}'
 
     @property
@@ -272,51 +275,68 @@ class BeamData:
         return WORK / f'{self.name}'
 
     @property
-    def grids_path(self) -> Path:
+    def grids(self) -> Path:
         return self.rf / 'grids'
 
-    def real_folder(self, nr: int) -> Path:
-        """Realization folder."""
-        return self.rf / f'realization_{nr:02}'
+    @property
+    def auxiliary(self) -> Path:
+        return self.rf / 'auxiliary'
 
-    def method_folder(self, nr: int, name: str) -> Path:
+    def method_folder(self, name: str) -> Path:
         """Training strategy / method folder."""
-        return self.real_folder(nr) / name
+        return self.rf / name
 
-    def logs_path(self, nr: int, name: str) -> Path:
-        return self.method_folder(nr, name) / 'logs'
+    def real_folder(self, method: str, nr: int) -> Path:
+        """Realization folder."""
+        return self.rf / method / f'realization_{nr:02}'
 
-    def bases_path(self, nr: int, method: str) -> Path:
-        """Return Path to bases folder.
+    def logs(self, method: str, nr: int) -> Path:
+        return self.real_folder(method, nr) / 'logs'
+
+    def gfembases(self, method: str, nr: int) -> Path:
+        """Return Path to folder containing local gfem bases.
 
         Args:
-            nr: realization index.
             method: name of the training strategy / method.
+            nr: realization index.
 
         """
-        return self.method_folder(nr, method) / 'bases'
+        return self.real_folder(method, nr) / 'gfembases'
 
-    def coarse_grid(self, config: str) -> Path:
+    def modes(self, method: str, nr: int) -> Path:
+        """Return Path to folder containing local bases."""
+        return self.real_folder(method, nr) / 'modes'
+
+    def projection(self, method: str, nr: int) -> Path:
+        return self.real_folder(method, nr) / 'projection'
+
+    def validation(self, method: str, nr: int) -> Path:
+        return self.real_folder(method, nr) / 'validation'
+
+    def optimization(self, method: str, nr: int) -> Path:
+        return self.real_folder(method, nr) / 'optimization'
+
+    @property
+    def coarse_grid(self) -> Path:
         """Global coarse grid."""
-        assert config in ['global']
-        return self.grids_path / config / 'coarse_grid.msh'
+        return self.grids / 'coarse_grid.msh'
 
-    def parent_domain(self, config: str) -> Path:
-        assert config in ['global']
-        return self.grids_path / config / 'parent_domain.msh'
+    @property
+    def fine_grid(self) -> Path:
+        return self.grids / 'fine_grid.msh'
 
     @property
     def parent_unit_cell(self) -> Path:
-        return self.grids_path / 'parent_unit_cell.msh'
+        return self.grids / 'parent_unit_cell.msh'
 
     @property
     def singular_values_auxiliary_problem(self) -> Path:
-        return self.rf / 'singular_values_auxiliary_problem.npy'
+        return self.auxiliary / 'singular_values.npy'
 
     @property
     def cell_type(self) -> str:
         """The cell type of the parent unit cell mesh."""
-        match self.geom_deg:
+        match self.preproc.geom_deg:
             case 1:
                 return 'quad'
             case 2:
@@ -326,48 +346,44 @@ class BeamData:
 
     def local_basis_npy(self, nr: int, cell: int, method='hapod') -> Path:
         """Final basis for loc rom assembly."""
-        dir = self.bases_path(nr, method)
+        dir = self.gfembases(method, nr)
         return dir / f'basis_{cell:02}.npy'
 
     def local_basis_dofs_per_vert(self, nr: int, cell: int, method='hapod') -> Path:
         """Dofs per vertex for each cell."""
-        dir = self.bases_path(nr, method)
+        dir = self.gfembases(method, nr)
         return dir / f'dofs_per_vert_{cell:02}.npy'
 
-    def rom_error_u(self, nreal: int, num_modes: int, method='hapod', ei=False) -> Path:
-        dir = self.method_folder(nreal, method)
+    def rom_error(self, method: str, nreal: int, field: str, num_modes: int, ei: bool) -> Path:
+        dir = self.validation(method, nreal)
         if ei:
-            return dir / f'rom_error_u_ei_{num_modes}.npz'
+            return dir / f'rom_error_{field}_ei_{num_modes}.npz'
         else:
-            return dir / f'rom_error_u_{num_modes}.npz'
+            return dir / f'rom_error_{field}_{num_modes}.npz'
 
-    def rom_error_s(self, nreal: int, num_modes: int, method='hapod', ei=False) -> Path:
-        dir = self.method_folder(nreal, method)
-        if ei:
-            return dir / f'rom_error_s_ei_{num_modes}.npz'
-        else:
-            return dir / f'rom_error_s_{num_modes}.npz'
+    def mean_rom_error(self, method: str, field: str, ei: bool) -> Path:
+        dir = self.method_folder(method)
+        _ei = '_ei' if ei else ''
+        return dir / f'mean_rom_error_{field}{_ei}.npz'
 
     def rom_condition(self, nreal: int, num_modes: int, method='hapod', ei=False) -> Path:
-        dir = self.method_folder(nreal, method)
+        dir = self.validation(method, nreal)
         if ei:
             return dir / f'rom_condition_ei_{num_modes}.npy'
         else:
             return dir / f'rom_condition_{num_modes}.npy'
 
-    @property
-    def fom_minimization_data(self) -> Path:
+    def fom_minimization_data(self, method: str, nr: int) -> Path:
         """FOM minimization data."""
-        return self.rf / 'fom_minimization_data.out'
+        return self.optimization(method, nr) / 'fom_minimization_data.out'
 
-    @property
-    def rom_minimization_data(self) -> Path:
+    def rom_minimization_data(self, method: str, nr: int) -> Path:
         """ROM minimization data."""
-        return self.rf / 'rom_minimization_data.out'
+        return self.optimization(method, nr) / 'rom_minimization_data.out'
 
-    def pp_stress(self, method: str) -> dict[str, Path]:
+    def pp_stress(self, method: str, nr: int) -> dict[str, Path]:
         """Postprocessing of stress at optimal design."""
-        folder = self.method_folder(0, method)
+        folder = self.optimization(method, nr)
         return {'fom': folder / 'stress_fom.xdmf', 'rom': folder / 'stress_rom.xdmf', 'err': folder / 'stress_err.xdmf'}
 
     # @property
@@ -386,21 +402,24 @@ class BeamData:
     # def fig_rom_opt(self) -> Path:
     #     return self.figures_path / "fig_rom_opt.pdf"
     def fig_projerr(self, k: int, scale: float = 0.1) -> Path:
-        return self.figures_path / f'fig_projerr_{k:02}_scale_{scale}.pdf'
+        return self.figures / f'fig_projerr_{k:02}_scale_{scale}.pdf'
 
     def fig_rom_error(self, method: str, ei: bool) -> Path:
         if ei:
-            return self.figures_path / f'rom_error_{method}_ei.pdf'
+            return self.figures / f'rom_error_{method}_ei.pdf'
         else:
-            return self.figures_path / f'rom_error_{method}.pdf'
+            return self.figures / f'rom_error_{method}.pdf'
 
     @property
     def realizations(self) -> Path:
         """Returns realizations that can be used to create ``np.random.SeedSequence``."""
         file = SRC / 'realizations.npy'
-        if not file.exists():
+        if file.exists():
+            n = np.load(file).size
+            if n < self.num_real:
+                self._generate_realizations(file)
+        else:
             self._generate_realizations(file)
-        # TODO generate realizations if existing nreal < self.num_real
         return file
 
     def _generate_realizations(self, outpath: Path) -> None:
@@ -409,16 +428,16 @@ class BeamData:
         np.save(outpath, realizations)
 
     def log_basis_construction(self, nr: int, method: str, k: int) -> Path:
-        return self.logs_path(nr, method) / f'basis_construction_{k:02}.log'
+        return self.logs(method, nr) / f'basis_construction_{k:02}.log'
 
     def log_projerr(self, nr: int, method: str, k: int, scale: float = 0.1) -> Path:
-        return self.logs_path(nr, method) / f'projerr_{k}_scale_{scale}.log'
+        return self.logs(method, nr) / f'projerr_{k}_scale_{scale}.log'
 
     def log_gfem(self, nr: int, cell: int, method='hapod') -> Path:
-        return self.logs_path(nr, method) / f'gfem_{cell:02}.log'
+        return self.logs(method, nr) / f'gfem_{cell:02}.log'
 
     def log_validate_rom(self, nr: int, modes: int, method='hapod', ei=True) -> Path:
-        dir = self.logs_path(nr, method)
+        dir = self.logs(method, nr)
         if ei:
             return dir / f'validate_rom_{modes}_with_ei.log'
         else:
@@ -426,57 +445,40 @@ class BeamData:
 
     @property
     def log_optimization(self) -> Path:
-        return self.logs_path(self.opt.nreal, self.opt.method) / 'optimization.log'
+        return self.logs(self.opt.method, self.opt.nreal) / 'optimization.log'
 
     def hapod_singular_values(self, nr: int, k: int) -> Path:
         """Singular values of final POD for k-th transfer problem."""
-        return self.method_folder(nr, 'hapod') / f'singular_values_{k:02}.npy'
+        return self.real_folder('hapod', nr) / f'singular_values_{k:02}.npy'
 
-    def hapod_neumann_svals(self, nr: int, k: int) -> Path:
-        """Singular values of POD of neumann data for k-th transfer problem."""
-        return self.method_folder(nr, 'hapod') / f'neumann_singular_values_{k:02}.npy'
-
-    def hapod_info(self, nr: int, k: int) -> Path:
+    def hapod_summary(self, nr: int, k: int) -> Path:
         """Info on HAPOD, final POD."""
-        return self.method_folder(nr, 'hapod') / f'info_{k:02}.out'
+        return self.real_folder('hapod', nr) / f'hapod_summary_{k:02}.out'
 
-    def hapod_modes_xdmf(self, nr: int, k: int) -> Path:
-        """Modes of the final POD for k-th transfer problem."""
-        dir = self.method_folder(nr, 'hapod') / 'pod_modes'
+    def modes_xdmf(self, method: str, nr: int, k: int) -> Path:
+        dir = self.modes(method, nr)
         return dir / f'modes_{k:02}.xdmf'
 
-    def heuristic_modes_xdmf(self, nr: int, k: int) -> Path:
-        """Modes computed by heuristic range finder."""
-        dir = self.method_folder(nr, 'hrrf') / 'modes'
-        return dir / f'modes_{k:02}.xdmf'
-
-    def hapod_modes_npy(self, nr: int, k: int) -> Path:
-        """Modes of the final POD for k-th transfer problem."""
-        dir = self.method_folder(nr, 'hapod') / 'pod_modes'
+    def modes_npy(self, method: str, nr: int, k: int) -> Path:
+        dir = self.modes(method, nr)
         return dir / f'modes_{k:02}.npy'
-
-    def heuristic_modes_npy(self, nr: int, k: int) -> Path:
-        """Modes for k-th transfer problem."""
-        dir = self.method_folder(nr, 'hrrf') / 'modes'
-        return dir / f'modes_{k:02}.npy'
-
-    def heuristic_neumann_svals(self, nr: int, k: int) -> Path:
-        """Singular values of POD of neumann snapshots."""
-        dir = self.method_folder(nr, 'hrrf')
-        return dir / f'neumann_svals_{k:02}.npy'
 
     def projection_error(self, nr: int, method: str, k: int, scale: float = 0.1) -> Path:
-        dir = self.method_folder(nr, method)
+        dir = self.projection(method, nr)
         return dir / f'projerr_{k}_scale_{scale}.npz'
 
+    def mean_projection_error(self, method: str, k: int, scale: float = 0.1) -> Path:
+        dir = self.method_folder(method)
+        return dir / f'mean_projection_error_{k}_scale_{scale}.npz'
+
     def path_omega(self, k: int) -> Path:
-        return self.grids_path / f'omega_{k:02}.xdmf'
+        return self.grids / f'omega_{k:02}.xdmf'
 
     def path_omega_coarse(self, k: int) -> Path:
-        return self.grids_path / f'omega_coarse_{k:02}.msh'
+        return self.grids / f'omega_coarse_{k:02}.msh'
 
     def path_omega_in(self, k: int) -> Path:
-        return self.grids_path / f'omega_in_{k:02}.xdmf'
+        return self.grids / f'omega_in_{k:02}.xdmf'
 
     def boundaries(self, domain: Mesh):
         """Returns boundaries (Dirichlet, Neumann) of the global domain.

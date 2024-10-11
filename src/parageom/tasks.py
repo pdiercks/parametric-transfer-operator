@@ -71,7 +71,7 @@ def task_coarse_grid():
     return {
         'file_dep': [SRC / 'preprocessing.py'],
         'actions': [create_global_coarse_grid],
-        'targets': [example.coarse_grid('global')],
+        'targets': [example.coarse_grid],
         'clean': True,
         'uptodate': [run_once],
     }
@@ -85,9 +85,9 @@ def task_fine_grid():
         create_fine_scale_grid(example, 'global', targets[0])
 
     return {
-        'file_dep': [example.coarse_grid('global'), example.parent_unit_cell, SRC / 'preprocessing.py'],
+        'file_dep': [example.coarse_grid, example.parent_unit_cell, SRC / 'preprocessing.py'],
         'actions': [create_global_fine_grid],
-        'targets': [example.parent_domain('global')],
+        'targets': [example.fine_grid],
         'clean': True,
     }
 
@@ -101,7 +101,7 @@ def task_oversampling_grid():
         targets.extend(with_h5(example.path_omega_in(k)))
         yield {
             'name': f'{k}',
-            'file_dep': [source, example.coarse_grid('global')],
+            'file_dep': [source, example.coarse_grid],
             'actions': ['python3 {} {}'.format(source, k)],
             'targets': targets,
             'clean': True,
@@ -134,11 +134,11 @@ def task_hapod():
             deps.extend(with_h5(example.path_omega_in(k)))
             targets = []
             targets.append(example.log_basis_construction(nreal, 'hapod', k))
-            targets.append(example.hapod_modes_npy(nreal, k))
+            targets.append(example.modes_npy('hapod', nreal, k))
             targets.append(example.hapod_singular_values(nreal, k))
-            targets.append(example.hapod_info(nreal, k))
+            targets.append(example.hapod_summary(nreal, k))
             if example.debug:
-                targets.extend(with_h5(example.hapod_modes_xdmf(nreal, k)))
+                targets.extend(with_h5(example.modes_xdmf('hapod', nreal, k)))
             yield {
                 'name': str(nreal) + ':' + str(k),
                 'file_dep': deps,
@@ -166,9 +166,9 @@ def task_hrrf():
             deps.extend(with_h5(example.path_omega_in(k)))
             targets = []
             targets.append(example.log_basis_construction(nreal, 'hrrf', k))
-            targets.append(example.heuristic_modes_npy(nreal, k))
+            targets.append(example.modes_npy('hrrf', nreal, k))
             if example.debug:
-                targets.extend(with_h5(example.heuristic_modes_xdmf(nreal, k)))
+                targets.extend(with_h5(example.modes_xdmf('hrrf', nreal, k)))
             yield {
                 'name': str(nreal) + ':' + str(k),
                 'file_dep': deps,
@@ -181,10 +181,11 @@ def task_hrrf():
 def task_projerr():
     """ParaGeom: Compute projection error."""
     source = SRC / 'projerr.py'
-    # check sensitivity wrt mu rather than uncertainty in g
     num_samples = 100
+    # check sensitivity wrt mu rather than uncertainty in g
     num_testvecs = 1
-    N = 400
+    # TODO: show plots for different N in the thesis?
+    N = 200
     ntrain_hrrf = {'hrrf': 50, 'hapod': None}
     amplitudes = [example.g_scale]
 
@@ -201,7 +202,7 @@ def task_projerr():
         return action
 
     for nreal in range(example.num_real):
-        for k in (0, 5):
+        for k in example.projerr.configs:
             for method in example.methods:
                 deps = [source]
                 deps.append(example.path_omega_coarse(k))
@@ -222,27 +223,6 @@ def task_projerr():
                         'targets': targets,
                         'clean': True,
                     }
-
-
-def task_fig_projerr():
-    """ParaGeom: Plot projection error."""
-    source = SRC / 'plot_projerr.py'
-    amplitudes = [example.g_scale]
-    for nreal in range(example.num_real):
-        for k in (0, 5):
-            deps = [source]
-            for scale in amplitudes:
-                for method in example.methods:
-                    deps.append(example.projection_error(nreal, method, k, scale))
-                targets = []
-                targets.append(example.fig_projerr(k, scale))
-                yield {
-                    'name': ':'.join([str(nreal), str(k), str(scale)]),
-                    'file_dep': deps,
-                    'actions': ['python3 {} {} {} {} %(targets)s'.format(source, nreal, k, scale)],
-                    'targets': targets,
-                    'clean': True,
-                }
 
 
 def task_gfem():
@@ -334,6 +314,86 @@ def task_validate_rom():
                     }
 
 
+def task_pp_projerr():
+    """ParaGeom: Postprocess projection error."""
+    from parageom.postprocessing import compute_mean_std
+
+    for method in example.methods:
+        for k in example.projerr.configs:
+            # gather data
+            deps = []
+            for n in range(example.num_real):
+                deps.append(example.projection_error(n, method, k))
+            yield {
+                'name': ':'.join([method, str(k)]),
+                'file_dep': deps,
+                'actions': [compute_mean_std],
+                'targets': [example.mean_projection_error(method, k)],
+            }
+
+
+def task_fig_projerr():
+    """ParaGeom: Plot projection error."""
+    source = SRC / 'plot_projerr.py'
+    amplitudes = [example.g_scale]
+    for nreal in range(example.num_real):
+        for k in example.projerr.configs:
+            deps = [source]
+            for scale in amplitudes:
+                for method in example.methods:
+                    deps.append(example.projection_error(nreal, method, k, scale))
+                targets = []
+                targets.append(example.fig_projerr(k, scale))
+                yield {
+                    'name': ':'.join([str(nreal), str(k), str(scale)]),
+                    'file_dep': deps,
+                    'actions': ['python3 {} {} {} {} %(targets)s'.format(source, nreal, k, scale)],
+                    'targets': targets,
+                    'clean': True,
+                }
+
+
+# TODO !!!
+# def task_pp_rom_error():
+#     """ParaGeom: Postprocess ROM error."""
+#     from parageom.postprocessing import compute_mean_std
+#
+#     def gather_and_compute(example, method, field, targets):
+#         """Gather error data for all number of modes, then compute mean & std."""
+#         error = []
+#         for n in range(example.num_real):
+#             # grow error over number of modes
+#             err = []
+#             for num_modes in example.rom_validation.num_modes:
+#                 infile = example.rom_error(method, n, field, num_modes, ei=True)
+#                 data = np.load(infile)
+#                 # TODO finalize output in validate_rom.py
+#                 # have separate files for u and s, but save min, avg & max over
+#                 # validation set
+#                 err.append()
+#
+#     # - [ ] get errors (u, s) for all number of modes for single realization
+#     # - [ ] then join data over all realizations
+#     # - [ ] then compute mean and std
+#
+#     # probably cannot use deps field, because not ordered
+#
+#     fields = example.rom_validation.fields
+#     for method in example.methods:
+#         for qty in fields:
+#             # gather data
+#             deps = []
+#             for n in range(example.num_real):
+#                 for nmodes in example.rom_validation.num_modes:
+#                     deps.append(example.rom_error(method, n, qty, nmodes, ei=True))
+#             yield {
+#                 'name': ':'.join([method, qty]),
+#                 'file_dep': deps,
+#                 'actions': [gather_and_compute],
+#                 'targets': [example.mean_rom_error(method, qty, ei=True)],
+#             }
+
+
 def task_fig_rom_error():
     """ParaGeom: Plot ROM error."""
     source = SRC / 'plot_romerr.py'
@@ -375,8 +435,8 @@ def task_optimization():
     minimizer = example.opt.minimizer
 
     deps = [source]
-    deps.append(example.coarse_grid('global'))
-    deps.append(example.parent_domain('global'))
+    deps.append(example.coarse_grid)
+    deps.append(example.fine_grid)
     deps.append(example.parent_unit_cell)
     for cell in range(example.nx * example.ny):
         deps.append(example.local_basis_npy(nreal, cell, method=method))
