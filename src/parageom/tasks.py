@@ -66,7 +66,7 @@ def task_coarse_grid():
     from parageom.preprocessing import create_structured_coarse_grid
 
     def create_global_coarse_grid(targets):
-        create_structured_coarse_grid(example, 'global', targets[0])
+        create_structured_coarse_grid(example, targets[0])
 
     return {
         'file_dep': [SRC / 'preprocessing.py'],
@@ -82,7 +82,7 @@ def task_fine_grid():
     from parageom.preprocessing import create_fine_scale_grid
 
     def create_global_fine_grid(targets):
-        create_fine_scale_grid(example, 'global', targets[0])
+        create_fine_scale_grid(example, targets[0])
 
     return {
         'file_dep': [example.coarse_grid, example.parent_unit_cell, SRC / 'preprocessing.py'],
@@ -245,14 +245,11 @@ def task_gfem():
         for cell in range(10):
             for method in example.methods:
                 deps = [source]
-                deps.append(example.coarse_grid('global'))
+                deps.append(example.coarse_grid)
                 deps.append(example.parent_unit_cell)
                 for k in cell_to_transfer_problem(cell):
                     deps.append(example.path_omega_in(k))
-                    if method == 'hapod':
-                        deps.append(example.hapod_modes_npy(nreal, k))
-                    else:
-                        deps.append(example.heuristic_modes_npy(nreal, k))
+                    deps.append(example.modes_npy(method, nreal, k))
                 targets = []
                 targets.append(example.local_basis_npy(nreal, cell, method=method))
                 targets.append(example.local_basis_dofs_per_vert(nreal, cell, method=method))
@@ -290,8 +287,8 @@ def task_validate_rom():
         for num_modes in number_of_modes:
             for method in example.methods:
                 deps = [source]
-                deps.append(example.coarse_grid('global'))
-                deps.append(example.parent_domain('global'))
+                deps.append(example.coarse_grid)
+                deps.append(example.fine_grid)
                 deps.append(example.parent_unit_cell)
                 for cell in range(num_cells):
                     deps.append(example.local_basis_npy(nreal, cell, method=method))
@@ -300,8 +297,8 @@ def task_validate_rom():
                 options = {}
                 for key, value in with_ei.items():
                     targets = []
-                    targets.append(example.rom_error_u(nreal, num_modes, method=method, ei=value))
-                    targets.append(example.rom_error_s(nreal, num_modes, method=method, ei=value))
+                    for field in example.rom_validation.fields:
+                        targets.append(example.rom_error(method, nreal, field, num_modes, ei=value))
                     targets.append(example.log_validate_rom(nreal, num_modes, method=method, ei=value))
                     if value:
                         options['--ei'] = ''
@@ -327,7 +324,7 @@ def task_pp_projerr():
             yield {
                 'name': ':'.join([method, str(k)]),
                 'file_dep': deps,
-                'actions': [compute_mean_std],
+                'actions': [(compute_mean_std, ['min', 'avg', 'max'])],
                 'targets': [example.mean_projection_error(method, k)],
             }
 
@@ -353,55 +350,60 @@ def task_fig_projerr():
                 }
 
 
-# TODO !!!
-# def task_pp_rom_error():
-#     """ParaGeom: Postprocess ROM error."""
-#     from parageom.postprocessing import compute_mean_std
-#
-#     def gather_and_compute(example, method, field, targets):
-#         """Gather error data for all number of modes, then compute mean & std."""
-#         error = []
-#         for n in range(example.num_real):
-#             # grow error over number of modes
-#             err = []
-#             for num_modes in example.rom_validation.num_modes:
-#                 infile = example.rom_error(method, n, field, num_modes, ei=True)
-#                 data = np.load(infile)
-#                 # TODO finalize output in validate_rom.py
-#                 # have separate files for u and s, but save min, avg & max over
-#                 # validation set
-#                 err.append()
-#
-#     # - [ ] get errors (u, s) for all number of modes for single realization
-#     # - [ ] then join data over all realizations
-#     # - [ ] then compute mean and std
-#
-#     # probably cannot use deps field, because not ordered
-#
-#     fields = example.rom_validation.fields
-#     for method in example.methods:
-#         for qty in fields:
-#             # gather data
-#             deps = []
-#             for n in range(example.num_real):
-#                 for nmodes in example.rom_validation.num_modes:
-#                     deps.append(example.rom_error(method, n, qty, nmodes, ei=True))
-#             yield {
-#                 'name': ':'.join([method, qty]),
-#                 'file_dep': deps,
-#                 'actions': [gather_and_compute],
-#                 'targets': [example.mean_rom_error(method, qty, ei=True)],
-#             }
+def task_pp_rom_error():
+    """ParaGeom: Postprocess ROM error."""
+
+    def gather_and_compute(example, method, field, targets):
+        """Gather error data for all number of modes, then compute mean & std."""
+        import numpy as np
+
+        Nmodes = len(example.rom_validation.num_modes)
+        Nvalidation = example.rom_validation.ntest
+
+        output = {}
+        errkeys = ['min', 'avg', 'max']
+        for key in errkeys:
+            error = []
+            # collect error for each realization
+            for n in range(example.num_real):
+                err = []
+                # grow error over number of modes
+                for num_modes in example.rom_validation.num_modes:
+                    infile = example.rom_error(method, n, field, num_modes, ei=True)
+                    data = np.load(infile)
+                    err.append(data[key])
+                error.append(np.array(err))
+            error = np.vstack(error)
+            assert error.shape == (Nvalidation, Nmodes)
+            output[f'mean_{key}'] = np.mean(error, axis=0)
+            output[f'std_{key}'] = np.std(error, axis=0)
+        np.savez(targets[0], **output)
+
+    fields = example.rom_validation.fields
+    for method in example.methods:
+        for qty in fields:
+            # gather data
+            deps = []
+            for n in range(example.num_real):
+                for nmodes in example.rom_validation.num_modes:
+                    deps.append(example.rom_error(method, n, qty, nmodes, ei=True))
+            yield {
+                'name': ':'.join([method, qty]),
+                'file_dep': deps,
+                'actions': [gather_and_compute],
+                'targets': [example.mean_rom_error(method, qty, ei=True)],
+            }
 
 
 def task_fig_rom_error():
     """ParaGeom: Plot ROM error."""
     source = SRC / 'plot_romerr.py'
-    nreal = 0  # TODO compute mean over all realizations ...
-    number_of_modes = example.rom_validation.num_modes
+
+    # TODO: (A) plot min, avg, max over realizations for max error over validation set
+    # TODO: (B) plot min, avg, max over validation set for single realization
 
     def create_action(method, output, ei=False):
-        action = f'python3 {source} {nreal} {method} {output}'
+        action = f'python3 {source} {method} {output}'
         if ei:
             action += ' --ei'
         return action
@@ -411,9 +413,8 @@ def task_fig_rom_error():
     for method in example.methods:
         for ei in with_ei.keys():
             deps = [source]
-            for num_modes in number_of_modes:
-                deps.append(example.rom_error_u(nreal, num_modes, method=method, ei=ei))
-                deps.append(example.rom_error_s(nreal, num_modes, method=method, ei=ei))
+            deps.append(example.mean_rom_error(method, 'u', ei=ei))
+            deps.append(example.mean_rom_error(method, 's', ei=ei))
             targets = [example.fig_rom_error(method, ei=ei)]
             yield {
                 'name': ':'.join([method, with_ei[ei]]),
@@ -441,7 +442,11 @@ def task_optimization():
     for cell in range(example.nx * example.ny):
         deps.append(example.local_basis_npy(nreal, cell, method=method))
         deps.append(example.local_basis_dofs_per_vert(nreal, cell, method=method))
-    targets = [example.fom_minimization_data, example.rom_minimization_data, example.log_optimization]
+    targets = [
+        example.fom_minimization_data(method, nreal),
+        example.rom_minimization_data(method, nreal),
+        example.log_optimization,
+    ]
     return {
         'file_dep': deps,
         'actions': [

@@ -258,9 +258,9 @@ def main(args):
 
     if args.debug:
         viz = FenicsxVisualizer(spectral_basis.space)
-        viz.visualize(spectral_basis, filename=example.heuristic_modes_xdmf(args.nreal, args.k))
+        viz.visualize(spectral_basis, filename=example.modes_xdmf('hrrf', args.nreal, args.k))
     np.save(
-        example.heuristic_modes_npy(args.nreal, args.k),
+        example.modes_npy('hrrf', args.nreal, args.k),
         spectral_basis.to_numpy(),
     )
 
