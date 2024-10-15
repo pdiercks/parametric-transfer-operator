@@ -76,7 +76,7 @@ def main(args):
         fxy = values[:, :, 3]
         fmin = (fxx + fyy) / 2 - np.sqrt(((fxx - fyy) / 2) ** 2 + fxy**2)
         fmax = (fxx + fyy) / 2 + np.sqrt(((fxx - fyy) / 2) ** 2 + fxy**2)
-        return fmin, fmax
+        return fmin.flatten(), fmax.flatten()
 
     # TODO: add stress plots in other postproc script?
 
@@ -102,7 +102,7 @@ def main(args):
     d_local = df.fem.Function(V_i, name='u_i')
 
     # ### Build localized ROM
-    coarse_grid_path = example.coarse_grid('global')
+    coarse_grid_path = example.coarse_grid
     coarse_domain = read_mesh(coarse_grid_path, MPI.COMM_WORLD, cell_tags=None, kwargs={'gdim': example.gdim})[0]
     struct_grid = StructuredQuadGrid(coarse_domain)
     dofmap = GFEMDofMap(struct_grid)
@@ -200,17 +200,21 @@ def main(args):
     s_error = sfom_sols - srom_sols
     s_error_norm = s_error.norm() / sfom_sols.norm()
 
-    def relative_nodal_error(E, U):
-        values = E.to_numpy()
-        relative = np.abs(values) / np.abs(U.to_numpy())
+    def relative_nodal_error(E, U, epsilon=1e-12):
+        abserr = np.abs(E.to_numpy())
+        truth = np.abs(U.to_numpy())
+        relative = np.where(truth > epsilon, abserr / truth, abserr)
         max_values = np.max(relative, axis=1)
         return max_values
 
     # nodal error
+    # TODO: fix nodal error
+    # maybe we can just use max norm for the stress??
     max_nodal_displacement_error = relative_nodal_error(u_error, ufom_sols)
     max_nodal_stress_error = relative_nodal_error(s_error, sfom_sols)
     assert max_nodal_displacement_error.size == len(validation_set)
     assert max_nodal_stress_error.size == len(validation_set)
+    breakpoint()
 
     logger.info(f"""Summary
     Validation set size = {len(validation_set)}
@@ -276,9 +280,9 @@ def build_fom(example, ω=0.5):
     from parageom.auxiliary_problem import discretize_auxiliary_problem
     from parageom.fom import discretize_fom
 
-    coarse_grid_path = example.coarse_grid('global')
+    coarse_grid_path = example.coarse_grid
     coarse_grid = StructuredQuadGrid(*read_mesh(coarse_grid_path, MPI.COMM_WORLD, kwargs={'gdim': example.gdim}))
-    parent_domain_path = example.parent_domain('global')
+    parent_domain_path = example.fine_grid
     omega_gl = RectangularDomain(*read_mesh(parent_domain_path, MPI.COMM_WORLD, kwargs={'gdim': example.gdim}))
     interface_tags = [i for i in range(15, 25)]
     auxiliary_problem = discretize_auxiliary_problem(
