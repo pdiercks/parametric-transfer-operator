@@ -64,6 +64,11 @@ def main(args):
     num_cells = map_c.size_local + map_c.num_ghosts
     cells = np.arange(0, num_cells, dtype=np.int32)
 
+    # ### NumpyVectorSpace for Stress
+    num_qp = q_points.shape[0]
+    dim_stress_space = num_qp * num_cells
+    stress_space = NumpyVectorSpace(dim_stress_space)
+
     def compute_principal_components(f):
         values = f.reshape(cells.size, 4, 4)
         fxx = values[:, :, 0]
@@ -139,27 +144,17 @@ def main(args):
     with new_rng(example.rom_validation.seed):
         validation_set = P.sample_randomly(args.num_params)
 
-    fom_sols = fom.solution_space.empty()
-    rom_sols = fom.solution_space.empty()
+    ufom_sols = fom.solution_space.empty()
+    urom_sols = fom.solution_space.empty()
+    sfom_sols = stress_space.empty()
+    srom_sols = stress_space.empty()
 
-    def compute_stress_error_norms(fom, rom):
-        fom_norm = np.linalg.norm(fom)
-        abs_err = np.abs(fom - rom)
-        rel_err = abs_err / fom_norm
-        max_rel_err = np.max(rel_err)  # pointwise
-        rel_err_norm = np.linalg.norm(abs_err) / fom_norm  # global
-        return {
-            'max_rel_err': max_rel_err,
-            'rel_err_norm': rel_err_norm,
-        }
-
-    max_rel_err_stress = []
     energy_product = fom.products['energy']
     kappa = np.empty(len(validation_set), dtype=np.float64) if args.condition else None
 
     for i_mu, mu in enumerate(validation_set):
         U_fom = fom.solve(mu)
-        fom_sols.append(U_fom)
+        ufom_sols.append(U_fom)
         d_fom.x.array[:] = U_fom.to_numpy().flatten()  # type: ignore
 
         if args.ei:
@@ -179,7 +174,7 @@ def main(args):
             urb = rom.solve(mu)
         reconstruct(urb.to_numpy(), dofmap, modes, d_local, d_rom)  # type: ignore
         U_rom = fom.solution_space.make_array([d_rom.x.petsc_vec.copy()])  # type: ignore
-        rom_sols.append(U_rom)
+        urom_sols.append(U_rom)
 
         if args.condition:
             A = rom.operator.assemble(mu)
@@ -189,21 +184,33 @@ def main(args):
                 kappa[i_mu] = np.linalg.cond(A.matrix)
 
         stress_expr_rom.eval(V.mesh, entities=cells, values=stress_rom.x.array.reshape(cells.size, -1))
-        s_rom = compute_principal_components(stress_rom.x.array.reshape(cells.size, -1))
+        _, s_rom = compute_principal_components(stress_rom.x.array.reshape(cells.size, -1))
 
         stress_expr_fom.eval(V.mesh, entities=cells, values=stress_fom.x.array.reshape(cells.size, -1))
-        s_fom = compute_principal_components(stress_fom.x.array.reshape(cells.size, -1))
+        _, s_fom = compute_principal_components(stress_fom.x.array.reshape(cells.size, -1))
 
-        first_principal = compute_stress_error_norms(s_fom[1], s_rom[1])
-        max_rel_err_stress.append(first_principal['max_rel_err'])
+        sfom_sols.append(stress_space.make_array(s_fom))
+        srom_sols.append(stress_space.make_array(s_rom))
 
-    # displacement error in energy norm
-    u_errors = fom_sols - rom_sols
-    errn = u_errors.norm(energy_product) / fom_sols.norm(energy_product)
+    # displacement error (energy norm)
+    u_error = ufom_sols - urom_sols
+    u_error_norm = u_error.norm(energy_product) / ufom_sols.norm(energy_product)
 
-    # displacement error per node
-    u_errors.scal(1 / fom_sols.amax()[1])
-    nodal_uerr = u_errors.amax()[1]
+    # stress error (Euclidean norm)
+    s_error = sfom_sols - srom_sols
+    s_error_norm = s_error.norm() / sfom_sols.norm()
+
+    def relative_nodal_error(E, U):
+        values = E.to_numpy()
+        relative = np.abs(values) / np.abs(U.to_numpy())
+        max_values = np.max(relative, axis=1)
+        return max_values
+
+    # nodal error
+    max_nodal_displacement_error = relative_nodal_error(u_error, ufom_sols)
+    max_nodal_stress_error = relative_nodal_error(s_error, sfom_sols)
+    assert max_nodal_displacement_error.size == len(validation_set)
+    assert max_nodal_stress_error.size == len(validation_set)
 
     logger.info(f"""Summary
     Validation set size = {len(validation_set)}
@@ -213,30 +220,51 @@ def main(args):
     Displacement
           Relative Error in Energy Norm:
           ---------------------
-          min = {np.min(errn)}
-          max = {np.max(errn)}
-          avg = {np.average(errn)}
-          Worst mu = {np.argmax(errn)}
+          min = {np.min(u_error_norm)}
+          max = {np.max(u_error_norm)}
+          avg = {np.average(u_error_norm)}
+          Worst mu = {np.argmax(u_error_norm)}
 
           Max Nodal Relative Error:
           ----------------
-          min = {np.min(nodal_uerr)}
-          max = {np.max(nodal_uerr)}
-          avg = {np.average(nodal_uerr)}
+          min = {np.min(max_nodal_displacement_error)}
+          max = {np.max(max_nodal_displacement_error)}
+          avg = {np.average(max_nodal_displacement_error)}
 
     Stress
-          min (max) rel err = {np.min(max_rel_err_stress)}
-          max (max) rel err = {np.max(max_rel_err_stress)}
-          avg (max) rel err = {np.average(max_rel_err_stress)}
-          Worst mu = {np.argmax(max_rel_err_stress)}
+          Relative Error in Euclidean Norm:
+          ---------------------
+          min = {np.min(s_error_norm)}
+          max = {np.max(s_error_norm)}
+          avg = {np.average(s_error_norm)}
+          Worst mu = {np.argmax(s_error_norm)}
+
+          Max Nodal Relative Error:
+          ----------------
+          min = {np.min(max_nodal_stress_error)}
+          max = {np.max(max_nodal_stress_error)}
+          avg = {np.average(max_nodal_stress_error)}
     """)
 
     # ### Write targets
-    output_u = example.rom_error_u(args.nreal, num_modes, method=args.method, ei=args.ei).as_posix()
-    np.savez(output_u, relerr=errn, nodal_err=nodal_uerr)
+    def outdata(array):
+        r = {}
+        r['max'] = np.max(array)
+        r['min'] = np.min(array)
+        r['avg'] = np.average(array)
+        return r
 
-    output_s = example.rom_error_s(args.nreal, num_modes, method=args.method, ei=args.ei).as_posix()
-    np.savez(output_s, relerr=max_rel_err_stress)
+    # u - min,avg,max over validation set for relative error in energy norm
+    output_u = example.rom_error(
+        args.method, args.nreal, example.rom_validation.fields[0], num_modes, args.ei
+    ).as_posix()
+    np.savez(output_u, **outdata(u_error_norm))
+
+    # s - min,avg,max over validation set for max relative nodal error
+    output_s = example.rom_error(
+        args.method, args.nreal, example.rom_validation.fields[1], num_modes, args.ei
+    ).as_posix()
+    np.savez(output_s, **outdata(max_nodal_stress_error))
 
     if args.condition:
         assert kappa is not None
