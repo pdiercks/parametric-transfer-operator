@@ -67,15 +67,11 @@ def create_structured_coarse_grid_v2(example: BeamData, coarse_grid, active_cell
     create_rectangle(xmin, xmax, ymin, ymax, num_cells=[num_cells, 1], recombine=True, out_file=output)
 
 
-def create_structured_coarse_grid(example: BeamData, typus: str, output: str):
+def create_structured_coarse_grid(example: BeamData, output: str):
+    """Create coarse grid for global domain."""
     a = example.preproc.unit_length
-
-    match typus:
-        case 'global':
-            num_cells = (example.nx, example.ny)
-            xmin = 0.0
-        case _:
-            raise NotImplementedError
+    num_cells = (example.nx, example.ny)
+    xmin = 0.0
 
     xmax = xmin + a * num_cells[0]
     ymin = 0.0
@@ -132,9 +128,9 @@ def create_fine_scale_grid_v2(example: BeamData, coarse_grid, active_cells, outp
         tmp.close()
 
 
-def create_fine_scale_grid(example: BeamData, typus: str, output: str):
-    """Create parent domain for `config`."""
-    coarse_grid_msh = example.coarse_grid(typus).as_posix()
+def create_fine_scale_grid(example: BeamData, output: str):
+    """Create parent domain for global domain."""
+    coarse_grid_msh = example.coarse_grid.as_posix()
     coarse_domain = gmshio.read_from_msh(coarse_grid_msh, MPI.COMM_WORLD, gdim=example.gdim)[0]
     coarse_grid = StructuredQuadGrid(coarse_domain)
     num_cells = coarse_grid.num_cells
@@ -277,11 +273,9 @@ if __name__ == '__main__':
     args = parser.parse_args(sys.argv[1:])
 
     # read global coarse grid
-    coarse_grid_path = example.coarse_grid('global')
-    coarse_domain = read_mesh(coarse_grid_path, MPI.COMM_WORLD, cell_tags=None, kwargs={'gdim': example.gdim})[0]
+    coarse_domain = read_mesh(example.coarse_grid, MPI.COMM_WORLD, cell_tags=None, kwargs={'gdim': example.gdim})[0]
     struct_grid_gl = StructuredQuadGrid(coarse_domain)
 
     # oversampling configuration
     ospconf = oversampling_config_factory(args.k)
-
     discretize_oversampling_domains(example, struct_grid_gl, ospconf)
