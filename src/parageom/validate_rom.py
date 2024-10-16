@@ -51,6 +51,7 @@ def main(args):
     stress_rom = df.fem.Function(QV)
 
     # ### UFL representation and Expression of stress
+    # stress computation based on ROM displacment solution, but the pull back is computed using transformation displacement from FOM
     suf = parageom_fom.weighted_stress(d_fom)
     stress_ufl_fom_vector = ufl.as_vector([suf[0, 0], suf[1, 1], suf[2, 2], suf[0, 1]])
     stress_expr_fom = df.fem.Expression(stress_ufl_fom_vector, q_points)
@@ -68,6 +69,15 @@ def main(args):
     num_qp = q_points.shape[0]
     dim_stress_space = num_qp * num_cells
     stress_space = NumpyVectorSpace(dim_stress_space)
+
+    def compute_first_principal(f):
+        values = f.reshape(cells.size, 4, 4)
+        fxx = values[:, :, 0]
+        fyy = values[:, :, 1]
+        fxy = values[:, :, 3]
+        # fmin = (fxx + fyy) / 2 - np.sqrt(((fxx - fyy) / 2) ** 2 + fxy**2)
+        fmax = (fxx + fyy) / 2 + np.sqrt(((fxx - fyy) / 2) ** 2 + fxy**2)
+        return fmax.flatten()
 
     def compute_principal_components(f):
         values = f.reshape(cells.size, 4, 4)
@@ -184,13 +194,13 @@ def main(args):
                 kappa[i_mu] = np.linalg.cond(A.matrix)
 
         stress_expr_rom.eval(V.mesh, entities=cells, values=stress_rom.x.array.reshape(cells.size, -1))
-        _, s_rom = compute_principal_components(stress_rom.x.array.reshape(cells.size, -1))
+        s_rom = compute_first_principal(stress_rom.x.array)
+        srom_sols.append(stress_space.make_array(s_rom))
 
         stress_expr_fom.eval(V.mesh, entities=cells, values=stress_fom.x.array.reshape(cells.size, -1))
-        _, s_fom = compute_principal_components(stress_fom.x.array.reshape(cells.size, -1))
-
+        s_fom = compute_first_principal(stress_fom.x.array)
+        # _, s_fom = compute_principal_components(stress_fom.x.array.reshape(cells.size, -1))
         sfom_sols.append(stress_space.make_array(s_fom))
-        srom_sols.append(stress_space.make_array(s_rom))
 
     # displacement error (energy norm)
     u_error = ufom_sols - urom_sols
@@ -200,18 +210,12 @@ def main(args):
     s_error = sfom_sols - srom_sols
     s_error_norm = s_error.norm() / sfom_sols.norm()
 
-    def relative_nodal_error(E, U, epsilon=1e-12):
-        abserr = np.abs(E.to_numpy())
-        truth = np.abs(U.to_numpy())
-        relative = np.where(truth > epsilon, abserr / truth, abserr)
-        max_values = np.max(relative, axis=1)
-        return max_values
-
-    # nodal error
-    # TODO: fix nodal error
-    # maybe we can just use max norm for the stress??
-    max_nodal_displacement_error = relative_nodal_error(u_error, ufom_sols)
-    max_nodal_stress_error = relative_nodal_error(s_error, sfom_sols)
+    # scale each vector by respective max value of FOM solution
+    u_error.scal(1 / ufom_sols.sup_norm())
+    s_error.scal(1 / sfom_sols.sup_norm())
+    # take the max value over all nodes
+    max_nodal_displacement_error = u_error.sup_norm()
+    max_nodal_stress_error = s_error.sup_norm()
     assert max_nodal_displacement_error.size == len(validation_set)
     assert max_nodal_stress_error.size == len(validation_set)
     breakpoint()
