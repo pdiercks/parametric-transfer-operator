@@ -25,11 +25,12 @@ from pymor.bindings.fenicsx import FenicsxMatrixOperator, FenicsxVectorSpace
 from pymor.operators.constructions import LincombOperator, VectorOperator
 from pymor.operators.interface import Operator
 from pymor.operators.numpy import NumpyMatrixOperator
-from pymor.parameters.base import Parameters
+from pymor.parameters.base import Mu, Parameters
 from pymor.vectorarrays.interface import VectorArray
 from pymor.vectorarrays.numpy import NumpyVectorSpace
 from scipy.sparse import coo_array, csr_array
 
+from parageom.auxiliary_problem import AuxiliaryModelWrapper
 from parageom.definitions import BeamData
 from parageom.dofmap_gfem import GFEMDofMap
 from parageom.matrix_based_operator import FenicsxMatrixBasedOperator
@@ -203,32 +204,88 @@ class GlobalParaGeomOperator(Operator):
         return self.assemble(mu).apply_inverse(V, initial_guess=initial_guess, least_squares=least_squares)
 
 
+# def reconstruct(
+#     U_rb: np.ndarray,
+#     dofmap: DofMap,
+#     bases: list[np.ndarray],
+#     u_local: df.fem.Function,
+#     u_global: df.fem.Function,
+# ) -> None:
+#     """Reconstructs rom solution on the global domain.
+#
+#     Args:
+#         U_rb: ROM solution in the reduced space.
+#         dofmap: The dofmap of the reduced space.
+#         bases: Local basis for each subdomain.
+#         u_local: The local solution field.
+#         u_global: The global solution field to be filled with values.
+#
+#     """
+#     coarse_grid = dofmap.grid
+#     V = u_global.function_space
+#     Vsub = u_local.function_space
+#     submesh = Vsub.mesh
+#     x_submesh = submesh.geometry.x
+#     u_global_view = u_global.x.array
+#     u_global_view[:] = 0.0
+#
+#     for cell in range(dofmap.num_cells):
+#         # translate subdomain mesh
+#         vertices = coarse_grid.get_entities(0, cell)
+#         dx_cell = coarse_grid.get_entity_coordinates(0, vertices)[0]
+#         x_submesh += dx_cell
+#
+#         # fill u_local with rom solution
+#         basis = bases[cell]
+#         dofs = dofmap.cell_dofs(cell)
+#
+#         # fill global field via dof mapping
+#         V_to_Vsub = make_mapping(Vsub, V, padding=1e-8, check=True)
+#         u_global_view[V_to_Vsub] = U_rb[0, dofs] @ basis
+#
+#         # move subdomain mesh to origin
+#         x_submesh -= dx_cell
+#     u_global.x.scatter_forward()
+
+
 def reconstruct(
     U_rb: np.ndarray,
+    mu: Mu,
     dofmap: DofMap,
     bases: list[np.ndarray],
-    u_local: df.fem.Function,
+    Vsub: df.fem.FunctionSpace,
     u_global: df.fem.Function,
+    d_global: df.fem.Function,
+    aux: AuxiliaryModelWrapper,
 ) -> None:
-    """Reconstructs rom solution on the global domain.
+    """Reconstructs ROM displacement solution & transformation displacement on the global domain.
 
     Args:
         U_rb: ROM solution in the reduced space.
+        mu: The current parameter value.
         dofmap: The dofmap of the reduced space.
         bases: Local basis for each subdomain.
-        u_local: The local solution field.
+        Vsub: The local FE space.
         u_global: The global solution field to be filled with values.
+        d_global: The global transformation displacement field to be filled with values.
+        aux: The model of the local auxiliary problem.
 
     """
     coarse_grid = dofmap.grid
     V = u_global.function_space
-    Vsub = u_local.function_space
     submesh = Vsub.mesh
     x_submesh = submesh.geometry.x
+
     u_global_view = u_global.x.array
     u_global_view[:] = 0.0
+    d_global_view = d_global.x.array
+    d_global_view[:] = 0.0
 
-    for cell in range(dofmap.num_cells):
+    mu_values = mu.to_numpy()
+    rom = aux.model
+    reductor = aux.reductor
+
+    for i, cell in enumerate(range(dofmap.num_cells)):
         # translate subdomain mesh
         vertices = coarse_grid.get_entities(0, cell)
         dx_cell = coarse_grid.get_entity_coordinates(0, vertices)[0]
@@ -242,9 +299,15 @@ def reconstruct(
         V_to_Vsub = make_mapping(Vsub, V, padding=1e-8, check=True)
         u_global_view[V_to_Vsub] = U_rb[0, dofs] @ basis
 
+        mu_i = rom.parameters.parse(mu_values[i])
+        drb = rom.solve(mu_i)
+        d_global_view[V_to_Vsub] = reductor.reconstruct(drb).to_numpy()[0, :]
+
         # move subdomain mesh to origin
         x_submesh -= dx_cell
+
     u_global.x.scatter_forward()
+    d_global.x.scatter_forward()
 
 
 def assemble_gfem_system(

@@ -20,6 +20,7 @@ from pymor.vectorarrays.numpy import NumpyVectorSpace
 
 def main(args):
     from parageom.dofmap_gfem import GFEMDofMap
+    from parageom.fom import ParaGeomLinEla
     from parageom.locmor import assemble_gfem_system, reconstruct
     from parageom.tasks import example
 
@@ -36,80 +37,107 @@ def main(args):
     fom, parageom_fom = build_fom(example)
     V = fom.solution_space.V
 
-    # ### Global function for displacment
-    d_rom = df.fem.Function(V, name='urom')
-    d_fom = df.fem.Function(V, name='ufom')
+    # ### Global Functions
+    u_rom = df.fem.Function(V, name='urom')  # FOM displacement
+    u_fom = df.fem.Function(V, name='ufom')  # ROM displacement
+    d_rom = df.fem.Function(V, name='drom')  # ROM transformation displacement
+    # FOM transformation displacement is managed by `parageom_fom` object
+
+    def constrained_cells(domain):
+        """Get active cells to deactivate constraint function in some part of the domain (near the support)."""
+
+        def exclude(x):
+            radius = 0.3
+            center = np.array([[10.0], [0.0], [0.0]])
+            distance = np.linalg.norm(np.abs(x - center), axis=0)
+            return distance < radius
+
+        tdim = domain.topology.dim
+        map_c = domain.topology.index_map(tdim)
+        num_cells = map_c.size_local + map_c.num_ghosts
+        allcells = np.arange(0, num_cells, dtype=np.int32)
+
+        nonactive = df.mesh.locate_entities(domain, tdim, exclude)
+        active = np.setdiff1d(allcells, nonactive)
+        return active
+
+    constrained = constrained_cells(V.mesh)
+    submesh, cell_map, _, _ = df.mesh.create_submesh(V.mesh, V.mesh.topology.dim, constrained)
 
     # ### Quadrature space for stress
-    basix_celltype = getattr(basix.CellType, V.mesh.topology.cell_type.name)
+    basix_celltype = getattr(basix.CellType, submesh.topology.cell_type.name)
     q_degree = 2
     q_points, _ = basix.make_quadrature(basix_celltype, q_degree)
     qve = basix.ufl.quadrature_element(basix_celltype, value_shape=(4,), scheme='default', degree=q_degree)
-    QV = df.fem.functionspace(V.mesh, qve)
+    QV = df.fem.functionspace(submesh, qve)
 
     stress_fom = df.fem.Function(QV)
     stress_rom = df.fem.Function(QV)
 
-    # ### UFL representation and Expression of stress
-    # stress computation based on ROM displacment solution, but the pull back is computed using transformation displacement from FOM
-    suf = parageom_fom.weighted_stress(d_fom)
+    # ### UFL representation and Expression of stress for both models
+    suf = parageom_fom.weighted_stress(u_fom)
     stress_ufl_fom_vector = ufl.as_vector([suf[0, 0], suf[1, 1], suf[2, 2], suf[0, 1]])
     stress_expr_fom = df.fem.Expression(stress_ufl_fom_vector, q_points)
 
-    sur = parageom_fom.weighted_stress(d_rom)
+    rommat = {
+        'gdim': parageom_fom.domain.gdim,
+        'E': example.E,
+        'NU': example.NU,
+        'plane_stress': example.plane_stress,
+    }
+    parageom_rom = ParaGeomLinEla(parageom_fom.domain, V, d_rom, rommat)
+    sur = parageom_rom.weighted_stress(u_rom)
     stress_ufl_rom_vector = ufl.as_vector([sur[0, 0], sur[1, 1], sur[2, 2], sur[0, 1]])
     stress_expr_rom = df.fem.Expression(stress_ufl_rom_vector, q_points)
 
-    tdim = V.mesh.topology.dim
-    map_c = V.mesh.topology.index_map(tdim)
-    num_cells = map_c.size_local + map_c.num_ghosts
-    cells = np.arange(0, num_cells, dtype=np.int32)
+    # tdim = V.mesh.topology.dim
+    # map_c = V.mesh.topology.index_map(tdim)
+    # num_cells = map_c.size_local + map_c.num_ghosts
+    # cells = np.arange(0, num_cells, dtype=np.int32)
 
     # ### NumpyVectorSpace for Stress
+    num_cells = cell_map.size
     num_qp = q_points.shape[0]
     dim_stress_space = num_qp * num_cells
     stress_space = NumpyVectorSpace(dim_stress_space)
 
-    def compute_first_principal(f):
-        values = f.reshape(cells.size, 4, 4)
+    def compute_first_principal(f, num_cells):
+        values = f.reshape(num_cells, 4, 4)
         fxx = values[:, :, 0]
         fyy = values[:, :, 1]
         fxy = values[:, :, 3]
-        # fmin = (fxx + fyy) / 2 - np.sqrt(((fxx - fyy) / 2) ** 2 + fxy**2)
         fmax = (fxx + fyy) / 2 + np.sqrt(((fxx - fyy) / 2) ** 2 + fxy**2)
         return fmax.flatten()
 
-    def compute_principal_components(f):
-        values = f.reshape(cells.size, 4, 4)
-        fxx = values[:, :, 0]
-        fyy = values[:, :, 1]
-        fxy = values[:, :, 3]
-        fmin = (fxx + fyy) / 2 - np.sqrt(((fxx - fyy) / 2) ** 2 + fxy**2)
-        fmax = (fxx + fyy) / 2 + np.sqrt(((fxx - fyy) / 2) ** 2 + fxy**2)
-        return fmin.flatten(), fmax.flatten()
+    # def compute_principal_components(f):
+    #     values = f.reshape(cells.size, 4, 4)
+    #     fxx = values[:, :, 0]
+    #     fyy = values[:, :, 1]
+    #     fxy = values[:, :, 3]
+    #     fmin = (fxx + fyy) / 2 - np.sqrt(((fxx - fyy) / 2) ** 2 + fxy**2)
+    #     fmax = (fxx + fyy) / 2 + np.sqrt(((fxx - fyy) / 2) ** 2 + fxy**2)
+    #     return fmin.flatten(), fmax.flatten()
 
     # TODO: add stress plots in other postproc script?
 
-    # ### Quadrature space for principal stress
-    # qs = basix.ufl.quadrature_element(
-    #     basix_celltype,
-    #     value_shape=(2,),  # type: ignore
-    #     scheme='default',
-    #     degree=q_degree,
-    # )
-    # Q = df.fem.functionspace(V.mesh, qs)
-    # p_stress_fom = df.fem.Function(Q)
-    # p_stress_rom = df.fem.Function(Q)
+    # ### Quadrature space for principal stress output
+    qs = basix.ufl.quadrature_element(
+        basix_celltype,
+        value_shape=(),  # type: ignore
+        scheme='default',
+        degree=q_degree,
+    )
+    Q = df.fem.functionspace(submesh, qs)
+    p_stress_fom = df.fem.Function(Q)
+    p_stress_rom = df.fem.Function(Q)
 
     # ### Lagrange space for stress output
-    # W = df.fem.functionspace(V.mesh, ('P', example.fe_deg, (2,)))  # output space for stress
-    # proj_stress_fom = df.fem.Function(W)
-    # proj_stress_rom = df.fem.Function(W)
+    W = df.fem.functionspace(submesh, ('P', example.fe_deg))  # output space for stress
 
     # ### Function for displacement on unit cell (for reconstruction)
     unit_cell_domain = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, kwargs={'gdim': example.gdim})[0]
     V_i = df.fem.functionspace(unit_cell_domain, ('P', example.fe_deg, (example.gdim,)))
-    d_local = df.fem.Function(V_i, name='u_i')
+    u_local = df.fem.Function(V_i, name='u_i')
 
     # ### Build localized ROM
     coarse_grid_path = example.coarse_grid
@@ -123,7 +151,7 @@ def main(args):
     if args.ei:
         logger.info('Building ROM with EI ...')
         tic = perf_counter()
-        rom, modes, _ = build_rom(
+        rom, modes, auxmodel = build_rom(
             example,
             dofmap,
             params,
@@ -139,7 +167,7 @@ def main(args):
         logger.info('Building ROM without EI ...')
         # here time is not interesting as the assembly has to be carried out
         # every time model is evaluated for new `mu`
-        rom_data = build_rom(
+        rom_data, auxmodel = build_rom(
             example,
             dofmap,
             params,
@@ -156,6 +184,8 @@ def main(args):
 
     ufom_sols = fom.solution_space.empty()
     urom_sols = fom.solution_space.empty()
+    dfom_sols = fom.solution_space.empty()
+    drom_sols = fom.solution_space.empty()
     sfom_sols = stress_space.empty()
     srom_sols = stress_space.empty()
 
@@ -165,7 +195,8 @@ def main(args):
     for i_mu, mu in enumerate(validation_set):
         U_fom = fom.solve(mu)
         ufom_sols.append(U_fom)
-        d_fom.x.array[:] = U_fom.to_numpy().flatten()  # type: ignore
+        u_fom.x.array[:] = U_fom.to_numpy().flatten()  # type: ignore
+        dfom_sols.append(fom.solution_space.make_array([parageom_fom.d.x.petsc_vec.copy()]))
 
         if args.ei:
             assert rom is not None
@@ -182,9 +213,20 @@ def main(args):
             )
             rom = StationaryModel(operator, rhs, output_functional=None, name='ROM')
             urb = rom.solve(mu)
-        reconstruct(urb.to_numpy(), dofmap, modes, d_local, d_rom)  # type: ignore
-        U_rom = fom.solution_space.make_array([d_rom.x.petsc_vec.copy()])  # type: ignore
+        # reconstruct(urb.to_numpy(), dofmap, modes, u_local, u_rom)  # type: ignore
+        reconstruct(
+            urb.to_numpy(),
+            mu,
+            dofmap,
+            modes,
+            u_local.function_space,
+            u_rom,
+            d_rom,
+            auxmodel,
+        )
+        U_rom = fom.solution_space.make_array([u_rom.x.petsc_vec.copy()])  # type: ignore
         urom_sols.append(U_rom)
+        drom_sols.append(fom.solution_space.make_array([d_rom.x.petsc_vec.copy()]))
 
         if args.condition:
             A = rom.operator.assemble(mu)
@@ -193,22 +235,53 @@ def main(args):
             else:
                 kappa[i_mu] = np.linalg.cond(A.matrix)
 
-        stress_expr_rom.eval(V.mesh, entities=cells, values=stress_rom.x.array.reshape(cells.size, -1))
-        s_rom = compute_first_principal(stress_rom.x.array)
+        stress_expr_rom.eval(V.mesh, entities=cell_map, values=stress_rom.x.array.reshape(cell_map.size, -1))
+        s_rom = compute_first_principal(stress_rom.x.array, cell_map.size)
+        p_stress_rom.x.array[:] = s_rom
         srom_sols.append(stress_space.make_array(s_rom))
 
-        stress_expr_fom.eval(V.mesh, entities=cells, values=stress_fom.x.array.reshape(cells.size, -1))
-        s_fom = compute_first_principal(stress_fom.x.array)
-        # _, s_fom = compute_principal_components(stress_fom.x.array.reshape(cells.size, -1))
+        stress_expr_fom.eval(V.mesh, entities=cell_map, values=stress_fom.x.array.reshape(cell_map.size, -1))
+        s_fom = compute_first_principal(stress_fom.x.array, cell_map.size)
+        p_stress_fom.x.array[:] = s_fom
         sfom_sols.append(stress_space.make_array(s_fom))
+
+        if i_mu == 1:
+            from parageom.stress_analysis import project
+
+            s_error_q = df.fem.Function(p_stress_fom.function_space)
+            s_error_q.x.array[:] = np.abs(p_stress_fom.x.array - p_stress_rom.x.array)
+
+            proj_s_error = df.fem.Function(W, name='serr')
+            proj_stress_fom = df.fem.Function(W, name='sfom')
+            proj_stress_rom = df.fem.Function(W, name='srom')
+
+            project(s_error_q, proj_s_error)
+            project(p_stress_fom, proj_stress_fom)
+            project(p_stress_rom, proj_stress_rom)
+
+            with df.io.XDMFFile(W.mesh.comm, 'output/stress_error.xdmf', 'w') as xdmf:
+                xdmf.write_mesh(W.mesh)
+                xdmf.write_function(proj_s_error)
+            with df.io.XDMFFile(W.mesh.comm, 'output/stress_fom.xdmf', 'w') as xdmf:
+                xdmf.write_mesh(W.mesh)
+                xdmf.write_function(proj_stress_fom)
+            with df.io.XDMFFile(W.mesh.comm, 'output/stress_rom.xdmf', 'w') as xdmf:
+                xdmf.write_mesh(W.mesh)
+                xdmf.write_function(proj_stress_rom)
 
     # displacement error (energy norm)
     u_error = ufom_sols - urom_sols
     u_error_norm = u_error.norm(energy_product) / ufom_sols.norm(energy_product)
 
+    # transformation displacement error
+    d_error = dfom_sols - drom_sols
+    d_error_norm = d_error.norm(energy_product) / dfom_sols.norm(energy_product)
+
     # stress error (Euclidean norm)
     s_error = sfom_sols - srom_sols
     s_error_norm = s_error.norm() / sfom_sols.norm()
+
+    breakpoint()
 
     # scale each vector by respective max value of FOM solution
     u_error.scal(1 / ufom_sols.sup_norm())
@@ -218,7 +291,6 @@ def main(args):
     max_nodal_stress_error = s_error.sup_norm()
     assert max_nodal_displacement_error.size == len(validation_set)
     assert max_nodal_stress_error.size == len(validation_set)
-    breakpoint()
 
     logger.info(f"""Summary
     Validation set size = {len(validation_set)}
@@ -405,8 +477,7 @@ def build_rom(example, dofmap, params, num_modes, ω=0.5, nreal=0, method='hapod
             'local_bases': local_bases,
             'dofs_per_vert': dofs_per_vert,
             'max_dofs_per_vert': max_dofs_per_vert,
-            'aux': auxmodel,
-        }
+        }, auxmodel
 
 
 if __name__ == '__main__':
