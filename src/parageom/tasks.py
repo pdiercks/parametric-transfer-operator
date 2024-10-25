@@ -358,13 +358,15 @@ def task_pp_rom_error():
         import numpy as np
 
         Nmodes = len(example.rom_validation.num_modes)
-        Nvalidation = example.rom_validation.ntest
 
         output = {}
-        errkeys = ['min', 'avg', 'max']
-        for key in errkeys:
+        errkeys = {
+            'u': ['energy_min', 'energy_avg', 'energy_max', 'max_min', 'max_avg', 'max_max'],
+            's': ['euclidean_min', 'euclidean_avg', 'euclidean_max', 'max_min', 'max_avg', 'max_max'],
+        }
+        for key in errkeys[field]:
             error = []
-            # collect error for each realization
+            # collect error (min/avg/max over validation set) for each realization
             for n in range(example.num_real):
                 err = []
                 # grow error over number of modes
@@ -374,7 +376,7 @@ def task_pp_rom_error():
                     err.append(data[key])
                 error.append(np.array(err))
             error = np.vstack(error)
-            assert error.shape == (Nvalidation, Nmodes)
+            assert error.shape == (example.num_real, Nmodes)
             output[f'mean_{key}'] = np.mean(error, axis=0)
             output[f'std_{key}'] = np.std(error, axis=0)
         np.savez(targets[0], **output)
@@ -390,7 +392,7 @@ def task_pp_rom_error():
             yield {
                 'name': ':'.join([method, qty]),
                 'file_dep': deps,
-                'actions': [gather_and_compute],
+                'actions': [(gather_and_compute, [example, method, qty])],
                 'targets': [example.mean_rom_error(method, qty, ei=True)],
             }
 

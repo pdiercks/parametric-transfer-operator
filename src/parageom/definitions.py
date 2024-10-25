@@ -26,7 +26,7 @@ class RomValidation:
 
     """
 
-    ntest: int = 200
+    ntest: int = 2
     num_modes: tuple[int, ...] = tuple(range(20, 81, 20))
     seed: int = 241690
     fields: tuple[str, str] = ('u', 's')

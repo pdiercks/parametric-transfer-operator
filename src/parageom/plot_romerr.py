@@ -1,5 +1,3 @@
-from collections import defaultdict
-
 import numpy as np
 from multi.plotting_context import PlottingContext
 from multi.postprocessing import read_bam_colors
@@ -11,54 +9,51 @@ def main(cli):
     bamcd = read_bam_colors()
     blue = bamcd['blue'][0]
     red = bamcd['red'][0]
+    colors = {'hapod': red, 'hrrf': blue}
+    norms = {'u': {0: 'energy', 1: 'max'}, 's': {0: 'euclidean', 1: 'max'}}
+    norms = norms[cli.field]
+    labels = {'hapod_max': 'HAPOD', 'hrrf_max': 'HRRF'}
 
-    nreal = cli.nreal
-    number_of_modes = example.rom_validation.num_modes
+    def prepend_one(array):
+        arr = np.hstack([np.ones(1), array])
+        return arr
 
-    erru = defaultdict(list)
-    errs = defaultdict(list)
+    def prepend_zero(array):
+        arr = np.hstack([np.zeros(1), array])
+        return arr
 
-    # define data to gather via keys
-    keys = ['relerr']
+    data = {}
+    for method in example.methods:
+        data[method] = np.load(example.mean_rom_error(method, cli.field, ei=cli.ei))
 
-    # append 1.0 for num_modes=0
-    for key in keys:
-        erru['min_' + key].append(1.0)
-        erru['max_' + key].append(1.0)
-        erru['avg_' + key].append(1.0)
-        errs['min_' + key].append(1.0)
-        errs['max_' + key].append(1.0)
-        errs['avg_' + key].append(1.0)
+    number_of_modes = prepend_zero(list(example.rom_validation.num_modes))
 
-    for num_modes in number_of_modes:
-        data_u = np.load(example.rom_error_u(nreal, num_modes, method=cli.method, ei=cli.ei))
-        data_s = np.load(example.rom_error_s(nreal, num_modes, method=cli.method, ei=cli.ei))
-
-        for key in keys:
-            erru['min_' + key].append(np.min(data_u[key]))
-            erru['max_' + key].append(np.max(data_u[key]))
-            erru['avg_' + key].append(np.average(data_u[key]))
-
-            errs['min_' + key].append(np.min(data_s[key]))
-            errs['max_' + key].append(np.max(data_s[key]))
-            errs['avg_' + key].append(np.average(data_s[key]))
-
-    number_of_modes = [0] + list(number_of_modes)
     args = [__file__, cli.outfile]
     styles = [example.plotting_style.as_posix()]
     with PlottingContext(args, styles) as fig:
-        ax = fig.subplots()
-        ax.semilogy(number_of_modes, erru['avg_relerr'], color=red, linestyle='dashed', marker='.')  # type: ignore
-        ax.semilogy(number_of_modes, errs['avg_relerr'], color=blue, linestyle='dashed', marker='.')  # type: ignore
-        ax.fill_between(number_of_modes, erru['min_relerr'], erru['max_relerr'], alpha=0.2, color=red)  # type: ignore
-        ax.fill_between(number_of_modes, errs['min_relerr'], errs['max_relerr'], alpha=0.2, color=blue)  # type: ignore
-        ax.semilogy(number_of_modes, erru['max_relerr'], color=red, linestyle='solid', marker='o', label=r'$e_u$')  # type: ignore
-        ax.semilogy(  # type: ignore
-            number_of_modes, errs['max_relerr'], color=blue, linestyle='solid', marker='o', label=r'$e_{\sigma}$'
-        )
-        ax.legend(loc='best')  # type: ignore
-        ax.set_xlabel('Local basis size')  # type: ignore
-        ax.set_ylabel('Relative error')  # type: ignore
+        ax = fig.subplots(1, 2, sharey=True)
+
+        for k, norm in norms.items():
+            for method in example.methods:
+                mean = prepend_one(data[method][f'mean_{norm}_max'])
+                std = prepend_zero(data[method][f'std_{norm}_max'])
+                ccc = colors[method]
+                label = labels.get('_'.join([method, norm]), '')
+                ax[k].semilogy(number_of_modes, mean, color=ccc, linestyle='dashed', marker='.', label=label)
+                ax[k].fill_between(number_of_modes, mean - std, mean + std, alpha=0.2, color=ccc)
+                ax[k].set_xticks(number_of_modes)
+                ax[k].set_xlabel(r'Local basis size $n$')
+                ax[k].set_ylabel('Relative error')  # TODO use symbol for defined error measures
+        ax[-1].legend(loc='best')
+
+        # ax.semilogy(number_of_modes, erru['avg_relerr'], color=red, linestyle='dashed', marker='.')  # type: ignore
+        # ax.semilogy(number_of_modes, errs['avg_relerr'], color=blue, linestyle='dashed', marker='.')  # type: ignore
+        # ax.fill_between(number_of_modes, erru['min_relerr'], erru['max_relerr'], alpha=0.2, color=red)  # type: ignore
+        # ax.fill_between(number_of_modes, errs['min_relerr'], errs['max_relerr'], alpha=0.2, color=blue)  # type: ignore
+        # ax.semilogy(number_of_modes, erru['max_relerr'], color=red, linestyle='solid', marker='o', label=r'$e_u$')  # type: ignore
+        # ax.semilogy(  # type: ignore
+        #     number_of_modes, errs['max_relerr'], color=blue, linestyle='solid', marker='o', label=r'$e_{\sigma}$'
+        # )
 
 
 if __name__ == '__main__':
@@ -66,13 +61,12 @@ if __name__ == '__main__':
     import sys
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('nreal', type=int, help='The n-th realization.')
     parser.add_argument(
-        'method',
+        'field',
         type=str,
-        help='The method used for basis construction.',
-        choices=('hapod', 'hrrf'),
-        default='hapod',
+        help='The field for which error is plotted.',
+        choices=('u', 's'),
+        default='u',
     )
     parser.add_argument('outfile', type=str, help='Write plot to path (pdf).')
     parser.add_argument('--ei', action='store_true', help='Plot data of validation of ROM with EI.')

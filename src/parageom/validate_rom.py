@@ -109,31 +109,6 @@ def main(args):
         fmax = (fxx + fyy) / 2 + np.sqrt(((fxx - fyy) / 2) ** 2 + fxy**2)
         return fmax.flatten()
 
-    # def compute_principal_components(f):
-    #     values = f.reshape(cells.size, 4, 4)
-    #     fxx = values[:, :, 0]
-    #     fyy = values[:, :, 1]
-    #     fxy = values[:, :, 3]
-    #     fmin = (fxx + fyy) / 2 - np.sqrt(((fxx - fyy) / 2) ** 2 + fxy**2)
-    #     fmax = (fxx + fyy) / 2 + np.sqrt(((fxx - fyy) / 2) ** 2 + fxy**2)
-    #     return fmin.flatten(), fmax.flatten()
-
-    # TODO: add stress plots in other postproc script?
-
-    # ### Quadrature space for principal stress output
-    qs = basix.ufl.quadrature_element(
-        basix_celltype,
-        value_shape=(),  # type: ignore
-        scheme='default',
-        degree=q_degree,
-    )
-    Q = df.fem.functionspace(submesh, qs)
-    p_stress_fom = df.fem.Function(Q)
-    p_stress_rom = df.fem.Function(Q)
-
-    # ### Lagrange space for stress output
-    W = df.fem.functionspace(submesh, ('P', example.fe_deg))  # output space for stress
-
     # ### Function for displacement on unit cell (for reconstruction)
     unit_cell_domain = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, kwargs={'gdim': example.gdim})[0]
     V_i = df.fem.functionspace(unit_cell_domain, ('P', example.fe_deg, (example.gdim,)))
@@ -213,7 +188,6 @@ def main(args):
             )
             rom = StationaryModel(operator, rhs, output_functional=None, name='ROM')
             urb = rom.solve(mu)
-        # reconstruct(urb.to_numpy(), dofmap, modes, u_local, u_rom)  # type: ignore
         reconstruct(
             urb.to_numpy(),
             mu,
@@ -237,51 +211,67 @@ def main(args):
 
         stress_expr_rom.eval(V.mesh, entities=cell_map, values=stress_rom.x.array.reshape(cell_map.size, -1))
         s_rom = compute_first_principal(stress_rom.x.array, cell_map.size)
-        p_stress_rom.x.array[:] = s_rom
         srom_sols.append(stress_space.make_array(s_rom))
 
         stress_expr_fom.eval(V.mesh, entities=cell_map, values=stress_fom.x.array.reshape(cell_map.size, -1))
         s_fom = compute_first_principal(stress_fom.x.array, cell_map.size)
-        p_stress_fom.x.array[:] = s_fom
         sfom_sols.append(stress_space.make_array(s_fom))
 
-        if i_mu == 1:
-            from parageom.stress_analysis import project
+        # TODO: add option --pvplot, s.t. for worst_mu (to be determined)
+        # the stress values are projected and plotted
+        # or better do separate script?
 
-            s_error_q = df.fem.Function(p_stress_fom.function_space)
-            s_error_q.x.array[:] = np.abs(p_stress_fom.x.array - p_stress_rom.x.array)
+        # ### Quadrature space for principal stress output
+        # qs = basix.ufl.quadrature_element(
+        #     basix_celltype,
+        #     value_shape=(),  # type: ignore
+        #     scheme='default',
+        #     degree=q_degree,
+        # )
+        # Q = df.fem.functionspace(submesh, qs)
+        # p_stress_fom = df.fem.Function(Q)
+        # p_stress_rom = df.fem.Function(Q)
 
-            proj_s_error = df.fem.Function(W, name='serr')
-            proj_stress_fom = df.fem.Function(W, name='sfom')
-            proj_stress_rom = df.fem.Function(W, name='srom')
+        # ### Lagrange space for stress output
+        # W = df.fem.functionspace(submesh, ('P', example.fe_deg))  # output space for stress
 
-            project(s_error_q, proj_s_error)
-            project(p_stress_fom, proj_stress_fom)
-            project(p_stress_rom, proj_stress_rom)
-
-            with df.io.XDMFFile(W.mesh.comm, 'output/stress_error.xdmf', 'w') as xdmf:
-                xdmf.write_mesh(W.mesh)
-                xdmf.write_function(proj_s_error)
-            with df.io.XDMFFile(W.mesh.comm, 'output/stress_fom.xdmf', 'w') as xdmf:
-                xdmf.write_mesh(W.mesh)
-                xdmf.write_function(proj_stress_fom)
-            with df.io.XDMFFile(W.mesh.comm, 'output/stress_rom.xdmf', 'w') as xdmf:
-                xdmf.write_mesh(W.mesh)
-                xdmf.write_function(proj_stress_rom)
+        # p_stress_rom.x.array[:] = s_rom
+        # p_stress_fom.x.array[:] = s_fom
+        # if i_mu == 1:
+        #     from parageom.stress_analysis import project
+        #
+        #     s_error_q = df.fem.Function(p_stress_fom.function_space)
+        #     s_error_q.x.array[:] = np.abs(p_stress_fom.x.array - p_stress_rom.x.array)
+        #
+        #     proj_s_error = df.fem.Function(W, name='serr')
+        #     proj_stress_fom = df.fem.Function(W, name='sfom')
+        #     proj_stress_rom = df.fem.Function(W, name='srom')
+        #
+        #     project(s_error_q, proj_s_error)
+        #     project(p_stress_fom, proj_stress_fom)
+        #     project(p_stress_rom, proj_stress_rom)
+        #
+        #     with df.io.XDMFFile(W.mesh.comm, 'output/stress_error.xdmf', 'w') as xdmf:
+        #         xdmf.write_mesh(W.mesh)
+        #         xdmf.write_function(proj_s_error)
+        #     with df.io.XDMFFile(W.mesh.comm, 'output/stress_fom.xdmf', 'w') as xdmf:
+        #         xdmf.write_mesh(W.mesh)
+        #         xdmf.write_function(proj_stress_fom)
+        #     with df.io.XDMFFile(W.mesh.comm, 'output/stress_rom.xdmf', 'w') as xdmf:
+        #         xdmf.write_mesh(W.mesh)
+        #         xdmf.write_function(proj_stress_rom)
 
     # displacement error (energy norm)
     u_error = ufom_sols - urom_sols
     u_error_norm = u_error.norm(energy_product) / ufom_sols.norm(energy_product)
 
     # transformation displacement error
-    d_error = dfom_sols - drom_sols
-    d_error_norm = d_error.norm(energy_product) / dfom_sols.norm(energy_product)
+    # d_error = dfom_sols - drom_sols
+    # d_error_norm = d_error.norm(energy_product) / dfom_sols.norm(energy_product)
 
     # stress error (Euclidean norm)
     s_error = sfom_sols - srom_sols
     s_error_norm = s_error.norm() / sfom_sols.norm()
-
-    breakpoint()
 
     # scale each vector by respective max value of FOM solution
     u_error.scal(1 / ufom_sols.sup_norm())
@@ -327,24 +317,24 @@ def main(args):
     """)
 
     # ### Write targets
-    def outdata(array):
+    def outdata(array, norm):
         r = {}
-        r['max'] = np.max(array)
-        r['min'] = np.min(array)
-        r['avg'] = np.average(array)
+        r[f'{norm}_max'] = np.max(array)
+        r[f'{norm}_min'] = np.min(array)
+        r[f'{norm}_avg'] = np.average(array)
         return r
 
     # u - min,avg,max over validation set for relative error in energy norm
     output_u = example.rom_error(
         args.method, args.nreal, example.rom_validation.fields[0], num_modes, args.ei
     ).as_posix()
-    np.savez(output_u, **outdata(u_error_norm))
+    np.savez(output_u, **outdata(u_error_norm, 'energy'), **outdata(max_nodal_displacement_error, 'max'))
 
     # s - min,avg,max over validation set for max relative nodal error
     output_s = example.rom_error(
         args.method, args.nreal, example.rom_validation.fields[1], num_modes, args.ei
     ).as_posix()
-    np.savez(output_s, **outdata(max_nodal_stress_error))
+    np.savez(output_s, **outdata(s_error_norm, 'euclidean'), **outdata(max_nodal_stress_error, 'max'))
 
     if args.condition:
         assert kappa is not None
