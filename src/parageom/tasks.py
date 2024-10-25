@@ -181,12 +181,13 @@ def task_hrrf():
 def task_projerr():
     """ParaGeom: Compute projection error."""
     source = SRC / 'projerr.py'
-    num_samples = 100
+    num_samples = 5  # 100
     # check sensitivity wrt mu rather than uncertainty in g
     num_testvecs = 1
     # TODO: show plots for different N in the thesis?
-    N = 200
-    ntrain_hrrf = {'hrrf': 50, 'hapod': None}
+    N = 50  # 200
+    # ntrain_hrrf = {'hrrf': 50, 'hapod': None}
+    ntrain_hrrf = {'hrrf': 10, 'hapod': None}
     amplitudes = [example.g_scale]
 
     def create_action_projerr(nreal, method, k, ntrain, output, ntrain_hrrf=None, scale=None, debug=False):
@@ -324,7 +325,7 @@ def task_pp_projerr():
             yield {
                 'name': ':'.join([method, str(k)]),
                 'file_dep': deps,
-                'actions': [(compute_mean_std, ['min', 'avg', 'max'])],
+                'actions': [compute_mean_std],
                 'targets': [example.mean_projection_error(method, k)],
             }
 

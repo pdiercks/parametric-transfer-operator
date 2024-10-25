@@ -10,6 +10,21 @@ def main(cli):
     blue = bamcd['blue'][0]
     red = bamcd['red'][0]
 
+    # TODO
+    # 1. use mean projection error data
+    # 2. check for neumann error
+
+    # mean (+std) of max (over testing set) relative error
+    # mean (+std) of l2-mean error
+
+    # split relative error and l2-mean?
+    # too much stuff if neumann is not None
+
+    # or make the same plot for k={0, 5} for spectral test data
+    # then add plot for k=0 for neumann data
+
+    # data = np.load(example.mean_projection_error(method, k))
+
     args = [__file__, cli.outfile]
     styles = [example.plotting_style.as_posix()]
     with PlottingContext(args, styles) as fig:
