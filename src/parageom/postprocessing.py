@@ -1,16 +1,20 @@
 """Postprocessing module."""
 
+from collections import defaultdict
+
 import numpy as np
 
 
-def compute_mean_std(keywords, dependencies, targets):
+def compute_mean_std(dependencies, targets):
     output = {}
-    for key in keywords:
-        error = []
-        for dep in dependencies:
-            data = np.load(dep)
-            error.append(data[key])
-        error = np.vstack(error)
-        output[f'mean_{key}'] = np.mean(error, axis=0)
-        output[f'std_{key}'] = np.std(error, axis=0)
+    error = defaultdict(list)
+    for dep in dependencies:
+        data = np.load(dep)
+        for key in data.files:
+            error[key].append(data[key])
+
+    for key, value in error.items():
+        err = np.vstack(value)
+        output[f'mean_{key}'] = np.mean(err, axis=0)
+        output[f'std_{key}'] = np.std(err, axis=0)
     np.savez(targets[0], **output)

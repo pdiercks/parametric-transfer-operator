@@ -189,11 +189,11 @@ def main(args):
         from pymor.bindings.fenicsx import FenicsxVisualizer
 
         viz = FenicsxVisualizer(transfer.range)
-        hapod_modes_xdmf = example.hapod_modes_xdmf(args.nreal, args.k).as_posix()
+        hapod_modes_xdmf = example.modes_xdmf('hapod', args.nreal, args.k).as_posix()
         viz.visualize(spectral_modes, filename=hapod_modes_xdmf)
 
     np.save(
-        example.hapod_modes_npy(args.nreal, args.k),
+        example.modes_npy('hapod', args.nreal, args.k),
         spectral_modes.to_numpy(),
     )
     np.save(
@@ -208,7 +208,7 @@ def main(args):
         'num_snapshots': len(snapshots),
         'num_modes': len(spectral_modes),
     }
-    with example.hapod_info(args.nreal, args.k).open('wb') as fh:
+    with example.hapod_summary(args.nreal, args.k).open('wb') as fh:
         dump(hapod_info, fh)
 
 

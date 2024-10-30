@@ -216,7 +216,7 @@ def discretize_fom(example: BeamData, auxiliary_problem, trafo_disp, ω=0.5):
     # ### Initialize global coarse grid
     # required for definition of Dirichlet & Neumann BCs
     grid, _, _ = read_mesh(
-        example.coarse_grid('global'),
+        example.coarse_grid,
         MPI.COMM_SELF,
         kwargs={'gdim': example.gdim},
     )

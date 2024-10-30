@@ -356,10 +356,8 @@ class BeamData:
 
     def rom_error(self, method: str, nreal: int, field: str, num_modes: int, ei: bool) -> Path:
         dir = self.validation(method, nreal)
-        if ei:
-            return dir / f'rom_error_{field}_ei_{num_modes}.npz'
-        else:
-            return dir / f'rom_error_{field}_{num_modes}.npz'
+        _ei = '_ei' if ei else ''
+        return dir / f'rom_error_{field}_{num_modes}{_ei}.npz'
 
     def mean_rom_error(self, method: str, field: str, ei: bool) -> Path:
         dir = self.method_folder(method)
@@ -368,10 +366,8 @@ class BeamData:
 
     def rom_condition(self, nreal: int, num_modes: int, method='hapod', ei=False) -> Path:
         dir = self.validation(method, nreal)
-        if ei:
-            return dir / f'rom_condition_ei_{num_modes}.npy'
-        else:
-            return dir / f'rom_condition_{num_modes}.npy'
+        _ei = '_ei' if ei else ''
+        return dir / f'rom_condition_{num_modes}{_ei}.npy'
 
     def fom_minimization_data(self, method: str, nr: int) -> Path:
         """FOM minimization data."""
@@ -404,11 +400,9 @@ class BeamData:
     def fig_projerr(self, k: int, scale: float = 0.1) -> Path:
         return self.figures / f'fig_projerr_{k:02}_scale_{scale}.pdf'
 
-    def fig_rom_error(self, method: str, ei: bool) -> Path:
-        if ei:
-            return self.figures / f'rom_error_{method}_ei.pdf'
-        else:
-            return self.figures / f'rom_error_{method}.pdf'
+    def fig_rom_error(self, field: str, ei: bool) -> Path:
+        _ei = '_ei' if ei else ''
+        return self.figures / f'rom_error_{field}{_ei}.pdf'
 
     @property
     def realizations(self) -> Path:

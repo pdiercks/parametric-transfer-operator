@@ -37,7 +37,7 @@ def main(args):
     logger = getLogger(stem, level=loglevel)
 
     # ### Coarse grid partition
-    coarse_grid_path = example.coarse_grid('global')
+    coarse_grid_path = example.coarse_grid
     coarse_domain = read_mesh(coarse_grid_path, MPI.COMM_WORLD, cell_tags=None, kwargs={'gdim': example.gdim})[0]
     struct_grid_gl = StructuredQuadGrid(coarse_domain)
 
@@ -117,10 +117,7 @@ def main(args):
 
         osp_configs[k] = oversampling_config_factory(k)
         # first load bases without enrichment
-        if args.method == 'hapod':
-            bases[k] = np.load(example.hapod_modes_npy(args.nreal, k))
-        else:
-            bases[k] = np.load(example.heuristic_modes_npy(args.nreal, k))
+        bases[k] = np.load(example.modes_npy(args.method, args.nreal, k))
 
     Phi = df.fem.Function(X, name='Phi')  # coarse scale hat functions
     phi = df.fem.Function(V, name='phi')  # hat functions on the fine grid
