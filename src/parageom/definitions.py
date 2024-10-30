@@ -400,11 +400,9 @@ class BeamData:
     def fig_projerr(self, k: int, scale: float = 0.1) -> Path:
         return self.figures / f'fig_projerr_{k:02}_scale_{scale}.pdf'
 
-    def fig_rom_error(self, method: str, ei: bool) -> Path:
-        if ei:
-            return self.figures / f'rom_error_{method}_ei.pdf'
-        else:
-            return self.figures / f'rom_error_{method}.pdf'
+    def fig_rom_error(self, field: str, ei: bool) -> Path:
+        _ei = '_ei' if ei else ''
+        return self.figures / f'rom_error_{field}{_ei}.pdf'
 
     @property
     def realizations(self) -> Path:

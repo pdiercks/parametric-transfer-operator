@@ -405,24 +405,24 @@ def task_fig_rom_error():
     # TODO: (A) plot min, avg, max over realizations for max error over validation set
     # TODO: (B) plot min, avg, max over validation set for single realization
 
-    def create_action(method, output, ei=False):
-        action = f'python3 {source} {method} {output}'
+    def create_action(field, output, ei=False):
+        action = f'python3 {source} {field} {output}'
         if ei:
             action += ' --ei'
         return action
 
     with_ei = {True: 'ei'}
     # with_ei = {False: '', True: 'ei'}
-    for method in example.methods:
+    for field in example.rom_validation.fields:
         for ei in with_ei.keys():
             deps = [source]
-            deps.append(example.mean_rom_error(method, 'u', ei=ei))
-            deps.append(example.mean_rom_error(method, 's', ei=ei))
-            targets = [example.fig_rom_error(method, ei=ei)]
+            for method in example.methods:
+                deps.append(example.mean_rom_error(method, field, ei=ei))
+            targets = [example.fig_rom_error(field, ei=ei)]
             yield {
-                'name': ':'.join([method, with_ei[ei]]),
+                'name': ':'.join([field, with_ei[ei]]),
                 'file_dep': deps,
-                'actions': [create_action(method, targets[0], ei=ei)],
+                'actions': [create_action(field, targets[0], ei=ei)],
                 'targets': targets,
                 'clean': True,
             }
