@@ -88,7 +88,8 @@ def main(args):
 
     # ### Read basis and wrap as pymor object
     logger.info(f'Computing spectral basis with method {args.method} ...')
-    epsilon_star = 0.01 * args.scale / example.energy_scale
+    target_tol = 0.01
+    epsilon_star = target_tol * args.scale / example.energy_scale
     Nin = transfer.rhs.dofs.size
     basis = None
     svals = None
@@ -101,7 +102,6 @@ def main(args):
         neumann_snapshots = transfer.range.empty(reserve=ntrain)
         spectral_basis_sizes = list()
 
-        # use most conservative estimate on tolerances Nin=1
         epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.projerr.hapod_omega**2) * epsilon_star
         epsilon_pod = np.sqrt(Nin * ntrain) * example.projerr.hapod_omega * epsilon_star
 
@@ -164,7 +164,7 @@ def main(args):
                 parameter_space,
                 hapod_training_set,
                 testing_set,
-                error_tol=example.hrrf.rrf_ttol / example.energy_scale,
+                error_tol=target_tol / example.energy_scale,
                 num_testvecs=example.hrrf.rrf_nt,
                 block_size=args.bs,
                 num_enrichments=example.hrrf.num_enrichments,

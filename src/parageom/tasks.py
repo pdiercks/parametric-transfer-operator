@@ -181,13 +181,11 @@ def task_hrrf():
 def task_projerr():
     """ParaGeom: Compute projection error."""
     source = SRC / 'projerr.py'
-    num_samples = 5  # 100
+    num_samples = 50
     # check sensitivity wrt mu rather than uncertainty in g
-    num_testvecs = 1
-    # TODO: show plots for different N in the thesis?
-    N = 50  # 200
-    # ntrain_hrrf = {'hrrf': 50, 'hapod': None}
-    ntrain_hrrf = {'hrrf': 10, 'hapod': None}
+    num_testvecs = 10
+    N = 400
+    ntrain_hrrf = {'hrrf': 50, 'hapod': None}
     amplitudes = [example.g_scale]
 
     def create_action_projerr(nreal, method, k, ntrain, output, ntrain_hrrf=None, scale=None, debug=False):
@@ -403,6 +401,7 @@ def task_fig_rom_error():
     source = SRC / 'plot_romerr.py'
 
     # TODO: (A) plot min, avg, max over realizations for max error over validation set
+    # case (A) is implemented in SRC/plot_romerr.py
     # TODO: (B) plot min, avg, max over validation set for single realization
 
     def create_action(field, output, ei=False):
