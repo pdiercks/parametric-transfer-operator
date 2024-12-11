@@ -65,7 +65,7 @@ class HRRF:
 
     seed_train: int = 767667058
     seed_test: int = 545445836
-    rrf_ttol: float = 0.01
+    rrf_ttol: tuple[float, ...] = (1e-3, 1e-3, 1e-3, 1e-2, 1e-2, 1e-2, 1e-2, 1e-2, 1e-2, 1e-2, 1e-2)
     rrf_ftol: float = 1e-15
     rrf_nt: int = 1
     num_enrichments: int = 10
@@ -102,7 +102,7 @@ class HAPOD:
     """
 
     seed_train: int = 212854936
-    eps: float = 0.001
+    eps: tuple[float, ...] = (1e-4, 1e-4, 1e-4, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3)
     omega: float = 0.5
 
     def ntrain(self, dim: int):

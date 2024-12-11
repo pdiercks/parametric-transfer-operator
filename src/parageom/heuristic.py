@@ -238,7 +238,7 @@ def main(args):
             parameter_space,
             training_set,
             testing_set,
-            error_tol=example.hrrf.rrf_ttol / example.energy_scale,
+            error_tol=example.hrrf.rrf_ttol[args.k] / example.energy_scale,
             num_testvecs=example.hrrf.rrf_nt,
             block_size=1,
             num_enrichments=example.hrrf.num_enrichments,
