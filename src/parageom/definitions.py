@@ -12,6 +12,10 @@ from multi.boundary import plane_at, point_at, within_range
 ROOT = Path(__file__).parents[2]
 WORK = ROOT / 'work'
 SRC = Path(__file__).parent
+# target tolerances for validation tasks
+ttols_validation = (1e-4, 1e-4, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1e-4, 1e-4)
+# Note: In case of the HAPOD, we use ttol * scale / energy_scale s.t. HAPOD generates
+# ca. same number of modes as HRRF. See projerr.py & hapod.py.
 
 
 @dataclass
@@ -65,7 +69,7 @@ class HRRF:
 
     seed_train: int = 767667058
     seed_test: int = 545445836
-    rrf_ttol: tuple[float, ...] = (1e-3, 1e-3, 1e-3, 1e-2, 1e-2, 1e-2, 1e-2, 1e-2, 1e-2, 1e-2, 1e-2)
+    rrf_ttol: tuple[float, ...] = ttols_validation
     rrf_ftol: float = 1e-15
     rrf_nt: int = 1
     num_enrichments: int = 10
@@ -102,7 +106,7 @@ class HAPOD:
     """
 
     seed_train: int = 212854936
-    eps: tuple[float, ...] = (1e-4, 1e-4, 1e-4, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3)
+    eps: tuple[float, ...] = ttols_validation
     omega: float = 0.5
 
     def ntrain(self, dim: int):

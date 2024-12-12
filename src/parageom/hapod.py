@@ -139,7 +139,7 @@ def main(args):
     neumann_snapshots = transfer.range.empty(reserve=len(training_set))
     spectral_basis_sizes = list()
 
-    epsilon_star = example.hapod.eps[args.k] / example.energy_scale
+    epsilon_star = example.hapod.eps[args.k] * example.g_scale / example.energy_scale
     Nin = transfer.rhs.dofs.size
     epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.hapod.omega**2.0) * epsilon_star
     epsilon_pod = np.sqrt(Nin * ntrain) * example.hapod.omega * epsilon_star
