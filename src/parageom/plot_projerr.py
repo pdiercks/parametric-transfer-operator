@@ -39,6 +39,7 @@ def main(cli):
             ax.semilogy(modes, max, color=color, linestyle='solid', marker='o', markevery=5, label=label)
             ax.fill_between(modes, min, max, alpha=0.2, color=color)
 
+        # TODO use mean projection error !!!
         infile_hapod = example.projection_error(cli.nreal, 'hapod', cli.k, cli.scale)
         infile_hrrf = example.projection_error(cli.nreal, 'hrrf', cli.k, cli.scale)
         data_hapod = np.load(infile_hapod)
