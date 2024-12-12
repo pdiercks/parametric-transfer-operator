@@ -915,6 +915,7 @@ def discretize_transfer_problem(
     assert len(bcs_op) - 1 == len(bcs_range_product)
 
     # ### Discretize left hand side - FenicsxMatrixBasedOperator
+    # example.E and example.NU are non-dimensional quantities
     matparam = {
         'gdim': example.gdim,
         'E': example.E,
