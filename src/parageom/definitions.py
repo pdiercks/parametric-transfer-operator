@@ -140,9 +140,8 @@ class ProjErr:
     configs: tuple[int, ...] = (0, 5)
     seed_train: int = 456729121
     seed_test: int = 923719053
-    hapod_eps: float = 1e-5  # scale=0.1
+    ttol: float = 1e-5
     hapod_omega: float = 0.5
-    hrrf_tol: float = 1e-5
 
 
 @dataclass

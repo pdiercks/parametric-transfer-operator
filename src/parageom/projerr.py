@@ -88,7 +88,7 @@ def main(args):
 
     # ### Read basis and wrap as pymor object
     logger.info(f'Computing spectral basis with method {args.method} ...')
-    target_tol = 0.01
+    target_tol = example.projerr.ttol
     epsilon_star = target_tol * args.scale / example.energy_scale
     Nin = transfer.rhs.dofs.size
     basis = None
