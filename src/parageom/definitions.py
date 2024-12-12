@@ -13,7 +13,7 @@ ROOT = Path(__file__).parents[2]
 WORK = ROOT / 'work'
 SRC = Path(__file__).parent
 # target tolerances for validation tasks
-ttols_validation = (1e-4, 1e-4, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1e-4, 1e-4)
+ttols_validation = (1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5)
 # Note: In case of the HAPOD, we use ttol * scale / energy_scale s.t. HAPOD generates
 # ca. same number of modes as HRRF. See projerr.py & hapod.py.
 
@@ -140,9 +140,9 @@ class ProjErr:
     configs: tuple[int, ...] = (0, 5)
     seed_train: int = 456729121
     seed_test: int = 923719053
-    hapod_eps: float = 0.001  # scale=0.1
+    hapod_eps: float = 1e-5  # scale=0.1
     hapod_omega: float = 0.5
-    hrrf_tol: float = 0.01
+    hrrf_tol: float = 1e-5
 
 
 @dataclass
