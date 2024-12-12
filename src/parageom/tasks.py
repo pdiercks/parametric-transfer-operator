@@ -325,6 +325,7 @@ def task_pp_projerr():
                 'file_dep': deps,
                 'actions': [compute_mean_std],
                 'targets': [example.mean_projection_error(method, k)],
+                'clean': True,
             }
 
 
@@ -393,6 +394,7 @@ def task_pp_rom_error():
                 'file_dep': deps,
                 'actions': [(gather_and_compute, [example, method, qty])],
                 'targets': [example.mean_rom_error(method, qty, ei=True)],
+                'clean': True,
             }
 
 
