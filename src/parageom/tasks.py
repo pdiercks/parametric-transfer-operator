@@ -178,6 +178,46 @@ def task_hrrf():
             }
 
 
+def task_gfem():
+    """ParaGeom: Build GFEM approximation."""
+    source = SRC / 'gfem.py'
+
+    def cell_to_transfer_problem(x) -> list[int]:
+        r = []
+        r.append(x)
+        r.append(x + 1)
+        return r
+
+    def create_action(script, nreal, cell, method, debug=False):
+        action = 'python3 {} {} {} {}'.format(script, nreal, cell, method)
+        if debug:
+            action += ' --debug'
+        return action
+
+    for nreal in range(example.num_real):
+        for cell in range(10):
+            for method in example.methods:
+                deps = [source]
+                deps.append(example.coarse_grid)
+                deps.append(example.parent_unit_cell)
+                for k in cell_to_transfer_problem(cell):
+                    deps.append(example.path_omega_in(k))
+                    deps.append(example.modes_npy(method, nreal, k))
+                targets = []
+                targets.append(example.local_basis_npy(nreal, cell, method=method))
+                targets.append(example.local_basis_dofs_per_vert(nreal, cell, method=method))
+                targets.append(example.log_gfem(nreal, cell, method=method))
+                if example.debug:
+                    targets.extend(with_h5(example.local_basis_npy(nreal, cell, method=method).with_suffix('.xdmf')))
+                yield {
+                    'name': ':'.join([str(nreal), str(cell), method]),
+                    'file_dep': deps,
+                    'actions': [create_action(source, nreal, cell, method, debug=example.debug)],
+                    'targets': targets,
+                    'clean': True,
+                }
+
+
 def task_projerr():
     """ParaGeom: Compute projection error."""
     source = SRC / 'projerr.py'
@@ -224,44 +264,41 @@ def task_projerr():
                     }
 
 
-def task_gfem():
-    """ParaGeom: Build GFEM approximation."""
-    source = SRC / 'gfem.py'
+def task_pp_projerr():
+    """ParaGeom: Postprocess projection error."""
+    from parageom.postprocessing import compute_mean_std
 
-    def cell_to_transfer_problem(x) -> list[int]:
-        r = []
-        r.append(x)
-        r.append(x + 1)
-        return r
+    for method in example.methods:
+        for k in example.projerr.configs:
+            # gather data
+            deps = []
+            for n in range(example.num_real):
+                deps.append(example.projection_error(n, method, k))
+            yield {
+                'name': ':'.join([method, str(k)]),
+                'file_dep': deps,
+                'actions': [compute_mean_std],
+                'targets': [example.mean_projection_error(method, k)],
+                'clean': True,
+            }
 
-    def create_action(script, nreal, cell, method, debug=False):
-        action = 'python3 {} {} {} {}'.format(script, nreal, cell, method)
-        if debug:
-            action += ' --debug'
-        return action
 
-    for nreal in range(example.num_real):
-        for cell in range(10):
-            for method in example.methods:
-                deps = [source]
-                deps.append(example.coarse_grid)
-                deps.append(example.parent_unit_cell)
-                for k in cell_to_transfer_problem(cell):
-                    deps.append(example.path_omega_in(k))
-                    deps.append(example.modes_npy(method, nreal, k))
-                targets = []
-                targets.append(example.local_basis_npy(nreal, cell, method=method))
-                targets.append(example.local_basis_dofs_per_vert(nreal, cell, method=method))
-                targets.append(example.log_gfem(nreal, cell, method=method))
-                if example.debug:
-                    targets.extend(with_h5(example.local_basis_npy(nreal, cell, method=method).with_suffix('.xdmf')))
-                yield {
-                    'name': ':'.join([str(nreal), str(cell), method]),
-                    'file_dep': deps,
-                    'actions': [create_action(source, nreal, cell, method, debug=example.debug)],
-                    'targets': targets,
-                    'clean': True,
-                }
+def task_fig_projerr():
+    """ParaGeom: Plot projection error."""
+    source = SRC / 'plot_projerr.py'
+    scale = example.g_scale
+    for k in example.projerr.configs:
+        deps = [source]
+        deps.append(example.mean_projection_error('hapod', k))
+        deps.append(example.mean_projection_error('hrrf', k))
+        targets = [example.fig_projerr(k)]
+        yield {
+            'name': ':'.join([str(k)]),
+            'file_dep': deps,
+            'actions': ['python3 {} {} {} %(targets)s'.format(source, k, scale)],
+            'targets': targets,
+            'clean': True,
+        }
 
 
 def task_validate_rom():
@@ -308,46 +345,6 @@ def task_validate_rom():
                         'targets': targets,
                         'clean': True,
                     }
-
-
-def task_pp_projerr():
-    """ParaGeom: Postprocess projection error."""
-    from parageom.postprocessing import compute_mean_std
-
-    for method in example.methods:
-        for k in example.projerr.configs:
-            # gather data
-            deps = []
-            for n in range(example.num_real):
-                deps.append(example.projection_error(n, method, k))
-            yield {
-                'name': ':'.join([method, str(k)]),
-                'file_dep': deps,
-                'actions': [compute_mean_std],
-                'targets': [example.mean_projection_error(method, k)],
-                'clean': True,
-            }
-
-
-def task_fig_projerr():
-    """ParaGeom: Plot projection error."""
-    source = SRC / 'plot_projerr.py'
-    amplitudes = [example.g_scale]
-    for nreal in range(example.num_real):
-        for k in example.projerr.configs:
-            deps = [source]
-            for scale in amplitudes:
-                for method in example.methods:
-                    deps.append(example.projection_error(nreal, method, k, scale))
-                targets = []
-                targets.append(example.fig_projerr(k, scale))
-                yield {
-                    'name': ':'.join([str(nreal), str(k), str(scale)]),
-                    'file_dep': deps,
-                    'actions': ['python3 {} {} {} {} %(targets)s'.format(source, nreal, k, scale)],
-                    'targets': targets,
-                    'clean': True,
-                }
 
 
 def task_pp_rom_error():

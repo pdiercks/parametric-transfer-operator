@@ -20,7 +20,6 @@ def adaptive_rrf_normal(
     logger,
     transfer_problem,
     num_testvecs: int = 20,
-    lambda_min=None,
     l2_err: float = 0.0,
     sampling_options=None,
 ):
@@ -33,27 +32,27 @@ def adaptive_rrf_normal(
     assert source_product is None or isinstance(source_product, Operator)
     assert range_product is None or isinstance(range_product, Operator)
 
-    if source_product is None:
-        lambda_min = 1
-    elif lambda_min is None:
-
-        def mv(v):
-            return source_product.apply(source_product.source.from_numpy(v)).to_numpy()  # type: ignore
-
-        def mvinv(v):
-            return source_product.apply_inverse(
-                source_product.range.from_numpy(v)  # type: ignore
-            ).to_numpy()
-
-        L = LinearOperator(
-            (source_product.source.dim, source_product.range.dim),  # type: ignore
-            matvec=mv,  # type: ignore
-        )
-        Linv = LinearOperator(
-            (source_product.range.dim, source_product.source.dim),  # type: ignore
-            matvec=mvinv,  # type: ignore
-        )
-        lambda_min = eigsh(L, sigma=0, which='LM', return_eigenvectors=False, k=1, OPinv=Linv)[0]
+    # if source_product is None:
+    #     lambda_min = 1
+    # elif lambda_min is None:
+    #
+    #     def mv(v):
+    #         return source_product.apply(source_product.source.from_numpy(v)).to_numpy()  # type: ignore
+    #
+    #     def mvinv(v):
+    #         return source_product.apply_inverse(
+    #             source_product.range.from_numpy(v)  # type: ignore
+    #         ).to_numpy()
+    #
+    #     L = LinearOperator(
+    #         (source_product.source.dim, source_product.range.dim),  # type: ignore
+    #         matvec=mv,  # type: ignore
+    #     )
+    #     Linv = LinearOperator(
+    #         (source_product.range.dim, source_product.source.dim),  # type: ignore
+    #         matvec=mvinv,  # type: ignore
+    #     )
+    #     lambda_min = eigsh(L, sigma=0, which='LM', return_eigenvectors=False, k=1, OPinv=Linv)[0]
 
     R = tp.generate_random_boundary_data(num_testvecs, 'normal', sampling_options)
     M = tp.solve(R)
