@@ -9,7 +9,7 @@ from doit.tools import run_once
 from parageom.definitions import ROOT, BeamData
 
 os.environ['PYMOR_COLORS_DISABLE'] = '1'
-example = BeamData(name='parageom', debug=True)
+example = BeamData(name='parageom', debug=False)
 SRC = ROOT / 'src' / 'parageom'
 
 
