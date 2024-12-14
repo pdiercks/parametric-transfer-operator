@@ -31,7 +31,7 @@ class RomValidation:
     """
 
     ntest: int = 200
-    num_modes: tuple[int, ...] = tuple(range(20, 81, 20))
+    num_modes: tuple[int, ...] = tuple(range(20, 101, 20))
     seed: int = 241690
     fields: tuple[str, str] = ('u', 's')
 
@@ -160,7 +160,7 @@ class Optimization:
     nreal: int = 0
     omega: float = 0.2
     method: str = 'hrrf'
-    num_modes: int = 60
+    num_modes: int = 100
     minimizer: str = 'SLSQP'
 
 
