@@ -264,9 +264,9 @@ class BeamData:
         self._make_tree()
 
     @property
-    def plotting_style(self) -> Path:
-        """Eccomas proceedings mplstyle."""
-        return ROOT / 'src/proceedings.mplstyle'
+    def plotting_styles(self) -> Path:
+        """PhD thesis mplstyles."""
+        return {'thesis': ROOT / 'src/thesis.mplstyle', 'thesis-halfwidth': ROOT / 'src/thesis-halfwidth.mplstyle'}
 
     @property
     def figures(self) -> Path:

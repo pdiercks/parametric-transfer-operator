@@ -32,7 +32,7 @@ def main(cli):
         nmarks = 10
 
     args = [__file__, cli.outfile]
-    styles = [example.plotting_style.as_posix()]
+    styles = [example.plotting_style['thesis'].as_posix()]
     with PlottingContext(args, styles) as fig:
         ax = fig.subplots()
 

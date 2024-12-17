@@ -29,7 +29,7 @@ def main(cli):
     number_of_modes = prepend_zero(list(example.rom_validation.num_modes))
 
     args = [__file__, cli.outfile]
-    styles = [example.plotting_style.as_posix()]
+    styles = [example.plotting_style['thesis'].as_posix()]
     with PlottingContext(args, styles) as fig:
         ax = fig.subplots(1, 2, sharey=True)
 
@@ -45,15 +45,6 @@ def main(cli):
                 ax[k].set_xlabel(r'Local basis size $n$')
                 ax[k].set_ylabel('Relative error')  # TODO use symbol for defined error measures
         ax[-1].legend(loc='best')
-
-        # ax.semilogy(number_of_modes, erru['avg_relerr'], color=red, linestyle='dashed', marker='.')  # type: ignore
-        # ax.semilogy(number_of_modes, errs['avg_relerr'], color=blue, linestyle='dashed', marker='.')  # type: ignore
-        # ax.fill_between(number_of_modes, erru['min_relerr'], erru['max_relerr'], alpha=0.2, color=red)  # type: ignore
-        # ax.fill_between(number_of_modes, errs['min_relerr'], errs['max_relerr'], alpha=0.2, color=blue)  # type: ignore
-        # ax.semilogy(number_of_modes, erru['max_relerr'], color=red, linestyle='solid', marker='o', label=r'$e_u$')  # type: ignore
-        # ax.semilogy(  # type: ignore
-        #     number_of_modes, errs['max_relerr'], color=blue, linestyle='solid', marker='o', label=r'$e_{\sigma}$'
-        # )
 
 
 if __name__ == '__main__':
