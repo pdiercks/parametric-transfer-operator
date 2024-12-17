@@ -1,0 +1,36 @@
+font.family: serif
+font.serif: Times New Roman
+font.size: 9
+
+axes.grid           : True    ## display grid or not
+axes.grid.axis      : both    ## which axis the grid should apply to
+axes.grid.which     : major   ## gridlines at major, minor or both ticks
+axes.labelsize      : medium  ## small, medium, large
+
+lines.linewidth : 1
+lines.markersize : 3
+
+axes.spines.top: False
+axes.spines.right: False
+
+# pgf.texsystem: lualatex
+pgf.rcfonts: False
+pgf.preamble: \usepackage{siunitx} \usepackage{physics} \usepackage[nice]{nicefrac} \usepackage{amsfonts} \usepackage{amsmath} \usepackage{bm}
+
+# ### figure size
+# see settings/layout.tex
+# the paperwidth is 17cm, and inner margin 2cm and outer margin 3cm
+# this should give ~12cm of printable width which is 4.72441 inch
+# the height is width * 0.618 (golden ratio)
+#
+figure.constrained_layout.use: True
+figure.figsize: 4.7, 2.9
+
+savefig.bbox: tight
+savefig.pad_inches: 0.0
+
+legend.fontsize: 9
+
+# ### Colors
+# bam colors
+axes.prop_cycle: cycler('color', ['e60000', '0d3333', 'a3cc00', 'd9a300', 'b20000', '7c0000', '00ffff', '00737c',  '00172e', 'ffe600',  'e6b800', 'c27a00', '6c8000', '408000', '193300', '070d0d', '273d3d', '688686', 'bccfcf', 'dce7e7',])

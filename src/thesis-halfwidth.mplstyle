@@ -1,0 +1,47 @@
+font.family: serif
+font.serif: Times New Roman
+font.size: 9
+
+axes.grid           : True    ## display grid or not
+axes.grid.axis      : both    ## which axis the grid should apply to
+axes.grid.which     : major   ## gridlines at major, minor or both ticks
+axes.labelsize      : medium  ## small, medium, large
+
+lines.linewidth : 1
+lines.markersize : 3
+
+axes.spines.top: False
+axes.spines.right: False
+
+# pgf.texsystem: lualatex
+pgf.rcfonts: False
+pgf.preamble: \usepackage{siunitx} \usepackage{physics} \usepackage[nice]{nicefrac} \usepackage{amsfonts} \usepackage{amsmath} \usepackage{bm}
+
+# see ctan geometry
+# scale=0.7 (default)
+# paperwidth=17cm & paperheight=24cm gives
+# width=11.9cm and height=16.8cm (not considering margins)
+# width=4.685in, height=6.614in
+
+# ### figure size
+# for standard figure width use 70% of the full printing box (0.7 * 11.9cm * in/2.54cm = 3.279in)
+# the height is width * 0.618 (golden ratio)
+#
+# FIXME: might need to increase figure size to make legend fit
+
+# for figures that are included next each other etc.
+# set individual figure size via
+# fig.set_size_inches(width, height)
+
+# update: use 90% of width=11.9cm
+figure.constrained_layout.use: True
+figure.figsize: 2.35, 1.45
+
+savefig.bbox: tight
+savefig.pad_inches: 0.0
+
+legend.fontsize: 9
+
+# ### Colors
+# bam colors
+axes.prop_cycle: cycler('color', ['e60000', '0d3333', 'a3cc00', 'd9a300', 'b20000', '7c0000', '00ffff', '00737c',  '00172e', 'ffe600',  'e6b800', 'c27a00', '6c8000', '408000', '193300', '070d0d', '273d3d', '688686', 'bccfcf', 'dce7e7',])
