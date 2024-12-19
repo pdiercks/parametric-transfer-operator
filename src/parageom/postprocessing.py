@@ -4,6 +4,33 @@ from collections import defaultdict
 
 import numpy as np
 
+# FIXME
+# averaging the singular values is rubbish of course
+# Thus, we simply plot the singular values for a single realization with the aim to discuss rapid decay, i.e., that HAPOD nicely compresses the data.
+# Then, we provide average values for HAPOD (modes / snapshots) in comparison with HRRF (number of iterations) in a table to discuss the computational costs for the basis construction.
+
+# TODO For the HRRF data I have to parse the logfiles.
+def parse_hrrf_logs():
+    pass
+
+def average_hapod_data(example):
+    from pymor.core.pickle import load
+    # Extract HAPOD data (num_modes / num_snapshots)
+    # and take the average over realizations for each transfer problem
+    keys = ['num_snapshots', 'num_modes']
+    average = defaultdict(list)
+    for j in range(11):
+        local_values = defaultdict(list)
+        for nreal in range(example.num_real):
+            with example.hapod_summary(nreal, j).open('rb') as fh:
+                data = load(fh)
+                for k in keys:
+                    local_values[k].append(data[k])
+        for k in keys:
+            assert local_values[k].size == example.num_real
+            average[k] = np.average(local_values[k])
+    return average
+
 
 def compute_mean_std(dependencies, targets):
     output = {}
