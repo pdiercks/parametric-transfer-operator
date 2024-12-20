@@ -4,31 +4,53 @@ from collections import defaultdict
 
 import numpy as np
 
-# FIXME
+# FIXME: Chapter 05
 # averaging the singular values is rubbish of course
-# Thus, we simply plot the singular values for a single realization with the aim to discuss rapid decay, i.e., that HAPOD nicely compresses the data.
-# Then, we provide average values for HAPOD (modes / snapshots) in comparison with HRRF (number of iterations) in a table to discuss the computational costs for the basis construction.
+# Thus, we simply plot the singular values for a single realization with the aim to discuss rapid decay,
+# i.e., that HAPOD nicely compresses the data.
+# Then, we provide average values for HAPOD (modes / snapshots) in comparison with HRRF
+# (number of iterations) in a table to discuss the computational costs for the basis construction.
 
-# TODO For the HRRF data I have to parse the logfiles.
-def parse_hrrf_logs():
-    pass
+
+def parse_logfile(logfile: str, search: dict):
+    """Parse `logfile` for patterns in `search`."""
+    import re
+
+    def number(string):
+        try:
+            return int(string)
+        except ValueError:
+            return float(string)
+
+    rv = defaultdict(list)
+    with open(logfile, 'r') as instream:
+        for line in instream.readlines():
+            for key, chars in search.items():
+                if chars in line:
+                    filtered = re.sub('[^.0-9e-]', '', line.split(chars)[1])
+                    rv[key].append(number(filtered.strip('.')))
+    return rv
+
 
 def average_hapod_data(example):
     from pymor.core.pickle import load
+
     # Extract HAPOD data (num_modes / num_snapshots)
     # and take the average over realizations for each transfer problem
     keys = ['num_snapshots', 'num_modes']
-    average = defaultdict(list)
+    average = defaultdict(list)  # list of average values for each key
     for j in range(11):
-        local_values = defaultdict(list)
-        for nreal in range(example.num_real):
-            with example.hapod_summary(nreal, j).open('rb') as fh:
-                data = load(fh)
-                for k in keys:
-                    local_values[k].append(data[k])
+        local_values = {}
         for k in keys:
-            assert local_values[k].size == example.num_real
-            average[k] = np.average(local_values[k])
+            local_values[k] = defaultdict(list)
+            for nreal in range(example.num_real):
+                with example.hapod_summary(nreal, j).open('rb') as fh:
+                    data = load(fh)
+                    local_values[k][j].append(data[k])
+            assert len(local_values[k][j]) == example.num_real
+            average[k].append(np.average(local_values[k][j]))
+    for k in keys:
+        assert len(average[k]) == 11
     return average
 
 

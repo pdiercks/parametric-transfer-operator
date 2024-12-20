@@ -460,6 +460,60 @@ def task_optimization():
     }
 
 
+def task_pp_hrrf_basis_length():
+    """ParaGeom: Average HRRF Modes."""
+
+    def determine_average(targets):
+        from collections import defaultdict
+
+        import numpy as np
+
+        from parageom.postprocessing import parse_logfile
+
+        method = 'hrrf'
+        basis_length = defaultdict(list)
+        for k in range(11):
+            search = {k: f'Final basis length (k={k:02d}):'}
+
+            for n in range(example.num_real):
+                logfile = example.log_basis_construction(n, method, k)
+                data = parse_logfile(logfile.as_posix(), search)
+                basis_length[k].extend(data[k])
+
+        # average basis length for each configuration
+        average = np.zeros(11)
+        for key, array in basis_length.items():
+            average[key] = np.mean(array)
+
+        np.save(targets[0], average)
+
+    return {
+        'file_dep': [example.log_basis_construction(n, 'hrrf', k) for k in range(11) for n in range(example.num_real)],
+        'actions': [determine_average],
+        'targets': [example.method_folder('hrrf') / 'mean_basis_length.npy'],
+        'clean': True,
+    }
+
+
+def task_pp_hapod_basis_length():
+    """ParaGeom: Average HAPOD Modes."""
+
+    def determine_average(targets):
+        import numpy as np
+
+        from parageom.postprocessing import average_hapod_data
+
+        data = average_hapod_data(example)
+        np.savez(targets[0], **data)
+
+    return {
+        'file_dep': [example.hapod_summary(n, k) for n in range(example.num_real) for k in range(11)],
+        'actions': [determine_average],
+        'targets': [example.method_folder('hapod') / 'mean_basis_length.npz'],
+        'clean': True,
+    }
+
+
 # def task_pp_stress():
 #     """ParaGeom: Post-process stress"""
 #     module = "src.parageom.pp_stress"
