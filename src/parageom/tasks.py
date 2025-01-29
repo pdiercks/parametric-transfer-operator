@@ -301,6 +301,24 @@ def task_fig_projerr():
         }
 
 
+def task_fig_max_projerr():
+    """ParaGeom: Plot max projection error."""
+    source = SRC / 'plot_max_projerr.py'
+    scale = example.g_scale
+    for k in example.projerr.configs:
+        deps = [source]
+        deps.append(example.mean_projection_error('hapod', k))
+        deps.append(example.mean_projection_error('hrrf', k))
+        targets = [example.fig_max_projerr(k)]
+        yield {
+            'name': ':'.join([str(k)]),
+            'file_dep': deps,
+            'actions': ['python3 {} {} {} %(targets)s'.format(source, k, scale)],
+            'targets': targets,
+            'clean': True,
+        }
+
+
 def task_validate_rom():
     """ParaGeom: Validate ROM."""
 

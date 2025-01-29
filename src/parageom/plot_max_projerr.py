@@ -12,19 +12,6 @@ def main(cli):
     blue = bamcd['blue'][0]
     red = bamcd['red'][0]
 
-    # what is more important?
-    # (a) show the standard deviation (realizations) for the max over the validation set?
-    # (b) show the min, avg, max over the validation set, but leave out standard deviation for each?
-    # --> For the projection error study we want to show that HRRF yields same quality
-    # as HAPOD compression when it comes to the parameter variation.
-    # The spread (difference between min and max) should indicate that all regions of
-    # the parameter space are sufficiently covered. If this was not the case,
-    # then the spread should be higher. (Assuming the validation set is sufficiently large).
-
-    # Conclusion
-    # Plot same as description in __docstring__.
-    # The l2-mean error is not needed.
-
     nmarks = 5
     if cli.k == 0:
         nmarks = 10
@@ -38,13 +25,10 @@ def main(cli):
 
         def add_relerr_plot(data, color):
             modes = np.arange(data['mean_min_relerr_energy'].size)
-            min = data['mean_min_relerr_energy']
-            max = data['mean_max_relerr_energy']
-            avg = data['mean_avg_relerr_energy']
-            ax.semilogy(modes, min, color=color, linestyle='None', marker='.', markevery=nmarks)
-            ax.semilogy(modes, avg, color=color, linestyle='dashed', marker='o', markevery=nmarks)
-            ax.semilogy(modes, max, color=color, linestyle='solid', marker='s', markevery=nmarks)
-            ax.fill_between(modes, min, max, alpha=0.2, color=color)
+            mean = data['mean_max_relerr_energy']
+            std = data['std_max_relerr_energy']
+            ax.semilogy(modes, mean, color=color, linestyle='solid', marker='s', markevery=nmarks)
+            ax.fill_between(modes, mean - std, mean + std, alpha=0.2, color=color)
 
         infile_hapod = example.mean_projection_error('hapod', cli.k, cli.scale)
         infile_hrrf = example.mean_projection_error('hrrf', cli.k, cli.scale)
@@ -58,8 +42,8 @@ def main(cli):
         ax.set_xlabel(r'Local basis size $n$')
         ax.set_ylabel(r'Projection error $\mathcal{E}_{P}$')
 
-        ax.set_ylim(1e-8, 5.0)
-        yticks = [1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1]
+        ax.set_ylim(1e-6, 5.0)
+        yticks = [1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1]
         ax.set_yticks(yticks)
 
         ax.legend(loc='best')
@@ -67,12 +51,10 @@ def main(cli):
 
         red_line = Line2D([], [], color=red, marker='None', linestyle='-', label='RRFPOD')
         blue_line = Line2D([], [], color=blue, marker='None', linestyle='-', label='HRRF')
-        min_marker = Line2D([], [], color='black', marker='.', linestyle='None', label='min')
-        avg_marker = Line2D([], [], color='black', marker='o', linestyle='dashed', label='avg')
         max_marker = Line2D([], [], color='black', marker='s', linestyle='solid', label='max')
 
         fig.legend(
-            handles=[min_marker, avg_marker, max_marker, red_line, blue_line],
+            handles=[max_marker, red_line, blue_line],
         )
 
 
