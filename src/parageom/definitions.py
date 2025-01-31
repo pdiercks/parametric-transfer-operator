@@ -14,8 +14,6 @@ WORK = ROOT / 'work'
 SRC = Path(__file__).parent
 # target tolerances for validation tasks
 ttols_validation = (1e-5, 1e-5, 1e-5, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1e-5, 1e-5, 1e-5)
-# Note: In case of the HAPOD, we use ttol * scale / energy_scale s.t. HAPOD generates
-# ca. same number of modes as HRRF. See projerr.py & hapod.py.
 
 
 @dataclass
