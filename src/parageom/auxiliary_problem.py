@@ -479,7 +479,7 @@ def reduce_auxiliary_model(example: BeamData, aux: StationaryModel, ntrain: int)
     for mu in training_set:
         U.append(aux.solve(mu))
 
-    modes, _ = pod(U, product=aux.operator, rtol=1e-6)
+    modes, _ = pod(U, product=aux.operator, rtol=1e-15)
     basis = modes[:1]
 
     reductor = StationaryRBReductor(aux, RB=basis, product=aux.operator)
@@ -509,7 +509,7 @@ def main():
     aux.disable_logging(True)
 
     # rom, reductor = reduce_auxiliary_model(example, aux, 21)
-    ntrain = 21
+    ntrain = 501
     ps = aux.parameters.space(example.mu_range)
     training_set = ps.sample_uniformly(ntrain)
     U = aux.solution_space.empty(reserve=ntrain)
@@ -517,13 +517,13 @@ def main():
         U.append(aux.solve(mu))
 
     # set tolerance such that > 1 modes are returned
-    modes, svals = pod(U, product=aux.operator, modes=10, rtol=0.0, atol=0.0)
+    modes, svals = pod(U, product=aux.operator, rtol=1e-15)
     basis = modes[:1]
 
     reductor = StationaryRBReductor(aux, RB=basis, product=aux.operator)
     rom = reductor.reduce()
 
-    ntest = 51
+    ntest = 150
     testing_set = ps.sample_randomly(ntest)
     U_fom = aux.solution_space.empty(reserve=ntest)
     U_rom = aux.solution_space.empty(reserve=ntest)
@@ -532,8 +532,9 @@ def main():
         U_rom.append(reductor.reconstruct(rom.solve(mu)))
     err = U_fom - U_rom
     errn = err.norm(aux.products['energy'])
-    rel_err = errn / U_fom.norm(aux.products['energy'])
-    if np.sum(rel_err) < 1e-12:
+    maxerr = np.max(np.abs(errn))
+    print(f'Max error is: {maxerr}')
+    if maxerr < 1e-14:
         print('Test passed. Writing singular values ...')
         np.save(example.singular_values_auxiliary_problem, svals)
     else:

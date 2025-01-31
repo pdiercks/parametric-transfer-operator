@@ -527,6 +527,17 @@ def task_pp_hapod_basis_length():
     }
 
 
+def task_mdeim_data():
+    """ParaGeom: Write MDEIM data."""
+    source = SRC / 'ei.py'
+    return {
+        'file_dep': [source],
+        'actions': ['python %(dependencies)s'],
+        'targets': [example.mdeim_data()],
+        'clean': True,
+    }
+
+
 # def task_pp_stress():
 #     """ParaGeom: Post-process stress"""
 #     module = "src.parageom.pp_stress"

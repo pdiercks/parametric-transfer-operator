@@ -149,7 +149,7 @@ def discretize_subdomain_operators(example):
     domain, ct, ft = read_mesh(example.parent_unit_cell, MPI.COMM_WORLD, kwargs={'gdim': example.gdim})
     omega = RectangularDomain(domain, ct, ft)
     aux = discretize_auxiliary_model(example, omega)
-    rom, reductor = reduce_auxiliary_model(example, aux, 21)
+    rom, reductor = reduce_auxiliary_model(example, aux, 501)
     V = aux.solution_space.V
     d = df.fem.Function(V, name='d_trafo_unit_cell')
     aux_model = AuxiliaryModelWrapper(rom, d, reductor)

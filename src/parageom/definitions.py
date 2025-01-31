@@ -205,7 +205,7 @@ class BeamData:
     parameter_dim: tuple[int, ...] = (2, 3, 4, 4, 4, 4, 4, 4, 4, 3, 2)
     methods: tuple[str, ...] = ('hapod', 'hrrf')
     g_scale: float = 0.1
-    mdeim_rtol: float = 1e-5
+    mdeim_rtol: float = 1e-10
     debug: bool = False
 
     # task parameters
@@ -377,6 +377,10 @@ class BeamData:
     def rom_minimization_data(self, method: str, nr: int) -> Path:
         """ROM minimization data."""
         return self.optimization(method, nr) / 'rom_minimization_data.out'
+
+    def mdeim_data(self) -> Path:
+        """MDEIM data."""
+        return self.auxiliary / 'mdeim_data.out'
 
     def pp_stress(self, method: str, nr: int) -> dict[str, Path]:
         """Postprocessing of stress at optimal design."""
