@@ -497,7 +497,7 @@ def main():
     # phyiscal domains/meshes
     # need to use same degree as degree that should be
     # used for the geometry interpolation afterwards
-    assert example.fe_deg == example.geom_deg
+    assert example.fe_deg == example.preproc.geom_deg
 
     # discretize auxiliary problem for parent unit cell
     mshfile = example.parent_unit_cell
@@ -517,7 +517,7 @@ def main():
         U.append(aux.solve(mu))
 
     # set tolerance such that > 1 modes are returned
-    modes, svals = pod(U, product=aux.operator, modes=10, rtol=1e-15)
+    modes, svals = pod(U, product=aux.operator, modes=10, rtol=0.0, atol=0.0)
     basis = modes[:1]
 
     reductor = StationaryRBReductor(aux, RB=basis, product=aux.operator)
