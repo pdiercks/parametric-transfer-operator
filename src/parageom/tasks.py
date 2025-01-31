@@ -538,6 +538,28 @@ def task_mdeim_data():
     }
 
 
+def task_fig_mdeim_svals():
+    """ParaGeom: Figure MDEIM Svals."""
+    source = SRC / 'plot_svals_simple.py'
+    return {
+        'file_dep': [example.mdeim_data()],
+        'actions': ['python3 {} %(dependencies)s %(targets)s'.format(source)],
+        'targets': [example.fig_mdeim_svals()],
+        'clean': True,
+    }
+
+
+def task_fig_aux_svals():
+    """ParaGeom: Figure AUX Svals."""
+    source = SRC / 'plot_svals_simple.py'
+    return {
+        'file_dep': [example.singular_values_auxiliary_problem],
+        'actions': ['python3 {} %(dependencies)s %(targets)s'.format(source)],
+        'targets': [example.fig_aux_svals()],
+        'clean': True,
+    }
+
+
 # def task_pp_stress():
 #     """ParaGeom: Post-process stress"""
 #     module = "src.parageom.pp_stress"
