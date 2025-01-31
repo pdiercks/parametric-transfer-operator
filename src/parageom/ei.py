@@ -31,6 +31,7 @@ def interpolate_subdomain_operator(
     modes: Optional[int] = None,
     atol: Optional[float] = None,
     rtol: Optional[float] = None,
+    l2_err: Optional[float] = None,
     method: Optional[str] = 'method_of_snapshots',
 ):
     """EI of subdomain operator.
@@ -81,7 +82,7 @@ def interpolate_subdomain_operator(
     Λ = vec_source.make_array(snapshots)
 
     # ### DEIM
-    pod_options = {'method': method}
+    pod_options = {'method': method, 'l2_err': l2_err}
     interpolation_dofs, collateral_basis, deim_data = deim(
         Λ, modes=modes, pod=True, atol=atol, rtol=rtol, product=None, pod_options=pod_options
     )
@@ -133,7 +134,14 @@ if __name__ == '__main__':
     operator = discretize_subdomain_operators(example)[0]
     print(f'mdeim_rtol={example.mdeim_rtol}')
     cb, interpmat, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(
-        example, operator, design='uniform', ntrain=ntrain, modes=None, atol=0.0, rtol=example.mdeim_rtol
+        example,
+        operator,
+        design='uniform',
+        ntrain=ntrain,
+        modes=None,
+        atol=0.0,
+        rtol=example.mdeim_rtol,
+        l2_err=example.mdeim_l2err,
     )
     m_dofs, m_inv = np.unique(magic_dofs, return_inverse=True)
     r_op, source_dofs = operator.restricted(m_dofs)

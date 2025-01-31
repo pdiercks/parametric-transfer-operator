@@ -205,7 +205,8 @@ class BeamData:
     parameter_dim: tuple[int, ...] = (2, 3, 4, 4, 4, 4, 4, 4, 4, 3, 2)
     methods: tuple[str, ...] = ('hapod', 'hrrf')
     g_scale: float = 0.1
-    mdeim_rtol: float = 1e-15
+    mdeim_rtol: float = 0.0
+    mdeim_l2err: float = 1e-12
     debug: bool = False
 
     # task parameters

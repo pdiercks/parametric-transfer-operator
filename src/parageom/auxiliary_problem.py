@@ -517,7 +517,7 @@ def main():
         U.append(aux.solve(mu))
 
     # set tolerance such that > 1 modes are returned
-    modes, svals = pod(U, product=aux.operator, rtol=1e-15)
+    modes, svals = pod(U, product=aux.operator, rtol=0.0, l2_err=1e-12)
     basis = modes[:1]
 
     reductor = StationaryRBReductor(aux, RB=basis, product=aux.operator)

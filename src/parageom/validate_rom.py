@@ -430,6 +430,7 @@ def build_rom(example, dofmap, params, num_modes, ω=0.5, nreal=0, method='hapod
             modes=None,
             atol=0.0,
             rtol=example.mdeim_rtol,
+            l2_err=example.mdeim_l2err,
             method='method_of_snapshots',
         )
         m_dofs, m_inv = np.unique(magic_dofs, return_inverse=True)
