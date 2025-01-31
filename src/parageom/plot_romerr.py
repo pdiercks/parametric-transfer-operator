@@ -12,7 +12,12 @@ def main(cli):
     colors = {'hapod': red, 'hrrf': blue}
     norms = {'u': {0: 'energy', 1: 'max'}, 's': {0: 'euclidean', 1: 'max'}}
     norms = norms[cli.field]
-    labels = {'hapod_max': 'HAPOD', 'hrrf_max': 'HRRF'}
+    labels = {'hapod_max': 'RRFPOD', 'hrrf_max': 'HRRF'}
+    ylabels = {
+        'u': {0: r'$\mathcal{E}^{\mathcal{V}}_{u}$', 1: r'$\mathcal{E}_{u}^{\max}$'},
+        's': {0: r'$\mathcal{E}^2_{\sigma}$', 1: r'$\mathcal{E}_{\sigma}^{\max}$'},
+    }
+    ylabels = ylabels[cli.field]
 
     def prepend_one(array):
         arr = np.hstack([np.ones(1), array])
@@ -29,7 +34,7 @@ def main(cli):
     number_of_modes = prepend_zero(list(example.rom_validation.num_modes))
 
     args = [__file__, cli.outfile]
-    styles = [example.plotting_style['thesis'].as_posix()]
+    styles = [example.plotting_styles['thesis'].as_posix()]
     with PlottingContext(args, styles) as fig:
         ax = fig.subplots(1, 2, sharey=True)
 
@@ -43,7 +48,7 @@ def main(cli):
                 ax[k].fill_between(number_of_modes, mean - std, mean + std, alpha=0.2, color=ccc)
                 ax[k].set_xticks(number_of_modes)
                 ax[k].set_xlabel(r'Local basis size $n$')
-                ax[k].set_ylabel('Relative error')  # TODO use symbol for defined error measures
+                ax[k].set_ylabel(ylabels[k])
         ax[-1].legend(loc='best')
 
 

@@ -417,10 +417,6 @@ def task_fig_rom_error():
     """ParaGeom: Plot ROM error."""
     source = SRC / 'plot_romerr.py'
 
-    # TODO: (A) plot min, avg, max over realizations for max error over validation set
-    # case (A) is implemented in SRC/plot_romerr.py
-    # TODO: (B) plot min, avg, max over validation set for single realization
-
     def create_action(field, output, ei=False):
         action = f'python3 {source} {field} {output}'
         if ei:
@@ -428,7 +424,6 @@ def task_fig_rom_error():
         return action
 
     with_ei = {True: 'ei'}
-    # with_ei = {False: '', True: 'ei'}
     for field in example.rom_validation.fields:
         for ei in with_ei.keys():
             deps = [source]
