@@ -152,6 +152,7 @@ if __name__ == '__main__':
 
     abserr = []
     relerr = []
+    refnorm = []
 
     for mu in test_set:
         # ### compare DEIM approximation
@@ -171,6 +172,7 @@ if __name__ == '__main__':
         kref = csr_array(operator.assemble(mu).matrix.getValuesCSR()[::-1])
 
         abserr.append(norm(kref - K, ord='fro'))
+        refnorm.append(norm(kref, ord='fro'))
         relerr.append(norm(kref - K, ord='fro') / norm(kref, ord='fro'))
 
     print(f'Max absolute error in Frobenious norm:\t{np.max(abserr)}')
