@@ -25,6 +25,8 @@ def main(args):
         ax.set_xticks(nmodes)
         ax.set_xlabel(r'$n$')
         ax.set_ylabel(r'$\sigma_n$')
+        ax.set_yticks([1e-6, 1e-4, 1e-2, 1])
+        ax.set_ylim(top=5)
 
 
 if __name__ == '__main__':
