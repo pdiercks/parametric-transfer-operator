@@ -36,6 +36,8 @@ def main(args):
     # ### FOM
     fom, parageom_fom = build_fom(example)
     V = fom.solution_space.V
+    NumDofs = {}
+    NumDofs['fom'] = V.dofmap.bs * V.dofmap.index_map.size_global
 
     # ### Global Functions
     u_rom = df.fem.Function(V, name='urom')  # FOM displacement
@@ -137,6 +139,7 @@ def main(args):
             use_ei=args.ei,
         )
         logger.info(f'Took {perf_counter()-tic} to build ROM.')
+        NumDofs['rom'] = dofmap.num_dofs
         rom_data = {}
     else:
         logger.info('Building ROM without EI ...')
@@ -186,6 +189,7 @@ def main(args):
                 rom_data['dofs_per_vert'],
                 rom_data['max_dofs_per_vert'],
             )
+            NumDofs['rom'] = rom_data['dofmap'].num_dofs
             rom = StationaryModel(operator, rhs, output_functional=None, name='ROM')
             urb = rom.solve(mu)
         reconstruct(
@@ -283,7 +287,9 @@ def main(args):
     assert max_nodal_stress_error.size == len(validation_set)
 
     logger.info(f"""Summary
+    NumDofs FOM = {NumDofs['fom']}
     Validation set size = {len(validation_set)}
+    NumDofs ROM = {NumDofs['rom']}
     Num modes = {num_modes}
     With EI = {str(args.ei)}
 
