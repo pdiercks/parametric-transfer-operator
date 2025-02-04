@@ -13,7 +13,7 @@ ROOT = Path(__file__).parents[2]
 WORK = ROOT / 'work'
 SRC = Path(__file__).parent
 # target tolerances for validation tasks
-ttols_validation = (1e-5, 1e-5, 1e-5, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1e-5, 1e-5, 1e-5)
+ttols_validation = (1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5)
 
 
 @dataclass
@@ -80,7 +80,7 @@ class HRRF:
             dim: Dimension of the parameter space.
 
         """
-        return dim * 100
+        return 400 # dim * 100
 
     def ntrain(self, dim: int):
         """Size of the training set.
@@ -89,7 +89,7 @@ class HRRF:
             dim: Dimension of the parameter space.
 
         """
-        return dim * 30
+        return 50 # dim * 30
 
 
 @dataclass
@@ -114,7 +114,7 @@ class HAPOD:
             dim: Dimension of the parameter space.
 
         """
-        return dim * 100
+        return 400 # dim * 100
 
 
 @dataclass
