@@ -366,6 +366,9 @@ class BeamData:
         _ei = '_ei' if ei else ''
         return dir / f'mean_rom_error_{field}{_ei}.npz'
 
+    def mean_num_dofs(self, method: str) -> Path:
+        return self.method_folder(method) / 'mean_num_dofs.npz'
+
     def rom_condition(self, nreal: int, num_modes: int, method='hapod', ei=False) -> Path:
         dir = self.validation(method, nreal)
         _ei = '_ei' if ei else ''
@@ -406,6 +409,9 @@ class BeamData:
 
     def fig_basis_size(self) -> Path:
         return self.figures / 'basis_size.pdf'
+
+    def fig_num_dofs(self) -> Path:
+        return self.figures / 'num_dofs.pdf'
 
     @property
     def realizations(self) -> Path:

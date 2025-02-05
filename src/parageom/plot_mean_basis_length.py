@@ -17,7 +17,7 @@ def main(args):
     barwidth = 0.35
     pos = {'hrrf': [x + barwidth / 2 for x in configs], 'hapod': [x - barwidth / 2 for x in configs]}
 
-    style = [example.plotting_styles['thesis'].as_posix()]
+    style = [example.plotting_styles['thesis-halfwidth'].as_posix()]
     with PlottingContext([__file__, args.outfile], style) as fig:
         ax = fig.subplots()
 
@@ -25,12 +25,10 @@ def main(args):
         ax.bar(pos['hapod'], snapshots, width=barwidth, color=red, alpha=0.2)
         ax.bar(pos['hrrf'], bs['hrrf'], width=barwidth, color=blue, label='HRRF')
 
-        ax.set_ylabel('Average basis size')
+        ax.set_ylabel('Local basis size')
         ax.set_xlabel(r'Configuration $k$')
         ax.set_xticks(configs)
         ax.set_yscale('log')
-
-        ax.legend()
 
 
 if __name__ == '__main__':

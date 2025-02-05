@@ -473,6 +473,42 @@ def task_optimization():
     }
 
 
+def task_pp_num_dofs():
+    """ParaGeom: Average Number of DoFs."""
+
+    def determine_average(method, targets):
+        import numpy as np
+
+        from parageom.postprocessing import parse_logfile
+
+        avg_dofs = []
+        search = {'DOFS': 'NumDofs ROM'}
+        num_modes = example.rom_validation.num_modes
+        num_dofs = []
+
+        for modes in num_modes:
+            num_dofs.clear()
+            for n in range(example.num_real):
+                logfile = example.log_validate_rom(n, modes=modes, method=method)
+                rv = parse_logfile(logfile.as_posix(), search)
+                num_dofs.extend(rv['DOFS'])
+            avg_dofs.append(np.mean(num_dofs))
+        np.savez(targets[0], dofs=avg_dofs, num_modes=num_modes)
+
+    for method in example.methods:
+        deps = []
+        for n in range(example.num_real):
+            for m in example.rom_validation.num_modes:
+                deps.append(example.log_validate_rom(n, m, method))
+        yield {
+            'name': method,
+            'file_dep': deps,
+            'actions': [(determine_average, (method,))],
+            'targets': [example.mean_num_dofs(method)],
+            'clean': True,
+        }
+
+
 def task_pp_hrrf_basis_length():
     """ParaGeom: Average HRRF Modes."""
 
@@ -523,6 +559,20 @@ def task_pp_hapod_basis_length():
         'file_dep': [example.hapod_summary(n, k) for n in range(example.num_real) for k in range(11)],
         'actions': [determine_average],
         'targets': [example.method_folder('hapod') / 'mean_basis_length.npz'],
+        'clean': True,
+    }
+
+
+def task_fig_num_dofs():
+    """ParaGeom: Average Number of DOFs."""
+    source = SRC / 'plot_mean_num_dofs.py'
+    hrrf = example.mean_num_dofs('hrrf')
+    hapod = example.mean_num_dofs('hapod')
+    cmdaction = 'python3 {} {} {} %(targets)s'.format(source, hapod, hrrf)
+    return {
+        'file_dep': [source, hapod, hrrf],
+        'actions': [cmdaction],
+        'targets': [example.fig_num_dofs()],
         'clean': True,
     }
 
