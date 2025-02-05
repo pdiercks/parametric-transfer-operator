@@ -527,6 +527,20 @@ def task_pp_hapod_basis_length():
     }
 
 
+def task_fig_basis_size():
+    """ParaGeom: Average basis size."""
+    source = SRC / 'plot_mean_basis_length.py'
+    hrrf = example.method_folder('hrrf') / 'mean_basis_length.npy'
+    hapod = example.method_folder('hapod') / 'mean_basis_length.npz'
+    cmdaction = 'python3 {} {} {} %(targets)s'.format(source, hapod, hrrf)
+    return {
+        'file_dep': [source, hapod, hrrf],
+        'actions': [cmdaction],
+        'targets': [example.fig_basis_size()],
+        'clean': True,
+    }
+
+
 def task_mdeim_data():
     """ParaGeom: Write MDEIM data."""
     source = SRC / 'ei.py'

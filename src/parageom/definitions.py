@@ -80,7 +80,7 @@ class HRRF:
             dim: Dimension of the parameter space.
 
         """
-        return 400 # dim * 100
+        return 400  # dim * 100
 
     def ntrain(self, dim: int):
         """Size of the training set.
@@ -89,7 +89,7 @@ class HRRF:
             dim: Dimension of the parameter space.
 
         """
-        return 50 # dim * 30
+        return 50  # dim * 30
 
 
 @dataclass
@@ -114,7 +114,7 @@ class HAPOD:
             dim: Dimension of the parameter space.
 
         """
-        return 400 # dim * 100
+        return 400  # dim * 100
 
 
 @dataclass
@@ -263,7 +263,7 @@ class BeamData:
         self._make_tree()
 
     @property
-    def plotting_styles(self) -> Path:
+    def plotting_styles(self) -> dict[str, Path]:
         """PhD thesis mplstyles."""
         return {'thesis': ROOT / 'src/thesis.mplstyle', 'thesis-halfwidth': ROOT / 'src/thesis-halfwidth.mplstyle'}
 
@@ -394,21 +394,6 @@ class BeamData:
         folder = self.optimization(method, nr)
         return {'fom': folder / 'stress_fom.xdmf', 'rom': folder / 'stress_rom.xdmf', 'err': folder / 'stress_err.xdmf'}
 
-    # @property
-    # def minimization_data_table(self) -> Path:
-    #     return self.rf / "minimization_data.csv"
-    #
-    # @property
-    # def minimization_comparison_table(self) -> Path:
-    #     return self.rf / "minimization_comparison.csv"
-    #
-    # @property
-    # def fig_fom_opt(self) -> Path:
-    #     return self.figures_path / "fig_fom_opt.pdf"
-    #
-    # @property
-    # def fig_rom_opt(self) -> Path:
-    #     return self.figures_path / "fig_rom_opt.pdf"
     def fig_projerr(self, k: int, scale: float = 0.1) -> Path:
         return self.figures / f'fig_projerr_{k:02}_scale_{scale}.pdf'
 
@@ -418,6 +403,9 @@ class BeamData:
     def fig_rom_error(self, field: str, ei: bool) -> Path:
         _ei = '_ei' if ei else ''
         return self.figures / f'rom_error_{field}{_ei}.pdf'
+
+    def fig_basis_size(self) -> Path:
+        return self.figures / 'basis_size.pdf'
 
     @property
     def realizations(self) -> Path:
