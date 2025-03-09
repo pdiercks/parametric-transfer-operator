@@ -624,31 +624,31 @@ def task_fig_aux_svals():
     }
 
 
-# def task_pp_stress():
-#     """ParaGeom: Post-process stress"""
-#     module = "src.parageom.pp_stress"
-#     distr = "normal"
-#     omega = example.omega # weighting factor for output functional
-#     nreal = 0
-#     for method in example.methods:
-#         deps = [SRC / "pp_stress.py"]
-#         # mesh and basis deps to construct rom
-#         deps.append(example.coarse_grid("global"))
-#         deps.append(example.parent_domain("global"))
-#         deps.append(example.parent_unit_cell)
-#         for cell in range(5):
-#             deps.append(example.local_basis_npy(nreal, method, distr, cell))
-#         deps.append(example.local_basis_dofs_per_vert(nreal, method, distr))
-#         # optimization result
-#         deps.append(example.fom_minimization_data)
-#         # xdmf files as targets
-#         targets = []
-#         for x in example.pp_stress(method).values():
-#             targets.extend(with_h5(x))
-#         yield {
-#                 "name": method,
-#                 "file_dep": deps,
-#                 "actions": ["python3 -m {} {} {} --omega {}".format(module, distr, method, omega)],
-#                 "targets": targets,
-#                 "clean": True,
-#                 }
+def task_pp_stress():
+    """ParaGeom: Post-process stress."""
+    module = 'src.parageom.pp_stress'
+    omega = 0.2
+    nreal = 0
+    method = 'hrrf'
+    deps = [SRC / 'pp_stress.py']
+    # mesh and basis deps to construct rom
+    deps.append(example.coarse_grid)
+    deps.append(example.fine_grid)
+    deps.append(example.parent_unit_cell)
+    for cell in range(5):
+        deps.append(example.local_basis_npy(nreal, cell, method))
+        deps.append(example.local_basis_dofs_per_vert(nreal, cell, method))
+    # optimization result
+    deps.append(example.fom_minimization_data(method, nreal))
+    deps.append(example.rom_minimization_data(method, nreal))
+    # xdmf files as targets
+    targets = []
+    for x in example.pp_stress(method, nreal).values():
+        targets.extend(with_h5(x))
+    yield {
+        'name': method,
+        'file_dep': deps,
+        'actions': ['python3 -m {} {} --omega {}'.format(module, method, omega)],
+        'targets': targets,
+        'clean': True,
+    }
