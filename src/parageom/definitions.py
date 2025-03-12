@@ -13,9 +13,7 @@ ROOT = Path(__file__).parents[2]
 WORK = ROOT / 'work'
 SRC = Path(__file__).parent
 # target tolerances for validation tasks
-ttols_validation = (1e-5, 1e-5, 1e-5, 1e-3, 1e-3, 1e-3, 1e-3, 1e-3, 1e-5, 1e-5, 1e-5)
-# Note: In case of the HAPOD, we use ttol * scale / energy_scale s.t. HAPOD generates
-# ca. same number of modes as HRRF. See projerr.py & hapod.py.
+ttols_validation = (1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5, 1e-5)
 
 
 @dataclass
@@ -82,7 +80,7 @@ class HRRF:
             dim: Dimension of the parameter space.
 
         """
-        return dim * 100
+        return 400  # dim * 100
 
     def ntrain(self, dim: int):
         """Size of the training set.
@@ -91,7 +89,7 @@ class HRRF:
             dim: Dimension of the parameter space.
 
         """
-        return dim * 30
+        return 50  # dim * 30
 
 
 @dataclass
@@ -116,7 +114,7 @@ class HAPOD:
             dim: Dimension of the parameter space.
 
         """
-        return dim * 100
+        return 400  # dim * 100
 
 
 @dataclass
@@ -208,6 +206,7 @@ class BeamData:
     methods: tuple[str, ...] = ('hapod', 'hrrf')
     g_scale: float = 0.1
     mdeim_rtol: float = 1e-5
+    mdeim_l2err: float = 0.0
     debug: bool = False
 
     # task parameters
@@ -264,7 +263,7 @@ class BeamData:
         self._make_tree()
 
     @property
-    def plotting_styles(self) -> Path:
+    def plotting_styles(self) -> dict[str, Path]:
         """PhD thesis mplstyles."""
         return {'thesis': ROOT / 'src/thesis.mplstyle', 'thesis-halfwidth': ROOT / 'src/thesis-halfwidth.mplstyle'}
 
@@ -367,6 +366,9 @@ class BeamData:
         _ei = '_ei' if ei else ''
         return dir / f'mean_rom_error_{field}{_ei}.npz'
 
+    def mean_num_dofs(self, method: str) -> Path:
+        return self.method_folder(method) / 'mean_num_dofs.npz'
+
     def rom_condition(self, nreal: int, num_modes: int, method='hapod', ei=False) -> Path:
         dir = self.validation(method, nreal)
         _ei = '_ei' if ei else ''
@@ -380,26 +382,21 @@ class BeamData:
         """ROM minimization data."""
         return self.optimization(method, nr) / 'rom_minimization_data.out'
 
+    def mdeim_data(self) -> Path:
+        """MDEIM data."""
+        return self.auxiliary / 'mdeim_data.out'
+
+    def fig_mdeim_svals(self) -> Path:
+        return self.figures / 'fig_mdeim_svals.pdf'
+
+    def fig_aux_svals(self) -> Path:
+        return self.figures / 'fig_aux_svals.pdf'
+
     def pp_stress(self, method: str, nr: int) -> dict[str, Path]:
         """Postprocessing of stress at optimal design."""
         folder = self.optimization(method, nr)
         return {'fom': folder / 'stress_fom.xdmf', 'rom': folder / 'stress_rom.xdmf', 'err': folder / 'stress_err.xdmf'}
 
-    # @property
-    # def minimization_data_table(self) -> Path:
-    #     return self.rf / "minimization_data.csv"
-    #
-    # @property
-    # def minimization_comparison_table(self) -> Path:
-    #     return self.rf / "minimization_comparison.csv"
-    #
-    # @property
-    # def fig_fom_opt(self) -> Path:
-    #     return self.figures_path / "fig_fom_opt.pdf"
-    #
-    # @property
-    # def fig_rom_opt(self) -> Path:
-    #     return self.figures_path / "fig_rom_opt.pdf"
     def fig_projerr(self, k: int, scale: float = 0.1) -> Path:
         return self.figures / f'fig_projerr_{k:02}_scale_{scale}.pdf'
 
@@ -409,6 +406,12 @@ class BeamData:
     def fig_rom_error(self, field: str, ei: bool) -> Path:
         _ei = '_ei' if ei else ''
         return self.figures / f'rom_error_{field}{_ei}.pdf'
+
+    def fig_basis_size(self) -> Path:
+        return self.figures / 'basis_size.pdf'
+
+    def fig_num_dofs(self) -> Path:
+        return self.figures / 'num_dofs.pdf'
 
     @property
     def realizations(self) -> Path:

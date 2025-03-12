@@ -18,3 +18,5 @@ work/
 muto-env/
 pyrightconfig.json
 src/figures/*.pdf
+
+!optimization/hrrf/*.out

@@ -9,7 +9,7 @@ from doit.tools import run_once
 from parageom.definitions import ROOT, BeamData
 
 os.environ['PYMOR_COLORS_DISABLE'] = '1'
-example = BeamData(name='parageom', debug=False)
+example = BeamData(name='parageom-validation', debug=False)
 SRC = ROOT / 'src' / 'parageom'
 
 
@@ -218,105 +218,105 @@ def task_gfem():
                 }
 
 
-def task_projerr():
-    """ParaGeom: Compute projection error."""
-    source = SRC / 'projerr.py'
-    num_samples = 50
-    # check sensitivity wrt mu rather than uncertainty in g
-    num_testvecs = 10
-    N = 400
-    ntrain_hrrf = {'hrrf': 50, 'hapod': None}
-    amplitudes = [example.g_scale]
-
-    def create_action_projerr(nreal, method, k, ntrain, output, ntrain_hrrf=None, scale=None, debug=False):
-        action = f'python3 {source} {nreal} {method} {k} {ntrain}'
-        action += f' {num_samples} {num_testvecs}'
-        action += f' --output {output}'
-        if ntrain_hrrf is not None:
-            action += f' --ntrain_hrrf {ntrain_hrrf}'
-        if scale is not None:
-            action += f' --scale {scale}'
-        if debug:
-            action += ' --debug'
-        return action
-
-    for nreal in range(example.num_real):
-        for k in example.projerr.configs:
-            for method in example.methods:
-                deps = [source]
-                deps.append(example.path_omega_coarse(k))
-                deps.extend(with_h5(example.path_omega(k)))
-                deps.extend(with_h5(example.path_omega_in(k)))
-                for scale in amplitudes:
-                    targets = []
-                    targets.append(example.projection_error(nreal, method, k, scale))
-                    targets.append(example.log_projerr(nreal, method, k, scale))
-                    yield {
-                        'name': ':'.join([str(nreal), method, str(k), str(scale)]),
-                        'file_dep': deps,
-                        'actions': [
-                            create_action_projerr(
-                                nreal, method, k, N, targets[0], ntrain_hrrf=ntrain_hrrf[method], scale=scale
-                            )
-                        ],
-                        'targets': targets,
-                        'clean': True,
-                    }
-
-
-def task_pp_projerr():
-    """ParaGeom: Postprocess projection error."""
-    from parageom.postprocessing import compute_mean_std
-
-    for method in example.methods:
-        for k in example.projerr.configs:
-            # gather data
-            deps = []
-            for n in range(example.num_real):
-                deps.append(example.projection_error(n, method, k))
-            yield {
-                'name': ':'.join([method, str(k)]),
-                'file_dep': deps,
-                'actions': [compute_mean_std],
-                'targets': [example.mean_projection_error(method, k)],
-                'clean': True,
-            }
+# def task_projerr():
+#     """ParaGeom: Compute projection error."""
+#     source = SRC / 'projerr.py'
+#     num_samples = 50
+#     # check sensitivity wrt mu rather than uncertainty in g
+#     num_testvecs = 10
+#     N = 400
+#     ntrain_hrrf = {'hrrf': 50, 'hapod': None}
+#     amplitudes = [example.g_scale]
+#
+#     def create_action_projerr(nreal, method, k, ntrain, output, ntrain_hrrf=None, scale=None, debug=False):
+#         action = f'python3 {source} {nreal} {method} {k} {ntrain}'
+#         action += f' {num_samples} {num_testvecs}'
+#         action += f' --output {output}'
+#         if ntrain_hrrf is not None:
+#             action += f' --ntrain_hrrf {ntrain_hrrf}'
+#         if scale is not None:
+#             action += f' --scale {scale}'
+#         if debug:
+#             action += ' --debug'
+#         return action
+#
+#     for nreal in range(example.num_real):
+#         for k in example.projerr.configs:
+#             for method in example.methods:
+#                 deps = [source]
+#                 deps.append(example.path_omega_coarse(k))
+#                 deps.extend(with_h5(example.path_omega(k)))
+#                 deps.extend(with_h5(example.path_omega_in(k)))
+#                 for scale in amplitudes:
+#                     targets = []
+#                     targets.append(example.projection_error(nreal, method, k, scale))
+#                     targets.append(example.log_projerr(nreal, method, k, scale))
+#                     yield {
+#                         'name': ':'.join([str(nreal), method, str(k), str(scale)]),
+#                         'file_dep': deps,
+#                         'actions': [
+#                             create_action_projerr(
+#                                 nreal, method, k, N, targets[0], ntrain_hrrf=ntrain_hrrf[method], scale=scale
+#                             )
+#                         ],
+#                         'targets': targets,
+#                         'clean': True,
+#                     }
 
 
-def task_fig_projerr():
-    """ParaGeom: Plot projection error."""
-    source = SRC / 'plot_projerr.py'
-    scale = example.g_scale
-    for k in example.projerr.configs:
-        deps = [source]
-        deps.append(example.mean_projection_error('hapod', k))
-        deps.append(example.mean_projection_error('hrrf', k))
-        targets = [example.fig_projerr(k)]
-        yield {
-            'name': ':'.join([str(k)]),
-            'file_dep': deps,
-            'actions': ['python3 {} {} {} %(targets)s'.format(source, k, scale)],
-            'targets': targets,
-            'clean': True,
-        }
+# def task_pp_projerr():
+#     """ParaGeom: Postprocess projection error."""
+#     from parageom.postprocessing import compute_mean_std
+#
+#     for method in example.methods:
+#         for k in example.projerr.configs:
+#             # gather data
+#             deps = []
+#             for n in range(example.num_real):
+#                 deps.append(example.projection_error(n, method, k))
+#             yield {
+#                 'name': ':'.join([method, str(k)]),
+#                 'file_dep': deps,
+#                 'actions': [compute_mean_std],
+#                 'targets': [example.mean_projection_error(method, k)],
+#                 'clean': True,
+#             }
 
 
-def task_fig_max_projerr():
-    """ParaGeom: Plot max projection error."""
-    source = SRC / 'plot_max_projerr.py'
-    scale = example.g_scale
-    for k in example.projerr.configs:
-        deps = [source]
-        deps.append(example.mean_projection_error('hapod', k))
-        deps.append(example.mean_projection_error('hrrf', k))
-        targets = [example.fig_max_projerr(k)]
-        yield {
-            'name': ':'.join([str(k)]),
-            'file_dep': deps,
-            'actions': ['python3 {} {} {} %(targets)s'.format(source, k, scale)],
-            'targets': targets,
-            'clean': True,
-        }
+# def task_fig_projerr():
+#     """ParaGeom: Plot projection error."""
+#     source = SRC / 'plot_projerr.py'
+#     scale = example.g_scale
+#     for k in example.projerr.configs:
+#         deps = [source]
+#         deps.append(example.mean_projection_error('hapod', k))
+#         deps.append(example.mean_projection_error('hrrf', k))
+#         targets = [example.fig_projerr(k)]
+#         yield {
+#             'name': ':'.join([str(k)]),
+#             'file_dep': deps,
+#             'actions': ['python3 {} {} {} %(targets)s'.format(source, k, scale)],
+#             'targets': targets,
+#             'clean': True,
+#         }
+
+
+# def task_fig_max_projerr():
+#     """ParaGeom: Plot max projection error."""
+#     source = SRC / 'plot_max_projerr.py'
+#     scale = example.g_scale
+#     for k in example.projerr.configs:
+#         deps = [source]
+#         deps.append(example.mean_projection_error('hapod', k))
+#         deps.append(example.mean_projection_error('hrrf', k))
+#         targets = [example.fig_max_projerr(k)]
+#         yield {
+#             'name': ':'.join([str(k)]),
+#             'file_dep': deps,
+#             'actions': ['python3 {} {} {} %(targets)s'.format(source, k, scale)],
+#             'targets': targets,
+#             'clean': True,
+#         }
 
 
 def task_validate_rom():
@@ -417,10 +417,6 @@ def task_fig_rom_error():
     """ParaGeom: Plot ROM error."""
     source = SRC / 'plot_romerr.py'
 
-    # TODO: (A) plot min, avg, max over realizations for max error over validation set
-    # case (A) is implemented in SRC/plot_romerr.py
-    # TODO: (B) plot min, avg, max over validation set for single realization
-
     def create_action(field, output, ei=False):
         action = f'python3 {source} {field} {output}'
         if ei:
@@ -428,7 +424,6 @@ def task_fig_rom_error():
         return action
 
     with_ei = {True: 'ei'}
-    # with_ei = {False: '', True: 'ei'}
     for field in example.rom_validation.fields:
         for ei in with_ei.keys():
             deps = [source]
@@ -476,6 +471,42 @@ def task_optimization():
         'targets': targets,
         'clean': True,
     }
+
+
+def task_pp_num_dofs():
+    """ParaGeom: Average Number of DoFs."""
+
+    def determine_average(method, targets):
+        import numpy as np
+
+        from parageom.postprocessing import parse_logfile
+
+        avg_dofs = []
+        search = {'DOFS': 'NumDofs ROM'}
+        num_modes = example.rom_validation.num_modes
+        num_dofs = []
+
+        for modes in num_modes:
+            num_dofs.clear()
+            for n in range(example.num_real):
+                logfile = example.log_validate_rom(n, modes=modes, method=method)
+                rv = parse_logfile(logfile.as_posix(), search)
+                num_dofs.extend(rv['DOFS'])
+            avg_dofs.append(np.mean(num_dofs))
+        np.savez(targets[0], dofs=avg_dofs, num_modes=num_modes)
+
+    for method in example.methods:
+        deps = []
+        for n in range(example.num_real):
+            for m in example.rom_validation.num_modes:
+                deps.append(example.log_validate_rom(n, m, method))
+        yield {
+            'name': method,
+            'file_dep': deps,
+            'actions': [(determine_average, (method,))],
+            'targets': [example.mean_num_dofs(method)],
+            'clean': True,
+        }
 
 
 def task_pp_hrrf_basis_length():
@@ -532,31 +563,92 @@ def task_pp_hapod_basis_length():
     }
 
 
-# def task_pp_stress():
-#     """ParaGeom: Post-process stress"""
-#     module = "src.parageom.pp_stress"
-#     distr = "normal"
-#     omega = example.omega # weighting factor for output functional
-#     nreal = 0
-#     for method in example.methods:
-#         deps = [SRC / "pp_stress.py"]
-#         # mesh and basis deps to construct rom
-#         deps.append(example.coarse_grid("global"))
-#         deps.append(example.parent_domain("global"))
-#         deps.append(example.parent_unit_cell)
-#         for cell in range(5):
-#             deps.append(example.local_basis_npy(nreal, method, distr, cell))
-#         deps.append(example.local_basis_dofs_per_vert(nreal, method, distr))
-#         # optimization result
-#         deps.append(example.fom_minimization_data)
-#         # xdmf files as targets
-#         targets = []
-#         for x in example.pp_stress(method).values():
-#             targets.extend(with_h5(x))
-#         yield {
-#                 "name": method,
-#                 "file_dep": deps,
-#                 "actions": ["python3 -m {} {} {} --omega {}".format(module, distr, method, omega)],
-#                 "targets": targets,
-#                 "clean": True,
-#                 }
+def task_fig_num_dofs():
+    """ParaGeom: Average Number of DOFs."""
+    source = SRC / 'plot_mean_num_dofs.py'
+    hrrf = example.mean_num_dofs('hrrf')
+    hapod = example.mean_num_dofs('hapod')
+    cmdaction = 'python3 {} {} {} %(targets)s'.format(source, hapod, hrrf)
+    return {
+        'file_dep': [source, hapod, hrrf],
+        'actions': [cmdaction],
+        'targets': [example.fig_num_dofs()],
+        'clean': True,
+    }
+
+
+def task_fig_basis_size():
+    """ParaGeom: Average basis size."""
+    source = SRC / 'plot_mean_basis_length.py'
+    hrrf = example.method_folder('hrrf') / 'mean_basis_length.npy'
+    hapod = example.method_folder('hapod') / 'mean_basis_length.npz'
+    cmdaction = 'python3 {} {} {} %(targets)s'.format(source, hapod, hrrf)
+    return {
+        'file_dep': [source, hapod, hrrf],
+        'actions': [cmdaction],
+        'targets': [example.fig_basis_size()],
+        'clean': True,
+    }
+
+
+def task_mdeim_data():
+    """ParaGeom: Write MDEIM data."""
+    source = SRC / 'ei.py'
+    return {
+        'file_dep': [source],
+        'actions': ['python %(dependencies)s'],
+        'targets': [example.mdeim_data()],
+        'clean': True,
+    }
+
+
+def task_fig_mdeim_svals():
+    """ParaGeom: Figure MDEIM Svals."""
+    source = SRC / 'plot_svals_simple.py'
+    return {
+        'file_dep': [example.mdeim_data()],
+        'actions': ['python3 {} %(dependencies)s %(targets)s'.format(source)],
+        'targets': [example.fig_mdeim_svals()],
+        'clean': True,
+    }
+
+
+def task_fig_aux_svals():
+    """ParaGeom: Figure AUX Svals."""
+    source = SRC / 'plot_svals_simple.py'
+    return {
+        'file_dep': [example.singular_values_auxiliary_problem],
+        'actions': ['python3 {} %(dependencies)s %(targets)s'.format(source)],
+        'targets': [example.fig_aux_svals()],
+        'clean': True,
+    }
+
+
+def task_pp_stress():
+    """ParaGeom: Post-process stress."""
+    module = 'src.parageom.pp_stress'
+    omega = 0.2
+    nreal = 0
+    method = 'hrrf'
+    deps = [SRC / 'pp_stress.py']
+    # mesh and basis deps to construct rom
+    deps.append(example.coarse_grid)
+    deps.append(example.fine_grid)
+    deps.append(example.parent_unit_cell)
+    for cell in range(5):
+        deps.append(example.local_basis_npy(nreal, cell, method))
+        deps.append(example.local_basis_dofs_per_vert(nreal, cell, method))
+    # optimization result
+    deps.append(example.fom_minimization_data(method, nreal))
+    deps.append(example.rom_minimization_data(method, nreal))
+    # xdmf files as targets
+    targets = []
+    for x in example.pp_stress(method, nreal).values():
+        targets.extend(with_h5(x))
+    yield {
+        'name': method,
+        'file_dep': deps,
+        'actions': ['python3 -m {} {} --omega {}'.format(module, method, omega)],
+        'targets': targets,
+        'clean': True,
+    }

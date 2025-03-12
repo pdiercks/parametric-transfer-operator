@@ -31,6 +31,7 @@ def interpolate_subdomain_operator(
     modes: Optional[int] = None,
     atol: Optional[float] = None,
     rtol: Optional[float] = None,
+    l2_err: Optional[float] = None,
     method: Optional[str] = 'method_of_snapshots',
 ):
     """EI of subdomain operator.
@@ -81,7 +82,7 @@ def interpolate_subdomain_operator(
     Λ = vec_source.make_array(snapshots)
 
     # ### DEIM
-    pod_options = {'method': method}
+    pod_options = {'method': method, 'l2_err': l2_err}
     interpolation_dofs, collateral_basis, deim_data = deim(
         Λ, modes=modes, pod=True, atol=atol, rtol=rtol, product=None, pod_options=pod_options
     )
@@ -119,6 +120,7 @@ def interpolate_subdomain_operator(
 
 
 if __name__ == '__main__':
+    from pymor.core.pickle import dump
     from pymor.operators.constructions import LincombOperator
     from scipy.linalg import solve
     from scipy.sparse.linalg import norm
@@ -126,19 +128,31 @@ if __name__ == '__main__':
     from parageom.fom import discretize_subdomain_operators
     from parageom.tasks import example
 
+    ntrain = 501
+    ntest = 200
+
     operator = discretize_subdomain_operators(example)[0]
+    print(f'mdeim_rtol={example.mdeim_rtol}')
     cb, interpmat, idofs, magic_dofs, deim_data = interpolate_subdomain_operator(
-        example, operator, design='uniform', ntrain=501, modes=None, atol=0.0, rtol=1e-12
+        example,
+        operator,
+        design='uniform',
+        ntrain=ntrain,
+        modes=None,
+        atol=0.0,
+        rtol=example.mdeim_rtol,
+        l2_err=example.mdeim_l2err,
     )
     m_dofs, m_inv = np.unique(magic_dofs, return_inverse=True)
     r_op, source_dofs = operator.restricted(m_dofs)
     range_dofs = r_op.restricted_range_dofs[m_inv].reshape(magic_dofs.shape)
 
     pspace = operator.parameters.space((0.1, 0.3))
-    test_set = pspace.sample_randomly(50)
+    test_set = pspace.sample_randomly(ntest)
 
     abserr = []
     relerr = []
+    refnorm = []
 
     for mu in test_set:
         # ### compare DEIM approximation
@@ -158,7 +172,21 @@ if __name__ == '__main__':
         kref = csr_array(operator.assemble(mu).matrix.getValuesCSR()[::-1])
 
         abserr.append(norm(kref - K, ord='fro'))
+        refnorm.append(norm(kref, ord='fro'))
         relerr.append(norm(kref - K, ord='fro') / norm(kref, ord='fro'))
 
     print(f'Max absolute error in Frobenious norm:\t{np.max(abserr)}')
     print(f'Max relative error in Frobenious norm:\t{np.max(relerr)}')
+
+    print('Writing MDEIM data to disk')
+    out = {
+        'cb_size': len(cb),
+        'svals': deim_data['svals'],
+        'rtol': example.mdeim_rtol,
+        'ntrain': ntrain,
+        'ntest': ntest,
+        'maxabserr': np.max(abserr),
+        'maxrelerr': np.max(relerr),
+    }
+    with example.mdeim_data().open('wb') as fh:
+        dump(out, fh)
