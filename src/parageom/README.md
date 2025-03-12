@@ -1,8 +1,8 @@
 # ParaGeom
-Code for the _ParaGeom_ example.
+Code for the _ParaGeom_ (parameterized geometries) example.
 Editable install via:
 ```sh
-cd /path/to/2023_11_mu_to
+cd /path/to/root-of-repo
 python3 -m pip install -e .
 ```
 
