@@ -400,8 +400,8 @@ class BeamData:
     def fig_projerr(self, k: int, scale: float = 0.1) -> Path:
         return self.figures / f'fig_projerr_{k:02}_scale_{scale}.pdf'
 
-    def fig_max_projerr(self, k: int, scale: float = 0.1) -> Path:
-        return self.figures / f'fig_max_projerr_{k:02}_scale_{scale}.pdf'
+    def fig_max_projerr(self) -> Path:
+        return self.figures / 'fig_max_projerr.pdf'
 
     def fig_rom_error(self, field: str, ei: bool) -> Path:
         _ei = '_ei' if ei else ''

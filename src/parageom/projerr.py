@@ -100,7 +100,7 @@ def main(args):
         neumann_snapshots = transfer.range.empty(reserve=ntrain)
         spectral_basis_sizes = list()
 
-        epsilon_star = target_tol * args.scale / example.energy_scale
+        epsilon_star = target_tol / example.energy_scale
         Nin = transfer.rhs.dofs.size
         epsilon_alpha = np.sqrt(Nin) * np.sqrt(1 - example.projerr.hapod_omega**2) * epsilon_star
         epsilon_pod = np.sqrt(Nin * ntrain) * example.projerr.hapod_omega * epsilon_star

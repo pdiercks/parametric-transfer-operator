@@ -9,7 +9,7 @@ from doit.tools import run_once
 from parageom.definitions import ROOT, BeamData
 
 os.environ['PYMOR_COLORS_DISABLE'] = '1'
-example = BeamData(name='parageom-validation', debug=False)
+example = BeamData(name='parageom', debug=False)
 SRC = ROOT / 'src' / 'parageom'
 
 
@@ -113,6 +113,122 @@ def task_preproc():
     return {
         'actions': None,
         'task_dep': ['coarse_grid', 'fine_grid', 'parent_unit_cell', 'oversampling_grid'],
+    }
+
+
+def task_projerr():
+    """ParaGeom: Compute projection error."""
+    source = SRC / 'projerr.py'
+    num_samples = 50
+    # check sensitivity wrt mu rather than uncertainty in g
+    num_testvecs = 10
+    N = 400
+    ntrain_hrrf = {'hrrf': 50, 'hapod': None}
+    amplitudes = [example.g_scale]
+
+    def create_action_projerr(nreal, method, k, ntrain, output, ntrain_hrrf=None, scale=None, debug=False):
+        action = f'python3 {source} {nreal} {method} {k} {ntrain}'
+        action += f' {num_samples} {num_testvecs}'
+        action += f' --output {output}'
+        if ntrain_hrrf is not None:
+            action += f' --ntrain_hrrf {ntrain_hrrf}'
+        if scale is not None:
+            action += f' --scale {scale}'
+        if debug:
+            action += ' --debug'
+        return action
+
+    for nreal in range(example.num_real):
+        for k in example.projerr.configs:
+            for method in example.methods:
+                deps = [source]
+                deps.append(example.path_omega_coarse(k))
+                deps.extend(with_h5(example.path_omega(k)))
+                deps.extend(with_h5(example.path_omega_in(k)))
+                for scale in amplitudes:
+                    targets = []
+                    targets.append(example.projection_error(nreal, method, k, scale))
+                    targets.append(example.log_projerr(nreal, method, k, scale))
+                    yield {
+                        'name': ':'.join([str(nreal), method, str(k), str(scale)]),
+                        'file_dep': deps,
+                        'actions': [
+                            create_action_projerr(
+                                nreal, method, k, N, targets[0], ntrain_hrrf=ntrain_hrrf[method], scale=scale
+                            )
+                        ],
+                        'targets': targets,
+                        'clean': True,
+                    }
+
+
+def task_pp_projerr():
+    """ParaGeom: Postprocess projection error."""
+    from parageom.postprocessing import compute_mean_std
+
+    for method in example.methods:
+        for k in example.projerr.configs:
+            # gather data
+            deps = []
+            for n in range(example.num_real):
+                deps.append(example.projection_error(n, method, k))
+            yield {
+                'name': ':'.join([method, str(k)]),
+                'file_dep': deps,
+                'actions': [compute_mean_std],
+                'targets': [example.mean_projection_error(method, k)],
+                'clean': True,
+            }
+
+
+def task_fig_projerr_5():
+    """ParaGeom: Plot projection error."""
+    source = SRC / 'plot_projerr.py'
+    scale = example.g_scale
+    k = 5
+    deps = [source]
+    deps.append(example.mean_projection_error('hapod', k))
+    deps.append(example.mean_projection_error('hrrf', k))
+    targets = [example.fig_projerr(k)]
+    return {
+        'file_dep': deps,
+        'actions': ['python3 {} {} {} %(targets)s'.format(source, k, scale)],
+        'targets': targets,
+        'clean': True,
+    }
+
+
+def task_fig_projerr_0():
+    """ParaGeom: Plot projection error."""
+    source = SRC / 'plot_projerr_1.py'
+    scale = example.g_scale
+    k = 0
+    deps = [source]
+    deps.append(example.mean_projection_error('hapod', k))
+    deps.append(example.mean_projection_error('hrrf', k))
+    targets = [example.fig_projerr(k, scale=scale)]
+    return {
+        'file_dep': deps,
+        'actions': ['python3 {} %(targets)s'.format(source)],
+        'targets': targets,
+        'clean': True,
+    }
+
+
+def task_fig_max_projerr():
+    """ParaGeom: Plot max projection error."""
+    source = SRC / 'plot_max_projerr.py'
+    deps = [source]
+    deps.append(example.mean_projection_error('hapod', 0))
+    deps.append(example.mean_projection_error('hrrf', 0))
+    deps.append(example.mean_projection_error('hapod', 5))
+    deps.append(example.mean_projection_error('hrrf', 5))
+    targets = [example.fig_max_projerr()]
+    return {
+        'file_dep': deps,
+        'actions': ['python3 {} %(targets)s'.format(source)],
+        'targets': targets,
+        'clean': True,
     }
 
 
