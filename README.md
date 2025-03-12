@@ -1,40 +1,19 @@
-# 2023_11_mu_to
-The `mu` stands for *parametric* and `to` stands for *transfer operator*.
-This is work in progress for the extension of the work in [this paper](https://git.bam.de/mechanics/paper/2020_02_multiscale) to the parametric setting.
-At the moment (March 2024) a conference proceedings paper (short term, ECCOMAS June 2024) and a journal paper (long term) are planned.
-
-## Conference proceedings
-Initially, the aim was to study different training strategies decoupled from the
-(complex) implementation of parametrized geometries.
-However, the comparison of the training strategies was completely moved to the journal
-paper to avoid any overlap.
-
-* Focus on application: variation of void radius
-
-## Journal paper
-The preliminary version of a comparison of the training strategies (March 2024)
-is archived using a git tag _heuristic-rrf_.
-
-* Focus on comparison of training strategies _HAPOD_ and _Heuristic randomized range finder_
-* If possible, extend the proof in BS2018 to parametric transfer operators
+# Parametric transfer operator
+This repository contains source code to implement reduced-order models that can be used to simulate geometrically parameterized lattice structures. The reduced-order models are constructed using concepts from localized model order reduction.
+A preliminary version of this work is published in the [conference proceedings of the 9th ECCOMAS congress 2024](http://dx.doi.org/10.23967/eccomas.2024.207).
+The current version (`main` branch) implements the numerical examples that are described in Chapter 04 of the thesis *Multiscale modeling of mechanical structures via localized model reduction*.
+(An ISBN or similar will follow once the thesis is published.)
 
 ## Tree
 The following directory structure is used:
 
 * src (any source code)
-* system (system information)
-* figures (.pdf, .png)
-* tables (.pdf)
-* paper (latex sources and pdf)
-* journal (final version of the pdf)
-* notes (.md, .tex)
 
 The `src` directory contains any source code to run the example problems and any
 code for plotting or creation of figures.
 Each instance of the workflow will be stored locally under `./work` with a
-subdirectory for each example. The output of the `doit` workflow is `paper/paper.pdf`.
-Each figure and table included in the paper is stored separately in `figures` and `tables`.
-The `notes` dir is used to write down ideas and important equations (project sheet).
+subdirectory for each example.
+The outputs (final figures) of the `doit` workflow are stored under `./figures`.
 
 ## Compute environment
 The compute environment can be instantiated with [`pixi`](https://prefix.dev/).
@@ -48,7 +27,7 @@ git clone -b fenicsx-pd --single-branch git@github.com:pdiercks/pymor.git $PYMOR
 ```
 ```sh
 export MULTISRC=./.multisrc # do not change this, see pyproject.toml
-git clone -b main --single-branch https://git.bam.de/mechanics/pdiercks/multicode.git $MULTISRC
+git clone -b main --single-branch git@github.com:pdiercks/multicode.git $MULTISRC
 ```
 
 2. Install the environment.
@@ -61,4 +40,5 @@ This will install the _default_ environment.
 ```sh
 pixi run doit
 ```
+Note that running the complete workflow may take a while.
 Alternatively, `pixi shell` will open a shell with the environment activated or any other doit command, e.g. `doit list`, may be executed via `pixi run doit list`.
