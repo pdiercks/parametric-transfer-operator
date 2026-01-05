@@ -2,7 +2,7 @@
 This repository contains source code to implement reduced-order models that can be used to simulate geometrically parameterized lattice structures. The reduced-order models are constructed using concepts from localized model order reduction.
 A preliminary version of this work is published in the [conference proceedings of the 9th ECCOMAS congress 2024](http://dx.doi.org/10.23967/eccomas.2024.207).
 The current version (`main` branch) implements the numerical examples that are described in Chapter 04 of the thesis *Multiscale modeling of mechanical structures via localized model reduction*.
-(An ISBN or similar will follow once the thesis is published.)
+The final version of the thesis can be obtained from [this link](https://research.tue.nl/en/publications/multiscale-modeling-of-mechanical-structures-via-localized-model-/).
 
 ## Tree
 The following directory structure is used:
